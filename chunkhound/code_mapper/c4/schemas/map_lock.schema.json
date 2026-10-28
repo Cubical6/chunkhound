@@ -235,6 +235,16 @@
             }
           ]
         },
+        "group_membership": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "title": "Group Membership",
+          "type": "object"
+        },
         "overrides": {
           "$ref": "#/$defs/Overrides"
         },
@@ -277,6 +287,7 @@
         "system",
         "containers",
         "tree_spec",
+        "group_membership",
         "components",
         "tombstones",
         "relations",
@@ -299,7 +310,7 @@
       "type": "object"
     },
     "version": {
-      "default": 1,
+      "default": 2,
       "title": "Version",
       "type": "integer"
     }

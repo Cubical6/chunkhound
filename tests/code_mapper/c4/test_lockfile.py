@@ -23,6 +23,9 @@ def sample_lock(base_sha: str = "abc") -> ScopeLock:
             "system": "systeem:app",
             "containers": {"pyproject.toml": "container:app"},
             "tree_spec": {"app": {"groups": ["src"]}},
+            "group_membership": {
+                "container:app": {"src/api.py": "1", "settings.py": "2"}
+            },
             "components": {
                 "component:api": {
                     "name": "API",
@@ -71,6 +74,21 @@ def test_lock_is_byte_stable(tmp_path: Path) -> None:
         == json.dumps(document, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
     )
     jsonschema.validate(document, shipped_schema("map_lock"))
+
+
+def test_lock_keeps_membership_for_groups_without_components(tmp_path: Path) -> None:
+    lock = sample_lock()
+    lock.components = {}
+    path = write_scope_lock(tmp_path, "/", lock)
+    raw = json.loads(path.read_text())
+    assert raw["scopes"]["/"]["group_membership"] == {
+        "container:app": {"src/api.py": "1", "settings.py": "2"}
+    }
+    restored = read_scope_lock(tmp_path, "/")
+    assert restored is not None
+    assert restored.group_membership == lock.group_membership
+    assert restored.components == {}
+    jsonschema.validate(raw, shipped_schema("map_lock"))
 
 
 def test_lock_sections_are_independent_per_scope(tmp_path: Path) -> None:

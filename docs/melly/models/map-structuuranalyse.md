@@ -171,6 +171,7 @@ classDiagram
     +str system
     +dict containers
     +TreeSpec tree_spec
+    +dict group_membership
     +dict components
     +dict tombstones
     +dict relations
@@ -206,6 +207,8 @@ classDiagram
   ScopeLock ..> Element : regels
   LlmSteps ..> ScopeLock : alleen echte uitkomsten
 ```
+
+`ScopeLock.group_membership` bewaart per container projectrelatieve bestandspaden met `/` → lokale groep-id, ook voor groepen rechtstreeks onder de container. Grouping leest deze vorige membership naast de ongewijzigde CodeBoarding `TreeSpec` en runtime-root; bekende bestanden blijven geplaatst, nieuwe mappen krijgen nieuwe prefix-only regels. De verplichte lockvorm gebruikt schemaversie 2 (gebruikersbesluit taak 7).
 
 ## 3. Vertaaltabel
 
