@@ -6,6 +6,11 @@ once, either in a component's groups or in direct. Never split a group or invent
 one. Shared code may remain directly under the container; do not manufacture a
 Helpers component. Components must contain at least one group.
 
+Write all newly generated component names, descriptions, and relationship titles
+in Dutch (Nederlands). Preserve existing component names exactly when attaching
+groups. Keep JSON field names, group IDs, component keys, and endpoint tokens
+unchanged; do not translate them.
+
 Existing components are already placed. Never repeat their groups in placements.
 To attach new groups to an existing component, use its exact name in a component
 row, only when that name uniquely identifies one existing component. Its locked
