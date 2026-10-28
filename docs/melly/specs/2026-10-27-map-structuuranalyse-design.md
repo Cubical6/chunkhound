@@ -81,7 +81,7 @@ Parser `chunkhound/api/cli/parsers/code_mapper_parser.py`; commando `chunkhound/
 ## 7. Statische analyse en groepen
 
 - **Bestandslijst:** dezelfde bestandssysteemloop als HyDE (`chunkhound/code_mapper/scope.py:8-70`) zonder het plafond `max_scope_files` (`:50`), omdat R7 volledig bewijs eist (rij 32).
-- **Imports** voor alle talen met mapping, zonder database: `ImportContextService` (`chunkhound/services/research/shared/import_context.py:98-106`) en `resolve_import_paths` (`chunkhound/services/research/shared/import_resolver.py:91-116`).
+- **Imports** voor alle talen met mapping, zonder database: `ImportContextService` (`chunkhound/services/research/shared/import_context.py:98-106`) en `resolve_import_paths` (`chunkhound/services/research/shared/import_resolver.py:91-116`). Als de service voor TS/JS/TSX/JSX geen imports teruggeeft, leest `references.py` de importnodes zelf uit de `ParserFactory`-AST, met oorspronkelijke bronposities en behoud van `import type`-bewijs. Gedeelde parsers/services en `resolve_import_paths` blijven ongewijzigd (gebruikersbesluit 2026-10-28).
 - **Aanroepen en overerving** voor Python, TS/JS/TSX/JSX, PHP via de gekopieerde `source_inspector`, doel via de import-binding; zonder binding geen pijl. Andere talen: alleen imports, marker `imports_only` (rij 15, 20).
 - **Filters:** type-only (Python `if TYPE_CHECKING:`, TS `import type`) → in het bewijs, status `type_only`, geen pijl; een import waarvan de naam nergens anders in het bestand voorkomt → status `unused`, geen pijl, tenzij re-export (`__init__.py`, `index.ts`, `__all__`) (rij 7, 11).
 - **Record:** `(from, to, kind, line, status)`, onafgekapt in het bewijs (rij 8, 32).
