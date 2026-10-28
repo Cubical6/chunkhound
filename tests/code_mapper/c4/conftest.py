@@ -90,10 +90,10 @@ def default_answers() -> dict[str, Answer]:
                     "groups": ["shop"],
                 }
             ],
-            "direct_groups": [],
-            "titles": {},
+            "direct": [],
+            "titles": [],
         },
-        "titles": {"titles": {}},
+        "titles": {"titles": []},
         "documented": {
             "elements": [
                 {
