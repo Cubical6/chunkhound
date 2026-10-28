@@ -1,7 +1,7 @@
 # Spec: `chunkhound map` levert de C4-structuur
 
 - Datum: 2026-10-27 · Branch: `Cubical6/map-structuur-design` (basis `829ec586`)
-- Besluitenlog: [2026-10-27-map-structuuranalyse.md](../decisions/2026-10-27-map-structuuranalyse.md) (rij 1–36; "rij N" hieronder)
+- Besluitenlog: [2026-10-27-map-structuuranalyse.md](../decisions/2026-10-27-map-structuuranalyse.md) (rij 1–40; "rij N" hieronder)
 - Bindend kader: AutoDoc-C4-log `autodoc-c4-design/docs/melly/decisions/2026-10-27-autodoc-c4-map.md` rij 11–32 ("C4-log rij N")
 - Model: [map-structuuranalyse.md](../models/map-structuuranalyse.md)
 
@@ -18,7 +18,7 @@
 1. `--no-c4` geeft exact de huidige uitvoer, zonder extra tokens of statische analyse (rij 17).
 2. Index, topics en gecombineerd document blijven byte-gelijk; `map` schrijft nooit genummerde links naar niet-topicbestanden in de index, omdat AutoDoc die als topic laadt (`chunkhound/autodoc/index_loader.py:22,54-65`; rij 29).
 3. Het lockbestand bevat alleen echte uitkomsten: nooit terugval of proef (rij 19, 30).
-4. Model en bewijs worden samen geschreven of geen van beide (rij 31).
+4. Model en bewijs vormen een paar met dezelfde `run.id`; een lezer gebruikt nooit een paar met verschillende `run.id` (rij 31, 39).
 
 ## 2. Domeinmodel
 
@@ -54,8 +54,8 @@ Nieuw subpakket `chunkhound/code_mapper/c4/` naast de bestaande topicstroom (rij
 | `summaries.py` | Views afleiden, labels voor samengevoegde pijlen | 35 |
 | `topic_coverage.py` | Dekking via gedeelde geciteerde bestanden (naam vermijdt botsing met `chunkhound/code_mapper/coverage.py:11,48`) | 23, 30 |
 | `lockfile.py` | Lezen, toepassen, atomair schrijven | 31 |
-| `model.py` | Pydantic-modellen van model, bewijs en lockbestand | 35 |
-| `writer.py` | Atomair schrijven van beide JSON-bestanden | 31 |
+| `model.py` | Pydantic-modellen van model, bewijs en lockbestand; `load_c4_pair()` valideert schema en gelijke `run.id`, anders een duidelijke fout | 35, 39 |
+| `writer.py` | `run.id` berekenen, beide JSON-bestanden schrijven | 31, 39 |
 | `schemas/` | Meegeleverde JSON Schema's | 35 |
 | `codeboarding/` | Gekopieerde MIT-code met kop en `LICENSE`: `source_inspector.py`, bron-terugval van `hierarchy_builder.py`, `clustering/names/` (CodeBoarding `13adc4a0`) | 20, 21 |
 
@@ -75,7 +75,7 @@ Parser `chunkhound/api/cli/parsers/code_mapper_parser.py`; commando `chunkhound/
 | `--plan --no-markdown` | Ook geen HyDE; 0 aanroepen; geen database nodig | 28, 32 |
 
 - De databasecontrole (`commands/code_mapper.py:196-201`) blijft voor de volledige run en `--no-markdown` (topics); de C4-tak zelf leest van schijf (rij 32).
-- Uitvoer in `--out`: `<safe_scope>_c4_model.json` en `<safe_scope>_c4_evidence.json`; `safe_scope` via `chunkhound/utils/text.py:4-7`, scopelabel via `chunkhound/code_mapper/orchestrator.py:49-58`. Schrijven via tijdelijk bestand + `os.replace`, eerst beide tijdelijke bestanden, dan beide vervangen (rij 31).
+- Uitvoer in `--out`: `<safe_scope>_c4_model.json` en `<safe_scope>_c4_evidence.json`; `safe_scope` via `chunkhound/utils/text.py:4-7`, scopelabel via `chunkhound/code_mapper/orchestrator.py:49-58`. Beide bestanden krijgen dezelfde `run.id` = sha256 over de inhoud van model en bewijs zonder `run.id`, zodat een ongewijzigde herhaalrun dezelfde sleutel geeft. Schrijven via tijdelijk bestand + `os.replace`: eerst het bewijs, dan het model. Een crash tussen die twee laat een paar met verschillende `run.id` achter; `load_c4_pair()` weigert dat met een fout die zegt `map` opnieuw te draaien (rij 31, 39).
 - Extra melding bij terugval: `C4: K elementen via terugval (niet opgeslagen)`; exitcodes verder ongewijzigd (rij 31).
 
 ## 7. Statische analyse en groepen
@@ -103,7 +103,7 @@ Alle aanroepen via `complete_structured_typed` (`chunkhound/interfaces/llm_provi
 
 - **Telling `classify`:** 3–0 → soort; 2–1 → meerderheid + `disputed` met afwijkende stem; 1–1–1 → bibliotheek + gemarkeerd; mislukt één ronde, dan tellen de twee overige (rij 12). Volgorde per ronde geschud met vaste seed.
 - **Hergebruik:** relatietitel zolang de vingerafdruk (componentpaar + gesorteerde set `(soort, doelbestand)`) gelijk is (rij 33); label zolang de set (relatie-id, titel) gelijk is (rij 35); documentatie-uitkomst zolang de hashes van de bronbestanden gelijk zijn (rij 34).
-- **Antwoordcontrole:** schema; elke groep precies één keer; component binnen één container; stem binnen de vaste soorten; citaat staat letterlijk op het opgegeven bestand:regel; label ≤60 tekens. Afgekeurd telt als tijdelijke fout (rij 33, 34, 35).
+- **Antwoordcontrole:** schema; elke groep precies één keer geplaatst, in één component óf rechtstreeks onder de container (gedeelde code; nooit een automatische verzamelcomponent zoals "Helpers", C4-log rij 13; rij 38); component binnen één container; stem binnen de vaste soorten; citaat staat letterlijk op het opgegeven bestand:regel; label ≤60 tekens. Afgekeurd telt als tijdelijke fout (rij 33, 34, 35).
 - **Fouten** via `_is_retryable_poi_error` (`chunkhound/code_mapper/service.py:95-119`): tijdelijk → één herpoging na de rest, daarna gemarkeerde terugval, niet opgeslagen; niet-tijdelijk of setupfout → exitcode 1, niets geschreven (rij 19, 33).
 
 | Stap | Terugval (marker `fallback`) |
@@ -117,12 +117,13 @@ Alle aanroepen via `complete_structured_typed` (`chunkhound/interfaces/llm_provi
 ## 9. Identiteit, status en dekking
 
 - **Normalisatie:** `slugify_kebab(ascii_only=True)` (`chunkhound/utils/text.py:10-16`) (rij 35).
-- **Id's:** `systeem:`/`container:` + manifestnaam (`[project].name`, `name`, `[package].name`; Dockerfile zonder manifest → mapnaam); `opslag:` + configsleutel; `extern:`/`persoon:` + dependency of letterlijke term; component `component:` + naam uit `merge` bij ontstaan, daarna R3; relatie `<van-id>-><naar-id>`, één per geordend paar (rij 4, 6, 35). Voorvoegsels zoals goedgekeurd in rij 4 en 35; alleen de JSON-veldnamen zijn Engels.
+- **Id's:** `systeem:` + manifestnaam in de scope-root, zonder root-manifest de mapnaam van de scope-root; `container:` + manifestnaam (`[project].name`, `name`, `[package].name`; Dockerfile zonder manifest → mapnaam); `opslag:` + configsleutel; `extern:`/`persoon:` + dependency of letterlijke term; component `component:` + naam uit `merge` bij ontstaan, daarna R3; relatie `<van-id>-><naar-id>`, één per geordend paar (rij 4, 6, 35, 40). Voorvoegsels zoals goedgekeurd in rij 4 en 35; alleen de JSON-veldnamen zijn Engels.
+- **Botsing bij een container-id:** het lockbestand gaat voor: een opgeslagen id (sleutel: relatief manifestpad) blijft staan. Een nieuwe container waarvan het id al bestaat, krijgt het relatieve pad van zijn manifestmap ervoor (`frontend/package.json` met `"name": "app"` → `container:frontend-app`); botst die slug ook, dan `-2`, `-3` op volgorde van pad. Zonder lockbestand krijgen alle botsende containers het pad. Een verdwenen manifestpad wordt tombstone; een verhuisde manifestmap krijgt een nieuw id (rij 40).
 - **Botsing bij een nieuw component-id:** bestaat het id al voor een _aangetroffen_ element of als tombstone → achtervoegsel `-2`, `-3`. Bestaat het als _gedocumenteerd_ element zonder bestanden → het nieuwe component neemt dat id over en wordt _aangetroffen_ (R4; rij 4).
 - **R3:** vergelijking met het lockbestand; renames via `git diff -M --name-status <base_sha> HEAD`; zonder git of bij onbekende `base_sha` geen renames, vermeld in `run.renames` (rij 35). Geschiedenisranden ≥10% aan één kant: `continuation`/`split`/`merge`/`new`/`removed` (rij 3).
-- **Status (R9):** elke bron krijgt haar soort van de stap die haar levert, zonder lijst: `references.py` → code; `runtime.py` en `classify` (manifest, Dockerfile, compose, configsleutel) → configuratie; `documented.py` → documentatie. _aangetroffen_ zodra ≥1 bron code of configuratie is (C4-log rij 29).
+- **Status (R9):** elke bron krijgt haar soort van de stap die haar levert, zonder lijst: `references.py` → code; `runtime.py` en `classify` (manifest, Dockerfile, compose, configsleutel) → configuratie; `documented.py` → documentatie. _aangetroffen_ zodra ≥1 bron code of configuratie is (C4-log rij 29). Elke code- en configuratiebron staat als `citation` met bestand:regel in het bewijs: de manifestregel van een container, de Dockerfile- of compose-regel, de definitieregel van een configsleutel, en de importplekken en configverwijzingen van een ingedeelde dependency (R7; rij 38).
 - **Documentatierelaties:** een relatie tussen twee _aangetroffen_ interne elementen zonder statische verwijzing komt niet op de kaart maar als niet-geverifieerd citaat in het bewijs (R1; rij 1). Een relatie met een persoon, extern systeem of _gedocumenteerd_ element komt op de kaart met status _gedocumenteerd_ (C4-log rij 21, 22, 25).
-- **Dekking:** na de topics, zonder taalmodel, per element via gedeelde geciteerde bestanden; component zonder topic → `undescribed`; bij `--plan` "niet berekend"; _gedocumenteerd_ element zonder bestanden heeft geen dekking (rij 23; C4-log rij 12, 25).
+- **Dekking:** na de topics, zonder taalmodel, per element via gedeelde geciteerde bestanden; component zonder topic → `undescribed`; bij `--plan` "niet berekend"; _gedocumenteerd_ element zonder bestanden heeft geen dekking; een bestand rechtstreeks onder een container levert alleen dekking voor die container (rij 23, 38; C4-log rij 12, 13, 25).
 - **Samengevoegde pijlen:** views context, containers en componenten per container worden deterministisch afgeleid; één onderliggende titel → overgenomen zonder aanroep (rij 35; C4-log rij 27, 28).
 
 ## 10. Schema's en lockbestand
@@ -131,12 +132,12 @@ Pydantic-modellen (`model.py`) → `model_json_schema()` ([docs](https://docs.py
 
 | Bestand | Inhoud |
 |---|---|
-| `_c4_model.json` | `run` (`kind`, `schema_version`, `head_sha` via `orchestrator.py:37`, `scope`, `fallback_count`, `renames`); `elements` (`id`, `kind`, `name`, `description`, `status`, `parent`, `markers`, `coverage{status, topics}`); `relations` (`id`, `from`, `to`, `title`, `status`, `reference_counts`, `markers`); `merged` (`id`, `from`, `to`, `view`, `label`, `underlying`, `markers`); `history` |
-| `_c4_evidence.json` | `schema_version`; `references` (`relation` of `null`, `from`, `line`, `to`, `kind`, `status`); `citations` (`target` element-/relatie-id of `null`, `file`, `start_line`, `end_line`, `source` `topic`\|`documentation`, `verified`); `element_files` |
+| `_c4_model.json` | `run` (`id`, `kind`, `schema_version`, `head_sha` via `orchestrator.py:37`, `scope`, `fallback_count`, `renames`); `elements` (`id`, `kind`, `name`, `description`, `status`, `parent`, `markers`, `coverage{status, topics}`); `relations` (`id`, `from`, `to`, `title`, `status`, `reference_counts`, `markers`); `merged` (`id`, `from`, `to`, `view`, `label`, `underlying`, `markers`); `history` |
+| `_c4_evidence.json` | `schema_version`; `run_id` (gelijk aan `run.id` van het model); `references` (`relation` of `null`, `from`, `line`, `to`, `kind`, `status`); `citations` (`target` element-/relatie-id of `null`, `file`, `start_line`, `end_line`, `source` `code`\|`configuration`\|`documentation`\|`topic`, `verified`); `element_files` (per element de implementatiebestanden; per container ook de bestanden rechtstreeks eronder) |
 
 Markers: `fallback`, `trial`, `disputed`, `undescribed`, `imports_only`, `provisional`, `not_merged`, `not_classified`.
 
-**Lockbestand** `<target_dir>/.chunkhound/map.lock.json` (`target_dir`: `orchestrator.py:116`), los van `--out` en van de database-locatie (rij 26). Eén sectie per scopelabel met `base_sha`, `tree_spec`, `components`, `tombstones`, `relations` (met vingerafdruk), `classifications`, `documented` (hashes + uitkomst, rij 34), `summaries` (labels, rij 35) en `overrides` (handgeschreven, nooit overschreven, gaan voor) (rij 31). Gesorteerde sleutels, relatieve paden met `/`, geen tijdstempels. Geschreven via `os.replace` na een volledige run met exitcode 0; terugvalitems weggelaten; nooit bij `--plan` of exitcode 1. Geen bestandsvergrendeling. Committen is de keuze van de gebruiker via `.chunkhound/*` + `!.chunkhound/map.lock.json` in `.gitignore`; `map` wijzigt `.gitignore` niet (rij 18, 26).
+**Lockbestand** `<target_dir>/.chunkhound/map.lock.json` (`target_dir`: `orchestrator.py:116`), los van `--out` en van de database-locatie (rij 26). Eén sectie per scopelabel met `base_sha`, `system` (id), `containers` (relatief manifestpad → id, rij 40), `tree_spec`, `components`, `tombstones`, `relations` (met vingerafdruk), `classifications`, `documented` (hashes + uitkomst, rij 34), `summaries` (labels, rij 35) en `overrides` (handgeschreven, nooit overschreven, gaan voor) (rij 31). Gesorteerde sleutels, relatieve paden met `/`, geen tijdstempels. Geschreven via `os.replace` na een volledige run met exitcode 0; terugvalitems weggelaten; nooit bij `--plan` of exitcode 1. Geen bestandsvergrendeling. Committen is de keuze van de gebruiker via `.chunkhound/*` + `!.chunkhound/map.lock.json` in `.gitignore`; `map` wijzigt `.gitignore` niet (rij 18, 26).
 
 ## 11. Testen
 
@@ -147,11 +148,11 @@ Volgens TESTING_PHILOSOPHY in `AGENTS.md`: alleen contracten. Map `tests/code_ma
 | `test_no_c4_output_matches_upstream` | `--no-c4` byte-gelijk aan huidige uitvoer | 17 |
 | `test_conflicting_output_flags_exit_2` | Twee vlagcombinaties → exitcode 2 | 31 |
 | `test_plan_no_markdown_zero_calls_no_db` | 0 aanroepen, geen database, lockbestand ongewijzigd, `kind: trial` | 28, 32 |
-| `test_rerun_unchanged_zero_calls_stable_output` | Tweede run: 0 aanroepen, zelfde model en lockbestand (op `head_sha` na) | 18, 27 |
-| `test_component_identity_majority` | Voorbeelden (a), (b), (b′) en een rename | 3 |
+| `test_rerun_unchanged_zero_calls_stable_output` | Tweede run: 0 aanroepen, zelfde model, bewijs, `run.id` en lockbestand (op `head_sha` na) | 18, 27, 39 |
+| `test_component_identity_majority` | Voorbeelden (a), (b), (b′), een rename en een nieuwe gelijknamige container (bestaand id blijft, nieuwkomer krijgt pad) | 3, 40 |
 | `test_static_reference_rules` | Gebruikt/ongebruikt/type-only/re-export/aanroep met en zonder binding | 1, 7, 11 |
 | `test_llm_failure_contract` | Tijdelijk → terugval, exitcode 0, lockbestand zonder terugval; niet-tijdelijk → exitcode 1, niets geschreven | 19, 33 |
-| `test_output_validates_against_schema` | Beide bestanden valide; elk id in het bewijs bestaat in het model | 24, 35 |
+| `test_output_validates_against_schema` | Beide bestanden valide; elk id in het bewijs bestaat in het model; `load_c4_pair()` weigert een paar met verschillende `run.id` | 24, 35, 39 |
 | `test_autodoc_loads_only_topics` | Echte `index_loader` leest precies de topics | 29 |
 | `test_documented_quote_must_exist` | Niet-letterlijk citaat afgekeurd | 34 |
 | `test_override_wins` | `overrides` gaan voor | 31 |
@@ -198,7 +199,7 @@ uv run pytest tests/test_smoke.py -v -n auto
 
 ## 14. Bronnen
 
-- Besluitenlog rij 1–36; C4-log rij 11–32.
+- Besluitenlog rij 1–40; C4-log rij 11–32.
 - Code: zie de `pad:regel`-verwijzingen per sectie.
 - CodeBoarding `13adc4a0`: `agents/relation_edges.py`, `diagram_analysis/{diagram_generator,scope_assembly,incremental_update}.py`, `static_analyzer/clustering/names/`, `infra/constants.py:20` (rij 33).
 - Metingen: `.scratch/new_arrow_probe.py` (rij 33), `.scratch/autodoc_index_probe.py` (rij 29), CodeBoarding-geschiedenis (rij 10). Wegwerpscripts, niet gecommit.

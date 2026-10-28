@@ -13,7 +13,8 @@ classDiagram
   Softwaresysteem "1" *-- "1..*" Container
   Container "1" *-- "0..*" Component
   Container <|-- Opslagcontainer
-  Component "1" *-- "1..*" Groep : vereniging van
+  Component "0..1" *-- "1..*" Groep : vereniging van
+  Container "1" o-- "0..*" Groep : rechtstreeks (gedeelde code)
   Groep "1" o-- "1..*" Bestand
   Relatie --> "1" Element : van
   Relatie --> "1" Element : naar
@@ -56,7 +57,7 @@ classDiagram
 | # | Regel | Voorbeeld → verwachte uitkomst |
 |---|---|---|
 | R1 | Een relatie tussen twee _aangetroffen_ interne elementen staat alleen op de kaart met ≥1 statische verwijzing met status _telt_; een citaat zonder zo'n verwijzing is "niet geverifieerd" in het bewijs | `service.py:28` import → pijl Code Mapper → Deep Research (geldig); "Code Mapper voedt AutoDoc" alleen als citaat → niet op de kaart (rij 1) |
-| R2 | Een component is een vereniging van hele groepen; elk bestand hoort bij ≤1 component | G1+G2 → "Code Mapper"; `render.py` los uit G2 halen → ongeldig (rij 2) |
+| R2 | Een component is een vereniging van hele groepen; elk bestand hoort bij ≤1 component; een groep mag rechtstreeks onder de container blijven, zonder automatische verzamelcomponent | G1+G2 → "Code Mapper"; `render.py` los uit G2 halen → ongeldig (rij 2); `core/types/common.py` rechtstreeks onder de container → geldig, geen "Helpers" (C4-log rij 13; rij 38) |
 | R3 | B erft het id van A iff 2·∣A∩B∣ > ∣A∣ en 2·∣A∩B∣ > ∣B∣, over bestanden in beide runs, git-renames gelijk; anders nieuw, nooit hergebruikt id | (a) 8/10 + 2 nieuw → erft; (b) 5 + 5 → beide nieuw; (b′) 6 + 4 → de 6 erft (rij 3, 10) |
 | R4 | Id = soort + genormaliseerde letterlijke term; een _gedocumenteerd_ element houdt zijn id als het _aangetroffen_ wordt | "Ontwikkelaar met AI-assistent" (`README.md:60`) → `persoon:ontwikkelaar-met-ai-assistent` (rij 4) |
 | R5 | Containers volgen runtime-grenzen; sjablonen tellen niet | `pyproject.toml` → `container:chunkhound`; `chunkhound/autodoc/assets/package.json` (`{{PACKAGE_NAME}}`) → geen container (rij 5) |
@@ -140,6 +141,7 @@ classDiagram
   }
   %% domain: Run (rij 28, 31)
   class RunInfo {
+    +str id
     +RunKind kind
     +int schema_version
     +str head_sha
@@ -158,6 +160,7 @@ classDiagram
   %% technical: bewijs-JSON (rij 24, 35)
   class C4Evidence {
     +int schema_version
+    +str run_id
     +list~Reference~ references
     +list~Citation~ citations
     +dict element_files
@@ -165,6 +168,8 @@ classDiagram
   %% domain: Lockbestand (rij 18, 26, 31)
   class ScopeLock {
     +str base_sha
+    +str system
+    +dict containers
     +TreeSpec tree_spec
     +dict components
     +dict tombstones
@@ -221,7 +226,7 @@ classDiagram
 | Status | `Status` | enum | `found` \| `documented` | — | R9 |
 | Topic / Dekking | `Element.coverage` | attribute | — | — | `topic_coverage.py` |
 | Lockbestand / Regel | `ScopeLock` | class | — | — | `.chunkhound/map.lock.json` |
-| Run | `RunInfo` | class | — | — | `kind` `full` \| `trial` |
+| Run | `RunInfo` | class | — | — | `kind` `full` \| `trial`; `id` = sha256 over model en bewijs zonder id, gedeeld met `C4Evidence.run_id` (rij 39) |
 | Opgeheven id | `ScopeLock.tombstones` | attribute | — | — | R3 |
 | Markering | `Marker` | enum | `fallback`, `trial`, `disputed`, `undescribed`, `imports_only`, `provisional`, `not_merged`, `not_classified` | — | rij 19, 35 |
 
