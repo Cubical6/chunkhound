@@ -53,6 +53,44 @@ def test_container_boundaries(fixture_repo: Path) -> None:
     ]
 
 
+def test_dockerfile_does_not_promote_template_package(tmp_path: Path) -> None:
+    sources = {
+        "package.json": '{"name":"app","bin":"main.js"}',
+        "main.js": "console.log('app');\n",
+        "templates/package.json": (
+            '{"name":"${APP}","bin":"run.js","dependencies":{"template-only":"1"}}'
+        ),
+        "templates/Dockerfile": "FROM scratch\n",
+        "templates/run.js": "console.log('template');\n",
+        "image/package.json": "{}",
+        "image/Dockerfile": "FROM scratch\n",
+    }
+    for name, text in sources.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    scan = scan_runtime(
+        project_root=tmp_path,
+        scope_path=tmp_path,
+        files=list(sources),
+        locked_containers={},
+        tombstones={},
+        accepted={"templates/package.json": True},
+    )
+    assert {c.id for c in scan.containers} == {"container:app", "container:image"}
+    assert {c.manifest for c in scan.containers} == {
+        "package.json",
+        "image/Dockerfile",
+    }
+    assert all(
+        scan.container_of[file] == "container:app"
+        for file in sources
+        if file.startswith("templates/")
+    )
+    assert scan.uncertain == []
+    assert scan.dependencies == []
+
+
 def test_scope_without_manifest_or_git(tmp_path: Path) -> None:
     scope = tmp_path / "Plain App"
     scope.mkdir()

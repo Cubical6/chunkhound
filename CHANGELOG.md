@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **C4 runtime discovery** — Detects executable Python, Node, Composer and Cargo packages and Docker runtime boundaries, with manifest citations, typed storage candidates and lock-preserving container IDs. Template package names are excluded; scopes without a recognized runtime receive a provisional container.
 
+### Fixed
+
+- **C4 template exclusion** — A Dockerfile beside a package with a placeholder name no longer promotes that template directory to a runtime container.
+
 ## [6.1.0] - 2026-10-20
 
 ### Added

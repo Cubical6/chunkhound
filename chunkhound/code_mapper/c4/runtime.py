@@ -159,7 +159,7 @@ def _manifest(
             data.get("require" if filename == "composer.json" else "dependencies", {})
         )
     name = package.get("name")
-    if not isinstance(name, str) or any(token in name for token in _PLACEHOLDERS):
+    if not isinstance(name, str):
         return None, []
     dependencies = [
         DependencyDecl(name=dep, manifest=path, line=_dependency_line(text, dep))
@@ -310,6 +310,7 @@ def _discover(
     dependencies = []
     storage = []
     dockerfiles = []
+    template_roots = set()
     for file in sorted(files):
         text = (project_root / file).read_text(encoding="utf-8", errors="replace")
         storage.extend(_storage(file, text))
@@ -317,9 +318,18 @@ def _discover(
             dockerfiles.append(file)
         if PurePosixPath(file).name in _MANIFESTS:
             manifest, declarations = _manifest(file, text, files)
-            dependencies.extend(declarations)
             if manifest is not None:
-                manifests.append(manifest)
+                if any(token in manifest.name for token in _PLACEHOLDERS):
+                    template_roots.add(PurePosixPath(file).parent.as_posix())
+                else:
+                    manifests.append(manifest)
+                    dependencies.extend(declarations)
+    # Excluded package roots must not be resurrected by their Dockerfile.
+    dockerfiles = [
+        file
+        for file in dockerfiles
+        if PurePosixPath(file).parent.as_posix() not in template_roots
+    ]
     return manifests, dependencies, storage, dockerfiles
 
 
