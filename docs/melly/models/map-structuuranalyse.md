@@ -174,6 +174,8 @@ classDiagram
     +dict containers
     +TreeSpec tree_spec
     +dict group_membership
+    +dict direct_groups
+    +LockedTransition transition
     +dict components
     +dict tombstones
     +dict relations
@@ -211,6 +213,8 @@ classDiagram
 ```
 
 `ScopeLock.group_membership` bewaart per container projectrelatieve bestandspaden met `/` → lokale groep-id, ook voor groepen rechtstreeks onder de container. Grouping leest deze vorige membership naast de ongewijzigde CodeBoarding `TreeSpec` en runtime-root; bekende bestanden blijven geplaatst, nieuwe mappen krijgen nieuwe prefix-only regels. De verplichte lockvorm gebruikt schemaversie 2 (gebruikersbesluit taak 7).
+
+Taak 13, gebruiker **"optie 1"**: schemaversie 3 bewaart daarnaast expliciete succesvolle `direct_groups` per container en optionele `transition` met `input_fingerprint`, `history` en `renames`. Een ongewijzigde uitvoering herhaalt de laatste succesvolle analysetransitie; zij maakt geen nieuwe geschiedenis. De vingerafdruk bevat werkelijke bestandsinhoud, HEAD, scope, configuratie, topics en overrides. Gewijzigde invoer berekent een nieuwe transitie; terugval/proef levert geen herbruikbare snapshot. Membership blijft volledig, zodat mislukte mergegroepen niet als succesvolle directe plaatsingen kunnen worden aangezien.
 
 ## 3. Vertaaltabel
 
@@ -260,6 +264,7 @@ sequenceDiagram
   end
   CLI->>LLM: documented (citerende docs bekend; alleen bij gewijzigde hash)
   CLI->>C4: identity, topic_coverage, summaries
+  C4->>C4: vergelijk invoervingerafdruk; hergebruik laatste succesvolle history/renames indien gelijk
   C4->>LLM: summaries (alleen nieuwe labels)
   CLI->>W: Markdown, _c4_model.json + _c4_evidence.json (samen)
   CLI->>Lock: os.replace na volledige run met exitcode 0; terugvalitems weggelaten

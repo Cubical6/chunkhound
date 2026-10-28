@@ -1,0 +1,642 @@
+"""Coordinate C4 analysis, delayed recovery, and cache-safe finalization."""
+
+import hashlib
+import json
+from collections import Counter, defaultdict
+from collections.abc import Awaitable, Callable, Iterable, Sequence
+from dataclasses import asdict, dataclass, field, replace
+from itertools import chain
+from pathlib import Path
+from typing import TypeVar
+
+from pydantic import TypeAdapter
+
+from chunkhound.code_mapper.c4.assemble import AssemblyInput, assemble
+from chunkhound.code_mapper.c4.classify import Classification, ClassifyItem, classify
+from chunkhound.code_mapper.c4.documented import (
+    DocElement,
+    DocRelation,
+    DocumentedOutcome,
+    TopicSources,
+    doc_files_for,
+    extract_documented,
+)
+from chunkhound.code_mapper.c4.files import list_scope_files
+from chunkhound.code_mapper.c4.grouping import GroupingResult, build_groups
+from chunkhound.code_mapper.c4.identity import (
+    IdentityResult,
+    assign_component_ids,
+    detect_renames,
+    element_id,
+)
+from chunkhound.code_mapper.c4.llm import C4Llm, RetryQueue
+from chunkhound.code_mapper.c4.merge import (
+    MergeResult,
+    ProposedComponent,
+    merge_container,
+    relation_fingerprint,
+    title_relations,
+)
+from chunkhound.code_mapper.c4.model import (
+    SCHEMA_VERSION,
+    C4Evidence,
+    C4Model,
+    Element,
+    LockedClassification,
+    LockedComponent,
+    LockedDocumented,
+    LockedRelation,
+    LockedTransition,
+    Marker,
+    MergedArrow,
+    Overrides,
+    ReferenceKind,
+    Relation,
+    RunInfo,
+    RunKind,
+    ScopeLock,
+)
+from chunkhound.code_mapper.c4.references import ReferenceScan, scan_references
+from chunkhound.code_mapper.c4.runtime import RuntimeScan, scan_runtime
+from chunkhound.code_mapper.c4.summaries import derive_views, label_arrows, summary_key
+from chunkhound.code_mapper.c4.topic_coverage import compute_coverage
+from chunkhound.core.config.config import Config
+
+T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class C4Options:
+    c4: bool
+    markdown: bool
+    trial: bool
+
+
+class LlmSteps(RetryQueue):
+    """Track each delayed operation's outcome without guessing from its text."""
+
+    def __init__(self, queue: RetryQueue) -> None:
+        self.queue = queue
+        self.fallbacks: set[str] = set()
+
+    def defer(
+        self,
+        key: str,
+        attempt: Callable[[], Awaitable[T]],
+        fallback: Callable[[], T],
+        apply: Callable[[T, bool], None],
+    ) -> None:
+        def tracked(value: T, failed: bool) -> None:
+            if failed:
+                self.fallbacks.add(key)
+            apply(value, failed)
+
+        self.queue.defer(key, attempt, fallback, tracked)
+
+    async def drain(self) -> int:
+        return await self.queue.drain()
+
+
+@dataclass
+class C4Draft:
+    project_root: Path
+    scope_path: Path
+    scope_label: str
+    files: list[str]
+    references: ReferenceScan
+    runtime: RuntimeScan
+    classifications: dict[str, Classification]
+    steps: LlmSteps
+    input_fingerprint: str
+    direct_groups: dict[str, list[str]] = field(default_factory=dict)
+    grouping: GroupingResult = field(
+        default_factory=lambda: GroupingResult({}, [], frozenset(), {})
+    )
+    merges: dict[str, MergeResult] = field(default_factory=dict)
+    prepared: bool = False
+
+
+@dataclass
+class C4Build:
+    model: C4Model
+    evidence: C4Evidence
+    lock: ScopeLock | None
+    fallback_count: int
+
+
+def _classification_items(draft: C4Draft) -> list[ClassifyItem]:
+    declarations: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for declaration in draft.runtime.dependencies:
+        declarations[declaration.name].append(asdict(declaration))
+    items = [
+        ClassifyItem(
+            name,
+            "dependency",
+            {
+                "declarations": declarations[name],
+                "imports": draft.references.external_sites.get(name, []),
+            },
+        )
+        for name in sorted(declarations.keys() | draft.references.external_sites.keys())
+    ]
+    items.extend(
+        ClassifyItem(c.manifest, "container", asdict(c))
+        for c in draft.runtime.uncertain
+    )
+    items.extend(
+        ClassifyItem(c.key, "storage", asdict(c)) for c in draft.runtime.storage
+    )
+    # A storage key may be referenced by several configuration sources.
+    return list({item.key: item for item in items}.values())
+
+
+def _scan(draft: C4Draft, lock: ScopeLock | None) -> RuntimeScan:
+    accepted = {
+        item.manifest: draft.classifications[item.manifest].value == "yes"
+        for item in draft.runtime.uncertain
+    }
+    runtime = scan_runtime(
+        project_root=draft.project_root,
+        scope_path=draft.scope_path,
+        files=draft.files,
+        locked_containers=lock.containers if lock else {},
+        tombstones=lock.tombstones if lock else {},
+        accepted=accepted,
+    )
+    if lock is not None:
+        runtime.system_id = lock.system
+    runtime.containers = [
+        replace(
+            unit,
+            markers=tuple(
+                sorted(
+                    set(unit.markers)
+                    | set(draft.classifications[unit.manifest].markers)
+                )
+            ),
+        )
+        if unit.manifest in draft.classifications
+        else unit
+        for unit in runtime.containers
+    ]
+    return runtime
+
+
+def _group_links(draft: C4Draft) -> dict[tuple[str, str], Counter[ReferenceKind]]:
+    owners = {file: group.id for group in draft.grouping.groups for file in group.files}
+    links: dict[tuple[str, str], Counter[ReferenceKind]] = defaultdict(Counter)
+    for ref in draft.references.references:
+        source, target = owners.get(ref.from_file), owners.get(ref.to)
+        if ref.status == "counts" and source and target and source != target:
+            links[source, target][ref.kind] += 1
+    return dict(links)
+
+
+async def _prepare(draft: C4Draft, llm: C4Llm, lock: ScopeLock | None) -> None:
+    draft.runtime = _scan(draft, lock)
+    draft.grouping = build_groups(
+        project_root=draft.project_root,
+        files=sorted(draft.runtime.container_of),
+        container_of=draft.runtime.container_of,
+        container_roots={unit.id: unit.root for unit in draft.runtime.containers},
+        references=draft.references.references,
+        stored=lock.tree_spec if lock else {},
+        stored_membership=lock.group_membership if lock else {},
+    )
+    links = _group_links(draft)
+    groups_by_container = defaultdict(list)
+    for group in draft.grouping.groups:
+        groups_by_container[group.container].append(group)
+    for container in draft.runtime.containers:
+        groups = groups_by_container[container.id]
+        claimed = {
+            group
+            for component in (lock.components.values() if lock else ())
+            for group in component.groups
+        }
+        cached_direct = set(lock.direct_groups.get(container.id, ()) if lock else ())
+        cached_direct.difference_update(claimed)
+        cached_direct.difference_update(lock.overrides.placements if lock else ())
+        draft.direct_groups[container.id] = sorted(
+            group.id for group in groups if group.id in cached_direct
+        )
+        groups = [group for group in groups if group.id not in cached_direct]
+        group_ids = {group.id for group in groups}
+        draft.merges[container.id] = await merge_container(
+            container=container,
+            groups=groups,
+            group_links={
+                pair: kinds
+                for pair, kinds in links.items()
+                if pair[0] in group_ids and pair[1] not in cached_direct
+            },
+            existing=lock.components if lock else {},
+            placements=lock.overrides.placements if lock else {},
+            llm=llm,
+            retries=draft.steps,
+        )
+    draft.prepared = True
+
+
+def _input_fingerprint(
+    project_root: Path, files: list[str], config: Config | None, scope_path: Path
+) -> str:
+    """Hash actual analyzed bytes, not Git status or modification timestamps."""
+    hashes = {}
+    for file in files:
+        digest = hashlib.sha256()
+        with (project_root / file).open("rb") as source:
+            for block in iter(lambda: source.read(65536), b""):
+                digest.update(block)
+        hashes[file] = digest.hexdigest()
+    payload = {
+        "files": hashes,
+        "scope": scope_path.relative_to(project_root).as_posix(),
+        "config": config.model_dump(mode="json") if config else None,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+async def analyze_c4(
+    *,
+    project_root: Path,
+    scope_path: Path,
+    scope_label: str,
+    config: Config | None,
+    llm: C4Llm,
+    lock: ScopeLock | None,
+    retries: RetryQueue,
+) -> C4Draft:
+    """Read disk once; retain mutable step outcomes until delayed recovery."""
+    files = list_scope_files(
+        scope_path=scope_path, project_root=project_root, config=config
+    )
+    references = await scan_references(project_root=project_root, files=files)
+    runtime = scan_runtime(
+        project_root=project_root,
+        scope_path=scope_path,
+        files=files,
+        locked_containers=lock.containers if lock else {},
+        tombstones=lock.tombstones if lock else {},
+    )
+    draft = C4Draft(
+        project_root,
+        scope_path,
+        scope_label,
+        files,
+        references,
+        runtime,
+        {},
+        LlmSteps(retries),
+        _input_fingerprint(project_root, files, config, scope_path),
+    )
+    items = _classification_items(draft)
+    draft.classifications = await classify(
+        items, llm=llm, lock=lock, retries=draft.steps
+    )
+    if all(item.key in draft.classifications for item in items):
+        await _prepare(draft, llm, lock)
+    return draft
+
+
+def _identify(
+    draft: C4Draft, docs: DocumentedOutcome, lock: ScopeLock | None
+) -> tuple[IdentityResult, dict[str, tuple[ProposedComponent, str]], bool]:
+    groups = {g.id: g for g in draft.grouping.groups}
+    proposals = {p.key: p for merge in draft.merges.values() for p in merge.components}
+    renames = detect_renames(draft.project_root, lock.base_sha if lock else "")
+    identity = assign_component_ids(
+        previous={id: frozenset(c.files) for id, c in lock.components.items()}
+        if lock
+        else {},
+        current={
+            key: (
+                p.name,
+                frozenset(file for group in p.groups for file in groups[group].files),
+            )
+            for key, p in proposals.items()
+        },
+        renames=renames or {},
+        taken_found=frozenset(
+            {draft.runtime.system_id} | {u.id for u in draft.runtime.containers}
+        ),
+        documented_without_files=frozenset(
+            element_id(e.kind, e.term) for e in docs.elements
+        ),
+        tombstones=lock.tombstones if lock else {},
+    )
+    if lock:
+        current_manifests = {unit.manifest for unit in draft.runtime.containers}
+        for manifest, id in lock.containers.items():
+            if manifest not in current_manifests:
+                identity.tombstones[manifest] = id
+    return (
+        identity,
+        {key: (p, identity.ids[key]) for key, p in proposals.items()},
+        renames is not None,
+    )
+
+
+def _merged_titles(draft: C4Draft, identity: IdentityResult) -> dict[str, str]:
+    titles = {}
+    for outcome in draft.merges.values():
+        for (source, target), title in outcome.titles.items():
+            source = identity.ids.get(source, source)
+            target = identity.ids.get(target, target)
+            titles[f"{source}->{target}"] = title
+    return titles
+
+
+def _fingerprints(
+    evidence: C4Evidence, relations: Sequence[Relation]
+) -> dict[str, str]:
+    refs: dict[str, list[tuple[ReferenceKind, str]]] = defaultdict(list)
+    for reference in evidence.references:
+        if reference.relation:
+            refs[reference.relation].append((reference.kind, reference.to))
+    return {
+        r.id: relation_fingerprint(r.from_id, r.to_id, refs[r.id])
+        for r in relations
+        if r.id in refs
+    }
+
+
+def _pending_titles(
+    inp: AssemblyInput,
+    elements: Sequence[Element],
+    relations: Sequence[Relation],
+    fingerprints: dict[str, str],
+    lock: ScopeLock | None,
+) -> dict[str, dict[str, Counter[ReferenceKind]]]:
+    by_id = {element.id: element for element in elements}
+    pending: dict[str, dict[str, Counter[ReferenceKind]]] = defaultdict(dict)
+    for relation in relations:
+        fingerprint = fingerprints.get(relation.id)
+        if (
+            fingerprint is None
+            or relation.id in inp.titles
+            or relation.id in inp.overrides.titles
+        ):
+            continue
+        cached = lock.relations.get(relation.id) if lock else None
+        if cached and cached.fingerprint == fingerprint:
+            inp.titles[fingerprint] = cached.title
+            continue
+        source = by_id[relation.from_id]
+        container = source.parent if source.kind == "component" else source.id
+        assert container is not None
+        pending[container][fingerprint] = Counter(relation.reference_counts)
+    return dict(pending)
+
+
+async def _titles(
+    inp: AssemblyInput, draft: C4Draft, llm: C4Llm, lock: ScopeLock | None
+) -> tuple[list[Element], list[Relation], C4Evidence]:
+    elements, relations, evidence = assemble(inp)
+    fingerprints = _fingerprints(evidence, relations)
+    pending = _pending_titles(inp, elements, relations, fingerprints, lock)
+    outcomes = {
+        container: await title_relations(
+            container=container, pending=items, llm=llm, retries=draft.steps
+        )
+        for container, items in pending.items()
+    }
+    await draft.steps.drain()
+    for outcome in outcomes.values():
+        inp.titles.update(outcome)
+    elements, relations, evidence = assemble(inp)
+    markers: dict[str, Marker] = {}
+    for container, items in pending.items():
+        if llm.trial or f"titles:{container}" in draft.steps.fallbacks:
+            markers.update(dict.fromkeys(items, "trial" if llm.trial else "fallback"))
+    for relation in relations:
+        marker = markers.get(fingerprints.get(relation.id, ""))
+        if marker and marker not in relation.markers:
+            relation.markers = sorted([*relation.markers, marker])
+    return elements, relations, evidence
+
+
+def _lock_components(
+    inp: AssemblyInput, evidence: C4Evidence
+) -> dict[str, LockedComponent]:
+    groups = {g.id: g for g in inp.groups.groups}
+    return {
+        id: LockedComponent(
+            name=p.name,
+            description=p.description,
+            container=groups[p.groups[0]].container,
+            groups=list(p.groups),
+            files=evidence.element_files[id],
+        )
+        for p, id in inp.components.values()
+        if not {"fallback", "trial"}.intersection(p.markers)
+    }
+
+
+def _direct_groups(draft: C4Draft) -> dict[str, list[str]]:
+    return {
+        container: sorted(
+            set(draft.direct_groups[container]) | set(merge.direct_groups)
+        )
+        for container, merge in draft.merges.items()
+    }
+
+
+def _final_fingerprint(
+    draft: C4Draft,
+    topics: Sequence[TopicSources] | None,
+    docs: DocumentedOutcome,
+    head_sha: str,
+    overrides: Overrides,
+) -> str:
+    payload = {
+        "analysis": draft.input_fingerprint,
+        "head": head_sha,
+        "scope": draft.scope_label,
+        "topics": [asdict(topic) for topic in topics] if topics is not None else None,
+        "documentation": docs.hashes,
+        "overrides": overrides.model_dump(mode="json"),
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _replay_history(
+    identity: IdentityResult,
+    renames: bool,
+    fingerprint: str,
+    lock: ScopeLock | None,
+) -> bool:
+    previous = lock.transition if lock else None
+    if previous is None or previous.input_fingerprint != fingerprint:
+        return renames
+    identity.history = [edge.model_copy(deep=True) for edge in previous.history]
+    return previous.renames
+
+
+def _transition(
+    draft: C4Draft, model: C4Model, inp: AssemblyInput, fingerprint: str
+) -> LockedTransition | None:
+    if draft.steps.fallbacks or inp.documented.fallback or model.run.kind == "trial":
+        return None
+    if any(c.fallback for c in draft.classifications.values()):
+        return None
+    if any(m.fallback for m in draft.merges.values()):
+        return None
+    marked: Iterable[Element | Relation | MergedArrow] = chain(
+        model.elements, model.relations, model.merged
+    )
+    if any({"fallback", "trial"}.intersection(item.markers) for item in marked):
+        return None
+    return LockedTransition(
+        input_fingerprint=fingerprint,
+        history=model.history,
+        renames=model.run.renames,
+    )
+
+
+def _build_lock(
+    draft: C4Draft,
+    model: C4Model,
+    evidence: C4Evidence,
+    inp: AssemblyInput,
+    identity: IdentityResult,
+    fingerprint: str,
+) -> ScopeLock:
+    fingerprints = _fingerprints(evidence, model.relations)
+    titles = {r.id: r.title for r in model.relations}
+    docs = inp.documented
+    return ScopeLock(
+        base_sha=model.run.head_sha,
+        system=draft.runtime.system_id,
+        containers={
+            unit.manifest: unit.id
+            for unit in draft.runtime.containers
+            if not {"fallback", "trial"}.intersection(unit.markers)
+        },
+        tree_spec={
+            id: tree.to_dict() for id, tree in draft.grouping.tree_specs.items()
+        },
+        group_membership=draft.grouping.group_membership,
+        direct_groups=_direct_groups(draft),
+        transition=_transition(draft, model, inp, fingerprint),
+        components=_lock_components(inp, evidence),
+        tombstones=identity.tombstones,
+        relations={
+            r.id: LockedRelation(title=r.title, fingerprint=fingerprints[r.id])
+            for r in model.relations
+            if r.id in fingerprints
+            and not {"fallback", "trial"}.intersection(r.markers)
+        },
+        classifications={
+            key: LockedClassification(
+                value=c.value, votes=list(c.votes), markers=list(c.markers)
+            )
+            for key, c in draft.classifications.items()
+            if not {"fallback", "trial"}.intersection(c.markers)
+        },
+        documented=None
+        if docs.fallback
+        else LockedDocumented(
+            hashes=docs.hashes,
+            elements=TypeAdapter(list[DocElement]).dump_python(
+                docs.elements, mode="json"
+            ),
+            relations=TypeAdapter(list[DocRelation]).dump_python(
+                docs.relations, mode="json"
+            ),
+        ),
+        summaries={
+            summary_key((id, titles[id]) for id in arrow.underlying): arrow.label
+            for arrow in model.merged
+            if not {"fallback", "trial"}.intersection(arrow.markers)
+        },
+        overrides=inp.overrides.model_copy(deep=True),
+    )
+
+
+async def finish_c4(
+    *,
+    draft: C4Draft,
+    topics: Sequence[TopicSources] | None,
+    llm: C4Llm,
+    lock: ScopeLock | None,
+    retries: RetryQueue,
+    head_sha: str,
+    kind: RunKind,
+) -> C4Build:
+    """Finalize dependent steps only after their deferred inputs are settled."""
+    docs = await extract_documented(
+        project_root=draft.project_root,
+        doc_files=doc_files_for(draft.project_root, draft.scope_path, topics or ()),
+        locked=lock.documented if lock else None,
+        llm=llm,
+        retries=draft.steps,
+    )
+    await retries.drain()
+    if not draft.prepared:
+        await _prepare(draft, llm, lock)
+        await retries.drain()
+    identity, components, renames = _identify(draft, docs, lock)
+    overrides = lock.overrides if lock else Overrides()
+    fingerprint = _final_fingerprint(draft, topics, docs, head_sha, overrides)
+    renames = _replay_history(identity, renames, fingerprint, lock)
+    inp = AssemblyInput(
+        draft.runtime,
+        draft.references,
+        draft.grouping,
+        components,
+        _direct_groups(draft),
+        draft.classifications,
+        docs,
+        _merged_titles(draft, identity),
+        overrides,
+    )
+    elements, relations, evidence = await _titles(inp, draft, llm, lock)
+    coverage = compute_coverage(
+        element_files=evidence.element_files,
+        direct_files={},
+        topics=None if llm.trial else topics,
+    )
+    for element in elements:
+        element.coverage = coverage[element.id]
+        if element.kind == "component" and element.coverage.status == "undescribed":
+            element.markers.append("undescribed")
+            element.markers.sort()
+        if docs.fallback and any(
+            c.target == element.id and c.source == "documentation"
+            for c in evidence.citations
+        ):
+            if "fallback" not in element.markers:
+                element.markers.append("fallback")
+                element.markers.sort()
+    merged = await label_arrows(
+        derive_views(elements, relations),
+        titles_by_relation={r.id: r.title for r in relations},
+        locked=lock.summaries if lock else {},
+        overrides=inp.overrides.labels,
+        llm=llm,
+        retries=draft.steps,
+    )
+    await retries.drain()
+    fallback_count = sum("fallback" in element.markers for element in elements)
+    model = C4Model(
+        run=RunInfo(
+            id="",
+            kind=kind,
+            schema_version=SCHEMA_VERSION,
+            head_sha=head_sha,
+            scope=draft.scope_label,
+            fallback_count=fallback_count,
+            renames=renames,
+        ),
+        elements=elements,
+        relations=relations,
+        merged=merged,
+        history=identity.history,
+    )
+    updated = (
+        None
+        if llm.trial
+        else _build_lock(draft, model, evidence, inp, identity, fingerprint)
+    )
+    return C4Build(model, evidence, updated, fallback_count)

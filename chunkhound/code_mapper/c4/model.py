@@ -5,7 +5,7 @@ from typing import Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 ElementKind: TypeAlias = Literal[
     "system", "container", "storage", "component", "external", "person"
@@ -153,12 +153,20 @@ class Overrides(_C4BaseModel):
     labels: dict[str, str] = Field(default_factory=dict)
 
 
+class LockedTransition(_C4BaseModel):
+    input_fingerprint: str
+    history: list[HistoryEdge]
+    renames: bool
+
+
 class ScopeLock(_C4BaseModel):
     base_sha: str
     system: str
     containers: dict[str, str]
     tree_spec: dict[str, dict[str, Any]]
     group_membership: dict[str, dict[str, str]]
+    direct_groups: dict[str, list[str]]
+    transition: LockedTransition | None
     components: dict[str, LockedComponent]
     tombstones: dict[str, str]
     relations: dict[str, LockedRelation]

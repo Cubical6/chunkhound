@@ -26,6 +26,8 @@ def sample_lock(base_sha: str = "abc") -> ScopeLock:
             "group_membership": {
                 "container:app": {"src/api.py": "1", "settings.py": "2"}
             },
+            "direct_groups": {"container:app": ["container:app/2"]},
+            "transition": None,
             "components": {
                 "component:api": {
                     "name": "API",

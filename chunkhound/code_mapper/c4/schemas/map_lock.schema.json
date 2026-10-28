@@ -1,5 +1,36 @@
 {
   "$defs": {
+    "HistoryEdge": {
+      "additionalProperties": false,
+      "properties": {
+        "from_id": {
+          "title": "From Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "continuation",
+            "split",
+            "merge",
+            "new",
+            "removed"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "to_id": {
+          "title": "To Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from_id",
+        "to_id",
+        "kind"
+      ],
+      "title": "HistoryEdge",
+      "type": "object"
+    },
     "LockedClassification": {
       "additionalProperties": false,
       "properties": {
@@ -148,6 +179,33 @@
       "title": "LockedRelation",
       "type": "object"
     },
+    "LockedTransition": {
+      "additionalProperties": false,
+      "properties": {
+        "history": {
+          "items": {
+            "$ref": "#/$defs/HistoryEdge"
+          },
+          "title": "History",
+          "type": "array"
+        },
+        "input_fingerprint": {
+          "title": "Input Fingerprint",
+          "type": "string"
+        },
+        "renames": {
+          "title": "Renames",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "input_fingerprint",
+        "history",
+        "renames"
+      ],
+      "title": "LockedTransition",
+      "type": "object"
+    },
     "Overrides": {
       "additionalProperties": false,
       "properties": {
@@ -225,6 +283,16 @@
           "title": "Containers",
           "type": "object"
         },
+        "direct_groups": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Direct Groups",
+          "type": "object"
+        },
         "documented": {
           "anyOf": [
             {
@@ -273,6 +341,16 @@
           "title": "Tombstones",
           "type": "object"
         },
+        "transition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LockedTransition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "tree_spec": {
           "additionalProperties": {
             "additionalProperties": true,
@@ -288,6 +366,8 @@
         "containers",
         "tree_spec",
         "group_membership",
+        "direct_groups",
+        "transition",
         "components",
         "tombstones",
         "relations",
@@ -310,7 +390,7 @@
       "type": "object"
     },
     "version": {
-      "default": 2,
+      "default": 3,
       "title": "Version",
       "type": "integer"
     }
