@@ -63,6 +63,8 @@ Nieuw subpakket `chunkhound/code_mapper/c4/` naast de bestaande topicstroom (rij
 
 **Exacte herhaling (gebruiker: "optie 1", taak 13):** een uitvoering met ongewijzigde relevante invoer herhaalt de laatste succesvolle analysetransitie, inclusief geschiedenis en runmetadata; zij is geen nieuwe identiteitsgebeurtenis. Een deterministische invoervingerafdruk omvat bestandsinhoud (ook dirty wijzigingen), HEAD, scope, configuratie, topics en overrides. Bij gewijzigde invoer berekent de analyse een nieuwe transitie met de gewone rename-/geschiedenisregels.
 
+Ook de verse `ReferenceScan`-uitkomsten tellen mee: verwijzingen met doel/status, import-only-bestanden en externe importplekken. Importresolutie raadpleegt het hele project; dirty verschijnen of verdwijnen van een doel buiten de gekozen scope mag daarom geen oude geschiedenis/runmetadata terugzetten. Gebruik de reeds berekende scan, zonder extra projectbrede bestandssysteemloop.
+
 ## 6. CLI en uitvoer
 
 Parser `chunkhound/api/cli/parsers/code_mapper_parser.py`; commando `chunkhound/api/cli/commands/code_mapper.py`.

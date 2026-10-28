@@ -75,8 +75,8 @@ async def build(repo, manager, *, lock=None, trial=False, **inputs):
     retries = RetryQueue()
     draft = await analyze_c4(
         project_root=repo,
-        scope_path=repo,
-        scope_label="shop",
+        scope_path=inputs.get("scope_path", repo),
+        scope_label=inputs.get("scope_label", "shop"),
         config=inputs.get("config"),
         llm=llm,
         lock=lock,
@@ -452,3 +452,51 @@ async def test_changed_bytes_not_timestamps_invalidate_replay(
         != first.lock.transition.input_fingerprint
     )
     assert changed.model.history != first.model.history
+
+
+@pytest.mark.parametrize("initial_exists", [False, True], ids=["appearance", "removal"])
+async def test_outside_scope_resolution_changes_transition(
+    fixture_repo, c4_llm_manager, pipeline_answers, tmp_path, initial_exists
+):
+    scope = fixture_repo / "services/api"
+    scope.mkdir(parents=True)
+    (scope / "pyproject.toml").write_text(
+        '[project]\nname = "api"\n[project.scripts]\napi = "main:run"\n'
+    )
+    source = scope / "main.py"
+    source.write_text("import shared\n\ndef run():\n    return shared.work()\n")
+    source_bytes = source.read_bytes()
+    target = fixture_repo / "shared.py"
+    if initial_exists:
+        target.write_text("def work(): return 1\n")
+    inputs = {"scope_path": scope, "scope_label": "services/api", "topics": []}
+    first = await build(fixture_repo, c4_llm_manager, **inputs)
+    before_target, after_target = (
+        ("shared.py", "package:shared")
+        if initial_exists
+        else ("package:shared", "shared.py")
+    )
+    assert any(r.to == before_target for r in first.evidence.references)
+    if initial_exists:
+        target.unlink()
+    else:
+        target.write_text("def work(): return 1\n")
+    changed = await build(fixture_repo, c4_llm_manager, lock=first.lock, **inputs)
+    assert changed.model.run.head_sha == first.model.run.head_sha
+    assert source.read_bytes() == source_bytes
+    assert any(r.to == after_target for r in changed.evidence.references)
+    assert changed.evidence.references != first.evidence.references
+    assert changed.model.history != first.model.history
+    assert changed.model.run.renames and not first.model.run.renames
+    assert (
+        changed.lock.transition.input_fingerprint
+        != first.lock.transition.input_fingerprint
+    )
+    write_scope_lock(tmp_path / "cache", "services/api", changed.lock)
+    restored = read_scope_lock(tmp_path / "cache", "services/api")
+    pipeline_answers.calls.clear()
+    replay = await build(fixture_repo, c4_llm_manager, lock=restored, **inputs)
+    assert not pipeline_answers.calls
+    assert replay.model == changed.model
+    assert replay.evidence == changed.evidence
+    assert replay.lock == changed.lock

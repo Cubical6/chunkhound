@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **C4 template exclusion** — A Dockerfile beside a package with a placeholder name no longer promotes that template directory to a runtime container.
+- **C4 scoped replay** — Fresh reference-resolution outcomes now invalidate transition replay when imports change between project files and external packages, including dirty target creation or removal outside the selected scope. Genuinely unchanged results still replay with identical JSON and no model calls.
 
 ## [6.1.0] - 2026-10-20
 

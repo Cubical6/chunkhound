@@ -451,6 +451,16 @@ def _final_fingerprint(
 ) -> str:
     payload = {
         "analysis": draft.input_fingerprint,
+        # Resolution consults project paths outside the analyzed file scope.
+        "references": [
+            reference.model_dump(mode="json")
+            for reference in draft.references.references
+        ],
+        "imports_only_files": sorted(draft.references.imports_only_files),
+        "external_sites": {
+            name: sorted(sites)
+            for name, sites in draft.references.external_sites.items()
+        },
         "head": head_sha,
         "scope": draft.scope_label,
         "topics": [asdict(topic) for topic in topics] if topics is not None else None,
