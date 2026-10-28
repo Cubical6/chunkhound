@@ -1,0 +1,103 @@
+# Copied from CodeBoarding (MIT, see ../LICENSE) at 13adc4a0: static_analyzer/clustering/names/inventory.py.
+# Changes: kept PROJECT_MANIFESTS, Unit, Trie, TrieNode, _project_root and _is_project_root; dropped units_from_graph(s)
+# and with them the CallGraph and normalize_repo_path imports (the call graph does not come along).
+"""Units and the trie of their positions.
+
+A unit is one file: the qualified names the engine declared in it. Its *position* is the
+file's directory under the repository root, so the trie over every unit's position is the
+repository's directory tree, the same for every language and every engine, whatever an
+adapter chose to call a symbol. Its *key* is the position plus the file's stem: what a rule
+owns to claim this file and not a sibling in the same directory.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from pathlib import Path
+
+PROJECT_MANIFESTS = (
+    "package.json",
+    "pyproject.toml",
+    "setup.py",
+    "go.mod",
+    "Cargo.toml",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "composer.json",
+)
+"""Files that make a directory a project of its own; a ``.csproj`` or ``.fsproj`` does too."""
+
+
+@dataclass(frozen=True)
+class Unit:
+    """One file's declarations. ``unit_id`` is the engine's path, used only as an identity."""
+
+    unit_id: str
+    language: str
+    names: tuple[str, ...]
+    position: tuple[str, ...]
+    key: tuple[str, ...]
+    """``position`` plus the file's name, so a file and a directory of the same name stay apart."""
+    project: tuple[str, ...] | None = None
+    """The nearest directory above the file holding a project manifest, when there is one: a unit
+    a reader separated on purpose."""
+
+
+def _project_root(repo_dir: Path, position: tuple[str, ...]) -> tuple[str, ...] | None:
+    """The nearest directory at or above ``position`` that holds a manifest; the repository root does not count."""
+    for depth in range(len(position), 0, -1):
+        if _is_project_root(repo_dir / Path(*position[:depth])):
+            return position[:depth]
+    return None
+
+
+def _is_project_root(directory: Path) -> bool:
+    if any((directory / manifest).is_file() for manifest in PROJECT_MANIFESTS):
+        return True
+    try:
+        return any(entry.suffix in (".csproj", ".fsproj") for entry in directory.iterdir())
+    except OSError:
+        return False
+
+
+@dataclass
+class TrieNode:
+    path: tuple[str, ...]
+    children: dict[str, TrieNode] = field(default_factory=dict)
+    units: list[Unit] = field(default_factory=list)
+    count: int = 0
+    """Units in this subtree, set once the trie is built."""
+
+
+class Trie:
+    """The prefix tree of unit positions: the directory tree of every file the engine saw.
+
+    A node holding one unit and nothing else is a one-file directory; the walk treats such a
+    node as a loose unit of its parent rather than as a scope, but keeps it in the tree,
+    because a one-file feature directory under a layer is evidence the transposition needs.
+    """
+
+    def __init__(self, units: Iterable[Unit]):
+        self.root = TrieNode(())
+        for unit in units:
+            node = self.root
+            for depth, segment in enumerate(unit.position):
+                node = node.children.setdefault(segment, TrieNode(unit.position[: depth + 1]))
+            node.units.append(unit)
+        _count(self.root)
+
+    def node(self, path: tuple[str, ...]) -> TrieNode | None:
+        node = self.root
+        for segment in path:
+            child = node.children.get(segment)
+            if child is None:
+                return None
+            node = child
+        return node
+
+
+def _count(node: TrieNode) -> int:
+    node.count = len(node.units) + sum(_count(child) for child in node.children.values())
+    return node.count

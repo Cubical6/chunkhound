@@ -167,6 +167,7 @@ include = [
     "chunkhound/**/*.py",
     "chunkhound/py.typed",
     "chunkhound/code_mapper/prompts/*.md",
+    "chunkhound/code_mapper/c4/codeboarding/LICENSE",
     "chunkhound/autodoc/prompts/*.txt",
     "chunkhound/autodoc/assets/**/*",
     "chunkhound/watchman_runtime/README.md",
@@ -216,6 +217,8 @@ ignore = []
 "chunkhound/mcp_server/tools.py" = ["E501"]
 # Prompt templates are LLM-facing strings — wrapping them breaks formatting
 "chunkhound/services/prompts/fetchurl.py" = ["E501"]
+# Verbatim MIT copy; rewrapping would diverge from upstream
+"chunkhound/code_mapper/c4/codeboarding/**" = ["E501"]
 
 [tool.mypy]
 python_version = "3.10"

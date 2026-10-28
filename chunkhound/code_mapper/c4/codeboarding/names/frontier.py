@@ -1,0 +1,235 @@
+# Copied from CodeBoarding (MIT, see ../LICENSE) at 13adc4a0: static_analyzer/clustering/names/frontier.py.
+# Changes: imports point at chunkhound.code_mapper.c4.codeboarding.names.
+"""The frontier: where the walk down the trie stops, and what it emits there.
+
+Per node: step through a single child or a child holding nearly everything; a node whose
+children are mostly role-named is layered, and is transposed when feature names recur under
+at least two of its layers, else it is one box; every other child is a box, and a box of one
+unit is a loose unit of its parent. A directory is its scope's structure, and its inside is
+the next depth. The walk emits rules, never assignments: ``replay`` decides which unit lands
+where, on this run and every later one.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from chunkhound.code_mapper.c4.codeboarding.names.inventory import Trie, TrieNode
+from chunkhound.code_mapper.c4.codeboarding.names.spec import Prefix
+from chunkhound.code_mapper.c4.codeboarding.names.tokens import (
+    distinctive_word,
+    is_role_named,
+    stems,
+    ubiquitous_words,
+)
+
+NEARLY_ALL = 0.8
+"""A child holding this share of its parent is stepped through whatever it is called: ``src``,
+``src/main/java``, the one package of a library. Anything less is a box; opening a child that
+held half a scope was measured to scatter Polly's strategies, AutoMapper's test folders and
+btcpayserver's controllers across their roots."""
+
+ROLE_SHARE = 0.6
+"""A node this much of whose units sit under role-named children is a layered node."""
+
+MIN_LAYERS = 3
+
+BOX = "box"
+FEATURE = "feature"
+LOOSE = "loose"
+RESIDUAL = "residual"
+WORD = "word"
+FILE = "file"
+HEAD = "head"
+"""Kinds of candidate. The walk emits the first four; the ladder's word, file and role rungs
+draw the rest from the units themselves."""
+
+
+@dataclass(frozen=True)
+class Candidate:
+    """One thing the frontier proposes as a box, before any grouping."""
+
+    key: str
+    kind: str
+    label: str
+    prefixes: tuple[Prefix, ...] = ()
+    fallback_prefixes: tuple[Prefix, ...] = ()
+    terms: tuple[str, ...] = ()
+
+
+@dataclass
+class Frontier:
+    candidates: list[Candidate] = field(default_factory=list)
+    axis: str = "flat"
+    notes: list[str] = field(default_factory=list)
+
+
+def walk(trie: Trie, role_words: frozenset[str], *, transpose: bool = True, layers: bool = False) -> Frontier:
+    """The candidates of a trie.
+
+    A layered node whose features recur is transposed onto them only with ``transpose``, else
+    drawn layer by layer with ``layers``, else kept as one box; one whose features do not recur
+    is always drawn layer by layer. Why the switch: below the leaf cap a transposition leaves a
+    residual per layer, which reads as a grab bag; layers are directories a reader can name.
+    """
+    frontier = Frontier()
+    top = trie.root
+    while len(top.children) == 1 and not top.units:
+        top = next(iter(top.children.values()))
+    _visit(top, role_words, frontier, transpose, layers, top=True)
+    return frontier
+
+
+def _visit(
+    node: TrieNode,
+    role_words: frozenset[str],
+    out: Frontier,
+    transpose: bool,
+    layers: bool,
+    *,
+    top: bool = False,
+) -> None:
+    children = sorted(node.children.items())
+    if len(children) == 1 and not node.units:
+        _visit(children[0][1], role_words, out, transpose, layers, top=top)
+        return
+    ubiquitous = ubiquitous_words(name for name, _ in children)
+    stepped = {name for name, child in children if child.count >= NEARLY_ALL * node.count}
+    role_children = [child for name, child in children if is_role_named(name, role_words, ubiquitous)]
+    role_units = sum(child.count for child in role_children)
+    if not stepped and len(role_children) >= MIN_LAYERS and node.count and role_units / node.count >= ROLE_SHARE:
+        _layered(node, ubiquitous, role_words, out, transpose, layers, top=top)
+        return
+    if top:
+        out.axis = "structural"
+    loose = bool(node.units)
+    scopes = 0
+    for name, child in children:
+        if child.count == 1:
+            loose = True
+            continue
+        scopes += 1
+        if name in stepped:
+            _visit(child, role_words, out, transpose, layers)
+            continue
+        out.candidates.append(_box(child))
+    if not scopes:
+        # Only units and one-unit children: a flat scope is one box, not a pile of loose files.
+        out.candidates.append(_box(node))
+    elif loose:
+        out.candidates.append(_loose(node))
+
+
+def _layered(
+    node: TrieNode,
+    ubiquitous: frozenset[str],
+    role_words: frozenset[str],
+    out: Frontier,
+    transpose: bool,
+    layers: bool,
+    *,
+    top: bool = False,
+) -> None:
+    """A node whose children are layers: transpose onto the features recurring under two of
+    them, else draw the layers, the only structure there is."""
+    by_name = sorted(node.children.items())
+    while True:
+        # The product's name may sit on the feature directories themselves, behind the layers'
+        # role-named containers; widen until no more of them read as ubiquitous.
+        found = [name for _, layer in by_name for name, _ in _feature_directories(layer, role_words, ubiquitous)]
+        widened = ubiquitous | ubiquitous_words(found)
+        if widened == ubiquitous:
+            break
+        ubiquitous = widened
+    layers_by_feature: dict[str, set[str]] = {}
+    display: dict[str, str] = {}
+    for layer_name, layer in by_name:
+        for name, _ in _feature_directories(layer, role_words, ubiquitous):
+            feature = _feature_stem(name, role_words, ubiquitous)
+            layers_by_feature.setdefault(feature, set()).add(layer_name)
+            display.setdefault(feature, name)
+    features = sorted(feature for feature, feature_layers in layers_by_feature.items() if len(feature_layers) >= 2)
+    grid = len(features) >= 2
+    if grid and not transpose and not layers:
+        out.notes.append(f"{_dotted(node.path) or '<root>'}: layered, kept as one box")
+        out.candidates.append(_box(node))
+        return
+    if not grid or not transpose:
+        if top:
+            out.axis = "structural"
+        why = "a grid drawn layer by layer" if grid else "no recurring features"
+        out.notes.append(f"{_dotted(node.path) or '<root>'}: role-named children, {why}; layers as boxes")
+        for _, layer in by_name:
+            if layer.count > 1:
+                out.candidates.append(_box(layer))
+        if node.units or any(layer.count == 1 for layer in node.children.values()):
+            out.candidates.append(_loose(node))
+        return
+    if top:
+        out.axis = "transposed"
+    out.notes.append(f"transposed {_dotted(node.path) or '<root>'} onto {', '.join(features)}")
+    prefixes_by_feature: dict[str, list[Prefix]] = {feature: [] for feature in features}
+    for _, layer in by_name:
+        for name, child in _feature_directories(layer, role_words, ubiquitous):
+            feature = _feature_stem(name, role_words, ubiquitous)
+            if feature in prefixes_by_feature:
+                prefixes_by_feature[feature].append(child.path)
+    for feature in features:
+        out.candidates.append(
+            Candidate(
+                key=f"{FEATURE}:{_dotted(node.path)}:{feature}",
+                kind=FEATURE,
+                label=display[feature],
+                prefixes=tuple(prefixes_by_feature[feature]),
+                terms=(feature,),
+            )
+        )
+    if node.units:
+        out.candidates.append(_loose(node))
+    for name, layer in by_name:
+        out.candidates.append(
+            Candidate(
+                key=f"{RESIDUAL}:{_dotted(layer.path)}",
+                kind=RESIDUAL,
+                label=name,
+                fallback_prefixes=(layer.path,),
+            )
+        )
+
+
+def _feature_directories(
+    node: TrieNode, role_words: frozenset[str], ubiquitous: frozenset[str]
+) -> list[tuple[str, TrieNode]]:
+    """The shallowest feature-named directories under a layer, looking through its role-named ones.
+
+    Why the walk stops there: a feature nested inside another (``Billing.Orders``) belongs to the
+    outer one, whatever the inner name recurs with elsewhere.
+    """
+    found: list[tuple[str, TrieNode]] = []
+    for name, child in sorted(node.children.items()):
+        if is_role_named(name, role_words, ubiquitous):
+            found.extend(_feature_directories(child, role_words, ubiquitous))
+        else:
+            found.append((name, child))
+    return found
+
+
+def _box(node: TrieNode) -> Candidate:
+    return Candidate(
+        key=f"{BOX}:{_dotted(node.path)}", kind=BOX, label=node.path[-1] if node.path else "", prefixes=(node.path,)
+    )
+
+
+def _loose(node: TrieNode) -> Candidate:
+    return Candidate(key=f"{LOOSE}:{_dotted(node.path)}", kind=LOOSE, label="", fallback_prefixes=(node.path,))
+
+
+def _feature_stem(name: str, role_words: frozenset[str], ubiquitous: frozenset[str]) -> str:
+    """The word a directory is about: its first word that is neither a role nor the product's name."""
+    words = stems(name)
+    return distinctive_word(name, role_words, ubiquitous) or (words[0] if words else name.casefold())
+
+
+def _dotted(path: Prefix) -> str:
+    """A key for a path: joined on ``/``, which no directory name carries, so ``x/a.b`` and ``x/a/b`` differ."""
+    return "/".join(path)
