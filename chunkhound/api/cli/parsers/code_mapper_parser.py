@@ -52,7 +52,7 @@ def add_map_subparser(subparsers: Any) -> argparse.ArgumentParser:
     # Add common arguments
     add_common_arguments(map_parser)
 
-    # Code Mapper requires database, embedding (for reranking), and llm configuration
+    # Full research needs database, embedding and LLM configuration.
     add_config_arguments(map_parser, ["database", "embedding", "llm"])
 
     # Optional flag: stop after overview/points-of-interest phase
@@ -62,8 +62,8 @@ def add_map_subparser(subparsers: Any) -> argparse.ArgumentParser:
         dest="overview_only",
         action="store_true",
         help=(
-            "Only run the planning pass and print the planned points of interest, "
-            "skipping per-point deep research and final assembly."
+            "Run only the planning pass and a deterministic C4 trial. "
+            "With --no-markdown, skip planning too (no database or LLM needed)."
         ),
     )
 
@@ -89,25 +89,49 @@ def add_map_subparser(subparsers: Any) -> argparse.ArgumentParser:
         ),
     )
 
-    # Mandatory output directory for per-topic documents and index
+    # Mandatory destination for the selected output formats.
     map_parser.add_argument(
         "--out",
         type=Path,
         required=True,
         dest="out",
         help=(
-            "Directory where an index file and one markdown file per point of "
-            "interest will be written. Use --combined to also write a combined "
-            "Code Mapper markdown file (or set CH_CODE_MAPPER_WRITE_COMBINED=1 for "
-            "backward compatibility)."
+            "Directory for C4 JSON, topic Markdown and the topics index. "
+            "Select formats with --no-c4 or --no-markdown. Use --combined to "
+            "also write a combined Markdown file (or set "
+            "CH_CODE_MAPPER_WRITE_COMBINED=1 for backward compatibility)."
         ),
     )
 
-    # Optional: write a single combined markdown document (CLI overrides env when set)
+    # Optional output formats; combined CLI overrides the environment when set.
     try:
         boolean_optional_action = argparse.BooleanOptionalAction
     except AttributeError:  # pragma: no cover - older Python
         boolean_optional_action = None
+
+    for name, help_text in (
+        ("c4", "Write a C4 model and evidence alongside the topic artifacts."),
+        (
+            "markdown",
+            "Write Markdown topics and an index (research still runs without it).",
+        ),
+    ):
+        if boolean_optional_action is not None:
+            map_parser.add_argument(
+                f"--{name}",
+                action=boolean_optional_action,
+                default=True,
+                help=help_text,
+            )
+        else:
+            map_parser.add_argument(
+                f"--{name}",
+                dest=name,
+                action="store_true",
+                default=True,
+                help=help_text,
+            )
+            map_parser.add_argument(f"--no-{name}", dest=name, action="store_false")
 
     if boolean_optional_action is not None:
         map_parser.add_argument(
