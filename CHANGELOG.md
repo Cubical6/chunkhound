@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **C4 runtime discovery** — Detects executable Python, Node, Composer and Cargo packages and Docker runtime boundaries, with manifest citations, typed storage candidates and lock-preserving container IDs. Template package names are excluded; scopes without a recognized runtime receive a provisional container.
 - **C4 deterministic grouping** — Groups files within explicit runtime roots without an LLM. Lock schema 2 persists previous file ownership independently of semantic components; replay preserves known groups while assigning newly introduced directories their own prefix-only groups.
 - **C4 classification** — Classifies new dependencies, runtime and storage candidates using three bundled LLM voting rounds. Manual corrections and locked decisions skip calls; trial runs remain deterministic and call-free. Transient failures get one delayed voting attempt, then marked conservative fallbacks.
+- **C4 documentation evidence** — Extracts documented actors, external systems, containers, components and relationships only with literal, line-verified quotations from scope READMEs and topic-cited Markdown. Unchanged source hashes reuse the lockfile without model calls; transient failures retry once before using a marked previous or empty outcome.
 
 ### Fixed
 

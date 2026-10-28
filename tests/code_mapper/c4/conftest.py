@@ -97,30 +97,28 @@ def default_answers() -> dict[str, Answer]:
         "documented": {
             "elements": [
                 {
-                    "id": "persoon:beheerder",
                     "kind": "person",
-                    "name": "beheerder",
-                    "citations": [deepcopy(citation)],
+                    "term": "beheerder",
+                    "citation": deepcopy(citation),
                 },
                 {
-                    "id": "extern:stripe",
                     "kind": "external",
-                    "name": "Stripe",
-                    "citations": [deepcopy(citation)],
+                    "term": "Stripe",
+                    "citation": deepcopy(citation),
                 },
             ],
             "relations": [
                 {
-                    "from": "persoon:beheerder",
-                    "to": "systeem:shop",
+                    "from_term": "beheerder",
+                    "to_term": "webwinkel",
                     "title": "gebruikt",
-                    "citations": [deepcopy(citation)],
+                    "citation": deepcopy(citation),
                 },
                 {
-                    "from": "systeem:shop",
-                    "to": "extern:stripe",
+                    "from_term": "webwinkel",
+                    "to_term": "Stripe",
                     "title": "betaalt via",
-                    "citations": [deepcopy(citation)],
+                    "citation": deepcopy(citation),
                 },
             ],
         },
