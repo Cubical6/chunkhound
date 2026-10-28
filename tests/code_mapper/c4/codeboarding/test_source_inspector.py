@@ -4,6 +4,7 @@
 # Changes: use a project-local CallSite path literal.
 # Changes: retain Python, JS, TS, TSX, PHP and language-independent behavior tests only.
 # Changes: cover source-only inheritance for target grammars and JSX identifier positions.
+# Changes: cover Python generic inheritance without mistaking type arguments for bases.
 """Tests for chunkhound.code_mapper.c4.codeboarding.source_inspector.SourceInspector."""
 
 import re
@@ -586,3 +587,10 @@ def test_jsx_calls_and_identifier_positions(tmp_path, suffix):
     inspector = SourceInspector()
     assert _positions(inspector.find_call_sites(path)) == {(1, 15)}
     assert inspector.identifier_at(path, 0, 14) == "Card"
+
+
+@pytest.mark.parametrize("base", ["Base[T]", "models.Base[T]"])
+def test_python_generic_inheritance_names_the_base_not_its_type_argument(tmp_path, base):
+    path = tmp_path / "generic.py"
+    path.write_text(f"class Child({base}, Plain, metaclass=Meta):\n pass\n")
+    assert SourceInspector().find_type_bases(path) == [("Child", ["Base", "Plain"])]

@@ -5,6 +5,7 @@
 # Changes: recognize Python, JS/TS and PHP inheritance nodes without LSP.
 # Changes: annotate the tree walker for strict mypy and sort redirected imports.
 # Changes: isolate JS/TS heritage unwrapping to keep added inheritance handling shallow.
+# Changes: unwrap Python subscript base values before selecting inheritance names.
 """Source code reading and tree-sitter call-site detection utilities."""
 
 from __future__ import annotations
@@ -1204,7 +1205,11 @@ class SourceInspector:
         """The individual base types a type declaration names, past the wrappers grammars add."""
         superclasses = declaration.child_by_field_name("superclasses")
         if superclasses is not None:
-            return [base for base in superclasses.named_children if base.type != "keyword_argument"]
+            return [
+                (base.child_by_field_name("value") or base) if base.type == "subscript" else base
+                for base in superclasses.named_children
+                if base.type != "keyword_argument"
+            ]
         nodes: list[TreeSitterNode] = []
         for child in declaration.children:
             if child.type == "class_heritage":
