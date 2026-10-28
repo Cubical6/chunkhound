@@ -69,6 +69,8 @@ classDiagram
 | R11 | Handmatige `overrides` in het lockbestand gaan voor op elke afgeleide uitkomst | override `pyarrow = opslagdriver` → geen stemming, soort opslagdriver (rij 31) |
 | R12 | Terugval en proef worden nooit opgeslagen | samenvoegstap twee keer time-out → 14 gemarkeerde componenten, lockbestand onveranderd (rij 19, 30) |
 
+Geschiedenis bij R3 (uitvoeringsbesluit R): behoud elk paar met ≥10% overlap aan één kant, over bestanden in beide runs na renames. Meerdere voorgangers → `merge`, anders meerdere opvolgers → `split`, anders `continuation`; het label bewijst geen overerving. Niet-geërfde nieuwe id's krijgen tevens `new` (`from_id=""`), niet-geërfde oude id's `removed` (`to_id=""`) plus tombstone `oud_id → oud_id`. Andere eindpunten zijn echte id's; bestaande tombstones blijven staan en beide kolommen reserveren id's.
+
 ### Open issues
 
 - **zonder dossier:** begrippen en regels zijn niet tegen een COGNiam-dossier gecontroleerd (rij 13).
