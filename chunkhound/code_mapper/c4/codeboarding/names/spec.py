@@ -1,5 +1,7 @@
-# Copied from CodeBoarding (MIT, see ../LICENSE) at 13adc4a0: static_analyzer/clustering/names/spec.py.
-# Changes: imports point at chunkhound.code_mapper.c4.codeboarding.names; ids come from names/ids.py.
+# Copied from CodeBoarding (https://github.com/CodeBoarding/CodeBoarding) commit 13adc4a0, MIT License, Copyright (c) 2025 CodeBoarding. See LICENSE in this directory.
+# Source: static_analyzer/clustering/names/spec.py; license: ../LICENSE.
+# Changes: imports point at chunkhound.code_mapper.c4.codeboarding.names.
+# Changes: ids come from names/ids.py.
 """The tree specification: the decisions a full run makes and every later run replays."""
 
 from __future__ import annotations

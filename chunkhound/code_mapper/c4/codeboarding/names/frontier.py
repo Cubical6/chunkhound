@@ -1,4 +1,5 @@
-# Copied from CodeBoarding (MIT, see ../LICENSE) at 13adc4a0: static_analyzer/clustering/names/frontier.py.
+# Copied from CodeBoarding (https://github.com/CodeBoarding/CodeBoarding) commit 13adc4a0, MIT License, Copyright (c) 2025 CodeBoarding. See LICENSE in this directory.
+# Source: static_analyzer/clustering/names/frontier.py; license: ../LICENSE.
 # Changes: imports point at chunkhound.code_mapper.c4.codeboarding.names.
 """The frontier: where the walk down the trie stops, and what it emits there.
 

@@ -1,6 +1,7 @@
-# Copied from CodeBoarding (MIT, see chunkhound/code_mapper/c4/codeboarding/LICENSE) at 13adc4a0:
-# tests/static_analyzer/names/conftest.py.
-# Changes: imports point at chunkhound.code_mapper.c4.codeboarding.names; the call-graph helper graph_from_layout was left out.
+# Copied from CodeBoarding (https://github.com/CodeBoarding/CodeBoarding) commit 13adc4a0, MIT License, Copyright (c) 2025 CodeBoarding. See LICENSE in this directory.
+# Source: tests/static_analyzer/names/conftest.py; license: chunkhound/code_mapper/c4/codeboarding/LICENSE (repository root).
+# Changes: imports point at chunkhound.code_mapper.c4.codeboarding.names.
+# Changes: the call-graph helper graph_from_layout was left out.
 """Builders shared by the names tests: units straight from qualified names, no engine."""
 
 from pathlib import Path

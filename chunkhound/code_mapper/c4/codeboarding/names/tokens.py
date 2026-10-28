@@ -1,4 +1,5 @@
-# Copied from CodeBoarding (MIT, see ../LICENSE) at 13adc4a0: static_analyzer/clustering/names/tokens.py.
+# Copied from CodeBoarding (https://github.com/CodeBoarding/CodeBoarding) commit 13adc4a0, MIT License, Copyright (c) 2025 CodeBoarding. See LICENSE in this directory.
+# Source: static_analyzer/clustering/names/tokens.py; license: ../LICENSE.
 # Changes: added the module constant QUALIFIED_NAME_DELIMITER (was ClusteringConfig.QUALIFIED_NAME_DELIMITER).
 """Words: how a qualified name is split, stemmed and classified."""
 

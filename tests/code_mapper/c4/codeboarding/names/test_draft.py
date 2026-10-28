@@ -1,5 +1,5 @@
-# Copied from CodeBoarding (MIT, see chunkhound/code_mapper/c4/codeboarding/LICENSE) at 13adc4a0:
-# tests/static_analyzer/names/test_draft.py.
+# Copied from CodeBoarding (https://github.com/CodeBoarding/CodeBoarding) commit 13adc4a0, MIT License, Copyright (c) 2025 CodeBoarding. See LICENSE in this directory.
+# Source: tests/static_analyzer/names/test_draft.py; license: chunkhound/code_mapper/c4/codeboarding/LICENSE (repository root).
 # Changes: imports point at chunkhound.code_mapper.c4.codeboarding.names.
 """Drafting: the frontier grouped into components, the ladder below them, and the guard."""
 

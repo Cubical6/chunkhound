@@ -1,6 +1,7 @@
-# Copied from CodeBoarding (MIT, see ../LICENSE) at 13adc4a0: static_analyzer/clustering/names/inventory.py.
-# Changes: kept PROJECT_MANIFESTS, Unit, Trie, TrieNode, _project_root and _is_project_root; dropped units_from_graph(s)
-# and with them the CallGraph and normalize_repo_path imports (the call graph does not come along).
+# Copied from CodeBoarding (https://github.com/CodeBoarding/CodeBoarding) commit 13adc4a0, MIT License, Copyright (c) 2025 CodeBoarding. See LICENSE in this directory.
+# Source: static_analyzer/clustering/names/inventory.py; license: ../LICENSE.
+# Changes: kept PROJECT_MANIFESTS, Unit, Trie, TrieNode, _project_root and _is_project_root; dropped units_from_graph(s).
+# Changes: removed CallGraph and normalize_repo_path imports (the call graph does not come along).
 """Units and the trie of their positions.
 
 A unit is one file: the qualified names the engine declared in it. Its *position* is the

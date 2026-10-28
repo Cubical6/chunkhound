@@ -1,7 +1,8 @@
-# Copied from CodeBoarding (MIT, see ../LICENSE) at 13adc4a0: infra/clustering_ids.py.
-# Changes: kept only what names/ uses: ScopeId, ComponentId, ROOT_SCOPE_ID, CodeBoardingClusterIds;
-# `type X = ...` statements became `TypeAlias` (Python 3.10); dropped ClusterId, GroupId, GraphClusterIds,
-# from_graph_id(s) and is_self_or_descendant, which belong to the call-graph clustering.
+# Copied from CodeBoarding (https://github.com/CodeBoarding/CodeBoarding) commit 13adc4a0, MIT License, Copyright (c) 2025 CodeBoarding. See LICENSE in this directory.
+# Source: infra/clustering_ids.py; license: ../LICENSE.
+# Changes: kept only what names/ uses: ScopeId, ComponentId, ROOT_SCOPE_ID, CodeBoardingClusterIds.
+# Changes: `type X = ...` statements became `TypeAlias` (Python 3.10).
+# Changes: dropped ClusterId, GroupId, GraphClusterIds, from_graph_id(s) and is_self_or_descendant (call-graph only).
 """Identifier types and operations shared across clustering layers."""
 
 from typing import TypeAlias

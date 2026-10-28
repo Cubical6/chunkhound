@@ -1,6 +1,8 @@
-# Copied from CodeBoarding (MIT, see ../LICENSE) at 13adc4a0: static_analyzer/clustering/names/draft.py.
-# Changes: imports point at chunkhound.code_mapper.c4.codeboarding.names; QUALIFIED_NAME_DELIMITER comes from tokens.py;
-# ids come from names/ids.py.
+# Copied from CodeBoarding (https://github.com/CodeBoarding/CodeBoarding) commit 13adc4a0, MIT License, Copyright (c) 2025 CodeBoarding. See LICENSE in this directory.
+# Source: static_analyzer/clustering/names/draft.py; license: ../LICENSE.
+# Changes: imports point at chunkhound.code_mapper.c4.codeboarding.names.
+# Changes: QUALIFIED_NAME_DELIMITER comes from tokens.py.
+# Changes: ids come from names/ids.py.
 """The ladder: a scope's rules drafted one rung at a time, the grouper its one judgement."""
 
 from __future__ import annotations
