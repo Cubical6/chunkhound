@@ -145,6 +145,30 @@ async def test_merged_arrow_labels(c4_llm_manager, scripted):
     assert len(fallback_label(["a" * 80, "b"])) <= 60
 
 
+@pytest.mark.parametrize("length", [60, 61, 100])
+async def test_single_title_label_is_bounded_without_model_calls(
+    c4_llm_manager, length
+):
+    llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
+    title = "a" * length
+    relations = [relation("s", "x", title), relation("c", "x", title)]
+    titles = {item.id: item.title for item in relations}
+    queue = RetryQueue()
+    result = await label_arrows(
+        [arrow(underlying=list(titles))],
+        titles_by_relation=titles,
+        locked={},
+        overrides={},
+        llm=llm,
+        retries=queue,
+    )
+    assert result[0].label == title[:60]
+    assert all(item.title == title for item in relations)
+    assert all(value == title for value in titles.values())
+    assert await queue.drain() == 0
+    assert llm.calls == 0
+
+
 async def test_long_label_rejected_then_retried(c4_llm_manager, scripted):
     seen = []
 

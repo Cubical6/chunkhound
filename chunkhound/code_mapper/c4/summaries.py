@@ -117,7 +117,7 @@ def _prepare_labels(
         elif key in locked:
             arrow.label = locked[key]
         elif len(unique) <= 1:
-            arrow.label = unique[0] if unique else ""
+            arrow.label = fallback_label(unique)
         else:
             pending[key].append(arrow)
             titles[key] = unique

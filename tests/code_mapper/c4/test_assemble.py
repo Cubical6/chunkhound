@@ -219,13 +219,10 @@ def test_relations_collapse_and_overrides_win():
 
 
 def test_coverage_via_shared_cited_files():
-    files = {
-        "component:a": ["a.py"],
-        "component:b": ["b.py"],
-        "container:app": ["a.py", "b.py"],
-        "systeem:app": ["a.py", "b.py", "shared.py"],
-        "container:doc": [],
-    }
+    _, _, evidence = assemble(assembly_input())
+    files = evidence.element_files
+    assert files["container:app"] == ["a.py", "b.py", "shared.py"]
+    assert files["systeem:app"] == ["a.py", "b.py"]
     direct = {"container:app": ["shared.py"]}
     topics = [
         TopicSources("shared", ("shared.py",)),
@@ -236,8 +233,14 @@ def test_coverage_via_shared_cited_files():
     assert result["component:b"].status == "undescribed"
     assert result["component:a"].topics == ["a", "both"]
     assert result["container:app"].topics == ["both", "a", "shared"]
-    assert result["systeem:app"].topics == ["both", "a", "shared"]
-    assert result["container:doc"].status == "none"
+    assert result["systeem:app"].topics == ["a", "both"]
+    assert result["container:dashboard"].status == "none"
+    direct_only = compute_coverage(
+        element_files=files, direct_files=direct, topics=[topics[0]]
+    )
+    assert {
+        id for id, coverage in direct_only.items() if coverage.status == "covered"
+    } == {"container:app"}
     trial = compute_coverage(element_files=files, direct_files=direct, topics=None)
     assert trial["component:a"].status == "not_computed"
-    assert trial["container:doc"].status == "none"
+    assert trial["container:dashboard"].status == "none"

@@ -126,7 +126,7 @@ Alle aanroepen via `complete_structured_typed` (`chunkhound/interfaces/llm_provi
 - **Documentatierelaties:** een relatie tussen twee _aangetroffen_ interne elementen zonder statische verwijzing komt niet op de kaart maar als niet-geverifieerd citaat in het bewijs (R1; rij 1). Een relatie met een persoon, extern systeem of _gedocumenteerd_ element komt op de kaart met status _gedocumenteerd_ (C4-log rij 21, 22, 25).
 - **Documentatie-eindpunten (uitvoeringsbesluit S):** een geverifieerd `DocElement.kind` bindt de kale relatieterm aan die soort en de toegewezen identiteit. Bij dezelfde systeem- en containernaam kiest een containerhint dus de container. Zonder hint moet de modelmatch uniek zijn; onopgeloste ambiguïteit blijft een niet-geverifieerd citaat, zonder pijl.
 - **Dekking:** na de topics, zonder taalmodel, per element via gedeelde geciteerde bestanden; component zonder topic → `undescribed`; bij `--plan` "niet berekend"; _gedocumenteerd_ element zonder bestanden heeft geen dekking; een bestand rechtstreeks onder een container levert alleen dekking voor die container (rij 23, 38; C4-log rij 12, 13, 25).
-- **Samengevoegde pijlen:** views context, containers en componenten per container worden deterministisch afgeleid; één onderliggende titel → overgenomen zonder aanroep (rij 35; C4-log rij 27, 28).
+- **Samengevoegde pijlen:** views context, containers en componenten per container worden deterministisch afgeleid; één onderliggende titel → overgenomen zonder aanroep, voor het label afgekapt op maximaal 60 tekens zonder de relatietitel te wijzigen (rij 35; C4-log rij 27, 28).
 
 ## 10. Schema's en lockbestand
 

@@ -157,6 +157,9 @@ class _Assembly:
                 self.files[current].append(file)
                 # Implementation files are code sources even without imports.
                 self.cite(current, file, 1, "code")
+                # Direct container files do not contribute ancestor coverage.
+                if self.elements[owner].kind != "component":
+                    break
                 current = self.elements[current].parent
             if file in self.inp.references.imports_only_files:
                 element = self.elements[owner]
@@ -306,8 +309,8 @@ class _Assembly:
 def assemble(inp: AssemblyInput) -> tuple[list[Element], list[Relation], C4Evidence]:
     """Consume finalized retry outcomes; writer assigns the shared run ID later.
 
-    element_files includes deduplicated container/system rollups and directly
-    owned files. Documentation citations are not implementation-file membership.
+    element_files rolls component files up to their container/system; directly
+    owned files stay with the container. Documentation is not file membership.
     """
     state = _Assembly(inp)
     state.runtime()
