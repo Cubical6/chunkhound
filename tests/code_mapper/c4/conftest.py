@@ -81,7 +81,7 @@ def default_answers() -> dict[str, Answer]:
     quote = "Een beheerder gebruikt de webwinkel via Stripe."
     citation = {"file": "README.md", "start_line": 3, "end_line": 3, "quote": quote}
     return {
-        "classify": {"classifications": {"requests": "library"}},
+        "classify": {"classifications": [{"key": "requests", "value": "library"}]},
         "merge": {
             "components": [
                 {
