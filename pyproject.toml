@@ -164,15 +164,16 @@ version-file = "chunkhound/_version.py"
 
 [tool.hatch.build]
 include = [
-    "chunkhound/**/*.py",
-    "chunkhound/py.typed",
-    "chunkhound/code_mapper/prompts/*.md",
-    "chunkhound/code_mapper/c4/codeboarding/LICENSE",
-    "chunkhound/autodoc/prompts/*.txt",
-    "chunkhound/autodoc/assets/**/*",
-    "chunkhound/watchman_runtime/README.md",
-    "chunkhound/watchman_runtime/platforms/*/manifest.json",
-    "tests/fixtures/yaml/**/*",
+  "chunkhound/**/*.py",
+  "chunkhound/py.typed",
+  "chunkhound/code_mapper/prompts/*.md",
+  "chunkhound/code_mapper/c4/codeboarding/LICENSE",
+  "chunkhound/code_mapper/c4/schemas/*.json",
+  "chunkhound/autodoc/prompts/*.txt",
+  "chunkhound/autodoc/assets/**/*",
+  "chunkhound/watchman_runtime/README.md",
+  "chunkhound/watchman_runtime/platforms/*/manifest.json",
+  "tests/fixtures/yaml/**/*",
 ]
 
 [tool.hatch.build.targets.wheel]

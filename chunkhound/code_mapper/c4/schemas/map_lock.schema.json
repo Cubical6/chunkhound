@@ -1,0 +1,312 @@
+{
+  "$defs": {
+    "LockedClassification": {
+      "additionalProperties": false,
+      "properties": {
+        "markers": {
+          "items": {
+            "enum": [
+              "fallback",
+              "trial",
+              "disputed",
+              "undescribed",
+              "imports_only",
+              "provisional",
+              "not_merged",
+              "not_classified"
+            ],
+            "type": "string"
+          },
+          "title": "Markers",
+          "type": "array"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        },
+        "votes": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Votes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "value",
+        "votes",
+        "markers"
+      ],
+      "title": "LockedClassification",
+      "type": "object"
+    },
+    "LockedComponent": {
+      "additionalProperties": false,
+      "properties": {
+        "container": {
+          "title": "Container",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Description"
+        },
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "groups": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Groups",
+          "type": "array"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "container",
+        "groups",
+        "files"
+      ],
+      "title": "LockedComponent",
+      "type": "object"
+    },
+    "LockedDocumented": {
+      "additionalProperties": false,
+      "properties": {
+        "elements": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Elements",
+          "type": "array"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "relations": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Relations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "hashes",
+        "elements",
+        "relations"
+      ],
+      "title": "LockedDocumented",
+      "type": "object"
+    },
+    "LockedRelation": {
+      "additionalProperties": false,
+      "properties": {
+        "fingerprint": {
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "fingerprint"
+      ],
+      "title": "LockedRelation",
+      "type": "object"
+    },
+    "Overrides": {
+      "additionalProperties": false,
+      "properties": {
+        "classifications": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Classifications",
+          "type": "object"
+        },
+        "descriptions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Descriptions",
+          "type": "object"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "object"
+        },
+        "names": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Names",
+          "type": "object"
+        },
+        "placements": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Placements",
+          "type": "object"
+        },
+        "titles": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Titles",
+          "type": "object"
+        }
+      },
+      "title": "Overrides",
+      "type": "object"
+    },
+    "ScopeLock": {
+      "additionalProperties": false,
+      "properties": {
+        "base_sha": {
+          "title": "Base Sha",
+          "type": "string"
+        },
+        "classifications": {
+          "additionalProperties": {
+            "$ref": "#/$defs/LockedClassification"
+          },
+          "title": "Classifications",
+          "type": "object"
+        },
+        "components": {
+          "additionalProperties": {
+            "$ref": "#/$defs/LockedComponent"
+          },
+          "title": "Components",
+          "type": "object"
+        },
+        "containers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Containers",
+          "type": "object"
+        },
+        "documented": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LockedDocumented"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "overrides": {
+          "$ref": "#/$defs/Overrides"
+        },
+        "relations": {
+          "additionalProperties": {
+            "$ref": "#/$defs/LockedRelation"
+          },
+          "title": "Relations",
+          "type": "object"
+        },
+        "summaries": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Summaries",
+          "type": "object"
+        },
+        "system": {
+          "title": "System",
+          "type": "string"
+        },
+        "tombstones": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Tombstones",
+          "type": "object"
+        },
+        "tree_spec": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Tree Spec",
+          "type": "object"
+        }
+      },
+      "required": [
+        "base_sha",
+        "system",
+        "containers",
+        "tree_spec",
+        "components",
+        "tombstones",
+        "relations",
+        "classifications",
+        "documented",
+        "summaries",
+        "overrides"
+      ],
+      "title": "ScopeLock",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "scopes": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ScopeLock"
+      },
+      "title": "Scopes",
+      "type": "object"
+    },
+    "version": {
+      "default": 1,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "scopes"
+  ],
+  "title": "MapLock",
+  "type": "object"
+}

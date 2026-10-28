@@ -1,0 +1,372 @@
+{
+  "$defs": {
+    "Coverage": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "covered",
+            "undescribed",
+            "not_computed",
+            "none"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "topics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Topics",
+          "type": "array"
+        }
+      },
+      "required": [
+        "status",
+        "topics"
+      ],
+      "title": "Coverage",
+      "type": "object"
+    },
+    "Element": {
+      "additionalProperties": false,
+      "properties": {
+        "coverage": {
+          "$ref": "#/$defs/Coverage"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Description"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "system",
+            "container",
+            "storage",
+            "component",
+            "external",
+            "person"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "markers": {
+          "items": {
+            "enum": [
+              "fallback",
+              "trial",
+              "disputed",
+              "undescribed",
+              "imports_only",
+              "provisional",
+              "not_merged",
+              "not_classified"
+            ],
+            "type": "string"
+          },
+          "title": "Markers",
+          "type": "array"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parent"
+        },
+        "status": {
+          "enum": [
+            "found",
+            "documented"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "description",
+        "status",
+        "parent",
+        "markers",
+        "coverage"
+      ],
+      "title": "Element",
+      "type": "object"
+    },
+    "HistoryEdge": {
+      "additionalProperties": false,
+      "properties": {
+        "from_id": {
+          "title": "From Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "continuation",
+            "split",
+            "merge",
+            "new",
+            "removed"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "to_id": {
+          "title": "To Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from_id",
+        "to_id",
+        "kind"
+      ],
+      "title": "HistoryEdge",
+      "type": "object"
+    },
+    "MergedArrow": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "title": "From",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "markers": {
+          "items": {
+            "enum": [
+              "fallback",
+              "trial",
+              "disputed",
+              "undescribed",
+              "imports_only",
+              "provisional",
+              "not_merged",
+              "not_classified"
+            ],
+            "type": "string"
+          },
+          "title": "Markers",
+          "type": "array"
+        },
+        "to": {
+          "title": "To",
+          "type": "string"
+        },
+        "underlying": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Underlying",
+          "type": "array"
+        },
+        "view": {
+          "title": "View",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "from",
+        "to",
+        "view",
+        "label",
+        "underlying",
+        "markers"
+      ],
+      "title": "MergedArrow",
+      "type": "object"
+    },
+    "Relation": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "title": "From",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "markers": {
+          "items": {
+            "enum": [
+              "fallback",
+              "trial",
+              "disputed",
+              "undescribed",
+              "imports_only",
+              "provisional",
+              "not_merged",
+              "not_classified"
+            ],
+            "type": "string"
+          },
+          "title": "Markers",
+          "type": "array"
+        },
+        "reference_counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "enum": [
+              "import",
+              "call",
+              "inherit"
+            ]
+          },
+          "title": "Reference Counts",
+          "type": "object"
+        },
+        "status": {
+          "enum": [
+            "found",
+            "documented"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "to": {
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "from",
+        "to",
+        "title",
+        "status",
+        "reference_counts",
+        "markers"
+      ],
+      "title": "Relation",
+      "type": "object"
+    },
+    "RunInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "fallback_count": {
+          "title": "Fallback Count",
+          "type": "integer"
+        },
+        "head_sha": {
+          "title": "Head Sha",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "full",
+            "trial"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "renames": {
+          "title": "Renames",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "scope": {
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "schema_version",
+        "head_sha",
+        "scope",
+        "fallback_count",
+        "renames"
+      ],
+      "title": "RunInfo",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "elements": {
+      "items": {
+        "$ref": "#/$defs/Element"
+      },
+      "title": "Elements",
+      "type": "array"
+    },
+    "history": {
+      "items": {
+        "$ref": "#/$defs/HistoryEdge"
+      },
+      "title": "History",
+      "type": "array"
+    },
+    "merged": {
+      "items": {
+        "$ref": "#/$defs/MergedArrow"
+      },
+      "title": "Merged",
+      "type": "array"
+    },
+    "relations": {
+      "items": {
+        "$ref": "#/$defs/Relation"
+      },
+      "title": "Relations",
+      "type": "array"
+    },
+    "run": {
+      "$ref": "#/$defs/RunInfo"
+    }
+  },
+  "required": [
+    "run",
+    "elements",
+    "relations",
+    "merged",
+    "history"
+  ],
+  "title": "C4Model",
+  "type": "object"
+}
