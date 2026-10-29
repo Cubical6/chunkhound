@@ -476,6 +476,11 @@ def scan_directory_files(
     return files
 
 
+def _use_rust_walk(ignore_engine: object | None) -> bool:
+    """Map requires directory pruning and explicit Git-ignore activation."""
+    return _get_use_rust() and not getattr(ignore_engine, "requires_python_walk", False)
+
+
 def walk_directory_tree(
     start_path: Path,
     root_directory: Path,
@@ -506,7 +511,7 @@ def walk_directory_tree(
     """
     # Fast Rust path: ignore crate handles gitignore + exclude_patterns natively.
     # ignore_engine is applied as a post-filter so Rust handles the expensive I/O walk.
-    if _get_use_rust():
+    if _use_rust_walk(ignore_engine):
         _exts, _names, _has_complex = summarize_include_patterns(patterns)
         # "**/*" is the unrestricted sentinel IndexingConfig injects for
         # index_unknown_files=True (see indexing_coordinator.py's
