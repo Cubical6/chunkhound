@@ -265,6 +265,7 @@ def test_watchman_adapter_keeps_file_events_filter_gated(
     assert recorded == [("created", blocked_file, False)]
 
 
+@pytest.mark.usefixtures("fake_watchman_listener")
 def test_private_watchman_sidecar_probe_ready_requires_version_response(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -288,6 +289,7 @@ def test_private_watchman_sidecar_probe_ready_requires_version_response(
     assert sidecar._probe_ready_sync() is False
 
 
+@pytest.mark.usefixtures("fake_watchman_listener")
 @pytest.mark.asyncio
 async def test_cleanup_stale_state_ignores_failed_log_without_metadata(
     tmp_path: Path,

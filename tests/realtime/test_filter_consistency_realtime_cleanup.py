@@ -185,6 +185,7 @@ async def test_watchdog_delete_admits_previously_indexed_excluded_file(
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git required")
+@pytest.mark.usefixtures("fake_watchman_listener")
 @pytest.mark.asyncio
 async def test_watchman_translation_filters_gitignored_worktree_file(
     tmp_path: Path,
@@ -230,6 +231,7 @@ async def test_watchman_translation_filters_gitignored_worktree_file(
         services.provider.disconnect()
 
 
+@pytest.mark.usefixtures("fake_watchman_listener")
 @pytest.mark.asyncio
 async def test_watchman_delete_admits_previously_indexed_excluded_file(
     tmp_path: Path,

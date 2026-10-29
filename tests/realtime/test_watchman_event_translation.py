@@ -82,6 +82,7 @@ async def _wait_for_realtime_idle(
     raise AssertionError("Timed out waiting for realtime service to become idle")
 
 
+@pytest.mark.usefixtures("fake_watchman_listener")
 @pytest.mark.asyncio
 async def test_watchman_mount_aware_startup_reuses_primary_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -666,6 +667,7 @@ async def test_watchman_start_preserves_logical_root_for_junction_scope_discover
         services.provider.disconnect()
 
 
+@pytest.mark.usefixtures("fake_watchman_listener")
 @pytest.mark.asyncio
 async def test_watchman_mount_aware_startup_uses_fallback_planning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1033,6 +1035,7 @@ async def test_watchman_subscription_pdu_deletes_indexed_directory(
         services.provider.disconnect()
 
 
+@pytest.mark.usefixtures("fake_watchman_listener")
 @pytest.mark.asyncio
 async def test_watchman_relative_root_mapping_and_filtering(
     tmp_path: Path,
@@ -1305,6 +1308,7 @@ async def test_watchman_multi_scope_translation_routes_colliding_subscription_na
         services.provider.disconnect()
 
 
+@pytest.mark.usefixtures("fake_watchman_listener")
 @pytest.mark.asyncio
 async def test_watchman_unexpected_file_type_warning_includes_entry_context(
     tmp_path: Path,
@@ -1397,6 +1401,7 @@ async def test_watchman_translation_errors_increment_pipeline_counter(
         services.provider.disconnect()
 
 
+@pytest.mark.usefixtures("fake_watchman_listener")
 @pytest.mark.asyncio
 async def test_watchman_scope_mapping_failure_requests_resync(
     tmp_path: Path,
@@ -1483,6 +1488,7 @@ async def test_watchman_scope_mapping_failure_requests_resync(
         services.provider.disconnect()
 
 
+@pytest.mark.usefixtures("fake_watchman_listener")
 @pytest.mark.asyncio
 async def test_watchman_translation_failure_requests_resync(
     tmp_path: Path,
@@ -1654,6 +1660,7 @@ async def test_watchman_start_preserves_logical_root_for_scope_planning(
         services.provider.disconnect()
 
 
+@pytest.mark.usefixtures("fake_watchman_listener")
 @pytest.mark.asyncio
 async def test_watchman_junction_scope_translation_preserves_logical_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1723,6 +1730,7 @@ async def test_watchman_junction_scope_translation_preserves_logical_path(
         services.provider.disconnect()
 
 
+@pytest.mark.usefixtures("fake_watchman_listener")
 @pytest.mark.asyncio
 async def test_watchman_junction_scope_filter_uses_logical_scope_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -303,6 +303,7 @@ def test_watchman_cli_session_queue_overflow_reports_drop_and_calls_handler(
     ]
 
 
+@pytest.mark.usefixtures("fake_watchman_listener")
 @pytest.mark.asyncio
 async def test_watchman_bridge_queue_overflow_reports_exact_drop_magnitude(
     tmp_path: Path,
@@ -354,6 +355,7 @@ async def test_watchman_bridge_queue_overflow_reports_exact_drop_magnitude(
         services.provider.disconnect()
 
 
+@pytest.mark.usefixtures("fake_watchman_listener")
 @pytest.mark.asyncio
 async def test_watchman_bridge_queue_overflow_reports_exact_drop_count(
     tmp_path: Path,
