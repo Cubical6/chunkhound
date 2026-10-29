@@ -1,6 +1,6 @@
 # AutoDoc C4-kaart — ontwerp
 
-Status: onafhankelijke specificatiereview goedgekeurd; wacht op gebruikersgoedkeuring van de geschreven specificatie vóór het implementatieplan; geen implementatiegoedkeuring.
+Status: geschreven specificatie door de gebruiker goedgekeurd op 2026-10-29; onafhankelijke review goedgekeurd; implementatieplan geschreven en zelfgecontroleerd, wacht op afzonderlijke plangoedkeuring. Geen C4-productimplementatie gestart.
 
 Besluiten: [besluitenlog](../decisions/2026-10-27-autodoc-c4-map.md), in het bijzonder rij 32–48 en 52. Model: [autodoc-c4-map](../models/autodoc-c4-map.md). Geen programregister; de afzonderlijke `map`-designsessie is een afhankelijkheid, niet stilzwijgend onderdeel van deze uitvoering.
 
