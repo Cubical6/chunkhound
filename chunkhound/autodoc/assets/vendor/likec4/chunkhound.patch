@@ -10,6 +10,205 @@ index 700483107..567411411 100644
      "oxlint": "catalog:",
      "oxlint-tsgolint": "catalog:",
      "rimraf": "^6.1.3",
+diff --git a/packages/core/src/compute-view/element-view/boundary-relations.spec.ts b/packages/core/src/compute-view/element-view/boundary-relations.spec.ts
+new file mode 100644
+index 000000000..edbc9bf1d
+--- /dev/null
++++ b/packages/core/src/compute-view/element-view/boundary-relations.spec.ts
+@@ -0,0 +1,57 @@
++import { describe, expect, it } from "vitest";
++import { Builder } from "../../builder";
++import { TestHelper } from "./__test__/TestHelper";
++
++describe("explicit boundary relationships", () => {
++  it("keeps direct relationships alongside expanded child relationships in both directions", () => {
++    const t = TestHelper.from(
++      Builder.specification({
++        elements: { el: {} },
++        metadataKeys: ["chunkhound_id"],
++      }).model(({ el, rel }, m) =>
++        m(
++          el("app"),
++          el("app.first"),
++          el("app.second"),
++          el("external"),
++          rel("app", "external", {
++            title: "Direct outgoing",
++            metadata: { chunkhound_id: "outgoing" },
++          }),
++          rel("app.first", "external", {
++            title: "Child outgoing",
++            metadata: { chunkhound_id: "child-outgoing" },
++          }),
++          rel("external", "app", {
++            title: "Direct incoming",
++            metadata: { chunkhound_id: "incoming" },
++          }),
++          rel("external", "app.second", {
++            title: "Child incoming",
++            metadata: { chunkhound_id: "child-incoming" },
++          }),
++          rel("app", "external", "Unmarked outgoing"),
++          rel("external", "app", "Unmarked incoming"),
++        ),
++      ),
++    );
++    const expanded = t.computeView(
++      TestHelper.$rules(t.$include("app"), t.$include("app.first"), t.$include("app.second"), t.$include("external")),
++    );
++    expect(expanded.edges.map((edge) => [edge.source, edge.target, edge.label]).sort()).toEqual(
++      [
++        ["app", "external", "Direct outgoing"],
++        ["app.first", "external", "Child outgoing"],
++        ["external", "app", "Direct incoming"],
++        ["external", "app.second", "Child incoming"],
++      ].sort(),
++    );
++    const collapsed = t.computeView(TestHelper.$rules(t.$include("app"), t.$include("external")));
++    expect(collapsed.edges.map((edge) => [edge.source, edge.target, edge.relations.length]).sort()).toEqual(
++      [
++        ["app", "external", 3],
++        ["external", "app", 3],
++      ].sort(),
++    );
++  });
++});
+diff --git a/packages/core/src/compute-view/element-view/clean-connections.ts b/packages/core/src/compute-view/element-view/clean-connections.ts
+index bab764329..f048f37e9 100644
+--- a/packages/core/src/compute-view/element-view/clean-connections.ts
++++ b/packages/core/src/compute-view/element-view/clean-connections.ts
+@@ -1,5 +1,5 @@
+-import { pipe, prop, reduce } from 'remeda'
+-import type { RelationshipModel } from '../../model'
++import { pipe, prop, reduce } from "remeda";
++import type { RelationshipModel } from "../../model";
+ import {
+   ConnectionModel,
+   differenceConnections,
+@@ -9,19 +9,31 @@ import {
+   isIncoming,
+   isOutgoing,
+   mergeConnections,
+-} from '../../model'
+-import type { AnyAux } from '../../types'
+-import { intersection, union } from '../../utils'
+-import { ifilter, toSet } from '../../utils/iterable'
++} from "../../model";
++import type { AnyAux } from "../../types";
++import { intersection, union } from "../../utils";
++import { ifilter, toSet } from "../../utils/iterable";
+ 
+ export function allRelationshipsFrom(connections: Iterable<ConnectionModel>): Set<RelationshipModel> {
+-  const relations = new Set<RelationshipModel>()
++  const relations = new Set<RelationshipModel>();
+   for (const c of connections) {
+     for (const rel of c.relations) {
+-      relations.add(rel)
++      relations.add(rel);
++    }
++  }
++  return relations;
++}
++
++function preserveNeutralDirectRelationships<A extends AnyAux>(
++  connection: ConnectionModel<A>,
++  redundant: Set<RelationshipModel<A>>,
++): void {
++  for (const rel of connection.directRelations) {
++    const metadata = rel.$relationship.metadata;
++    if (metadata && "chunkhound_id" in metadata && metadata["chunkhound_id"]) {
++      redundant.delete(rel);
+     }
+   }
+-  return relations
+ }
+ 
+ // function isInOutToDescendant(id: string): (c: ConnectionModel) => boolean {
+@@ -44,59 +56,44 @@ export function findRedundantConnections<A extends AnyAux>(
+     [...connections],
+     mergeConnections,
+     reduce((reducedConnections, connection, _, all) => {
+-      const descendants = findDescendantConnections(all, connection)
+-      const nestedRelations = union(
+-        ...descendants.map(prop('relations')),
+-      )
++      const descendants = findDescendantConnections(all, connection);
++      const nestedRelations = union(...descendants.map(prop("relations")));
+ 
+-      let accum = intersection(connection.relations, nestedRelations)
++      let accum = intersection(connection.relations, nestedRelations);
+ 
+       if (descendants.length > 0) {
+-        accum = union(accum, connection.directRelations)
++        accum = union(accum, connection.directRelations);
+       }
+       // Check if there is any reversed connection to descendant
+       if (findDeepestNestedConnection(all, connection.reversed())) {
+-        accum = union(accum, connection.directRelations)
++        accum = union(accum, connection.directRelations);
+       }
+ 
+       if (accum.size < connection.relations.size) {
+-        const isSourceExpanded = all.some(isAnyInOut(connection.source))
+-        const isTargetExpanded = all.some(isAnyInOut(connection.target))
++        const isSourceExpanded = all.some(isAnyInOut(connection.source));
++        const isTargetExpanded = all.some(isAnyInOut(connection.target));
+ 
+         // Check if source expandaded
+         if (isSourceExpanded) {
+-          accum = union(
+-            accum,
+-            toSet(
+-              ifilter(
+-                connection.relations,
+-                isOutgoing(connection.source),
+-              ),
+-            ),
+-          )
++          accum = union(accum, toSet(ifilter(connection.relations, isOutgoing(connection.source))));
+         }
+ 
+         // Check if target expandaded
+         if (isTargetExpanded) {
+-          accum = union(
+-            accum,
+-            toSet(
+-              ifilter(
+-                connection.relations,
+-                isIncoming(connection.target),
+-              ),
+-            ),
+-          )
++          accum = union(accum, toSet(ifilter(connection.relations, isIncoming(connection.target))));
+         }
+       }
++      // AutoDoc neutral relationships are independent evidence, not duplicates
++      // of descendant relationships. Unmarked models keep upstream semantics.
++      preserveNeutralDirectRelationships(connection, accum);
+ 
+       if (accum.size > 0) {
+-        reducedConnections.push(connection.update(accum))
++        reducedConnections.push(connection.update(accum));
+       }
+ 
+-      return reducedConnections
++      return reducedConnections;
+     }, [] as ConnectionModel<A>[]),
+-  )
++  );
+ }
+ 
+ /**
+@@ -109,8 +106,5 @@ export function findRedundantConnections<A extends AnyAux>(
+ export function cleanRedundantRelationships<A extends AnyAux>(
+   connections: Iterable<ConnectionModel<A>>,
+ ): Array<ConnectionModel<A>> {
+-  return differenceConnections(
+-    connections,
+-    findRedundantConnections(connections),
+-  )
++  return differenceConnections(connections, findRedundantConnections(connections));
+ }
 diff --git a/packages/diagram/src/chunkhound/metadata.ts b/packages/diagram/src/chunkhound/metadata.ts
 new file mode 100644
 index 000000000..447c259e0
@@ -1961,6 +2160,224 @@ index 88e3f9dc6..0a575b078 100644
    "description": "Toolchain for your architecture diagrams",
    "keywords": [
      "likec4",
+diff --git a/packages/likec4/tsdown.config.mts b/packages/likec4/tsdown.config.mts
+index f4039b4c1..cd3ef379f 100644
+--- a/packages/likec4/tsdown.config.mts
++++ b/packages/likec4/tsdown.config.mts
+@@ -1,137 +1,143 @@
+-import { defineConfig } from '@likec4/devops/tsdown'
+-import { existsSync, readdirSync } from 'node:fs'
+-import { copyFile, cp, mkdir, rm } from 'node:fs/promises'
+-import { resolve } from 'node:path'
+-import { fileURLToPath } from 'node:url'
+-import { $, fs } from 'zx'
++import { defineConfig } from "@likec4/devops/tsdown";
++import { existsSync, readdirSync } from "node:fs";
++import { copyFile, cp, mkdir, rm } from "node:fs/promises";
++import { resolve } from "node:path";
++import { fileURLToPath } from "node:url";
++import { $, fs } from "zx";
+ 
+-$.verbose = true
++$.verbose = true;
+ 
+ async function emptyDir(dir: string) {
+   if (!existsSync(dir)) {
+-    return
++    return;
+   }
+-  console.info('Cleaning: %s', dir)
++  console.info("Cleaning: %s", dir);
+   for (const file of readdirSync(dir)) {
+-    await rm(resolve(dir, file), { recursive: true, force: true })
++    await rm(resolve(dir, file), { recursive: true, force: true });
+   }
+ }
+ 
+ export default defineConfig([
+   {
+     entry: [
+-      'src/vite-plugin/index.ts',
+-      'src/config/index.ts',
+-      'src/model/builder.ts',
+-      'src/model/index.ts',
+-      'src/cli/index.ts',
+-      'src/generators/likec4.ts',
+-      'src/index.ts',
++      "src/vite-plugin/index.ts",
++      "src/config/index.ts",
++      "src/model/builder.ts",
++      "src/model/index.ts",
++      "src/cli/index.ts",
++      "src/generators/likec4.ts",
++      "src/index.ts",
+     ],
+-    platform: 'node',
++    platform: "node",
++    // Ship the patched computation core with the Node/plugin entry points.
++    // Browser internals and copied React artifacts keep their shared core runtime.
++    deps: {
++      onlyBundle: false,
++      alwaysBundle: [/^@likec4\/core(?:\/|$)/],
++    },
+     dts: {
+       build: true,
+     },
+     hooks: {
+-      'build:done': async ({ options: { logger } }) => {
+-        logger.info('\n----- Copy artifacts ------\n')
++      "build:done": async ({ options: { logger } }) => {
++        logger.info("\n----- Copy artifacts ------\n");
+ 
+-        await mkdir('./config', { recursive: true })
+-        await copyFile('../config/schema.json', './config/schema.json')
++        await mkdir("./config", { recursive: true });
++        await copyFile("../config/schema.json", "./config/schema.json");
+ 
+-        await copyVitePluginModules()
+-        logger.success('Copied vite-plugin-modules.d.ts\n')
++        await copyVitePluginModules();
++        logger.success("Copied vite-plugin-modules.d.ts\n");
+ 
+-        await copyReact()
+-        logger.success('Copied @likec4/react\n')
++        await copyReact();
++        logger.success("Copied @likec4/react\n");
+ 
+-        await bundleApp()
+-        logger.success('Bundled likec4-spa\n')
++        await bundleApp();
++        logger.success("Bundled likec4-spa\n");
+ 
+-        await copyMcpAppAssets()
+-        logger.success('Copied mcp-app assets\n')
++        await copyMcpAppAssets();
++        logger.success("Copied mcp-app assets\n");
+ 
+-        await copySkills()
+-        logger.success('Copied skills\n')
++        await copySkills();
++        logger.success("Copied skills\n");
+       },
+     },
+   },
+   {
+     entry: {
+-      'index': './src/vite-plugin/internal.ts',
++      index: "./src/vite-plugin/internal.ts",
+     },
+-    outDir: './dist/vite-plugin/internal',
+-    platform: 'neutral',
++    outDir: "./dist/vite-plugin/internal",
++    platform: "neutral",
+     target: false,
+     minify: false,
+     dts: true,
+   },
+-])
++]);
+ 
+ async function copyVitePluginModules() {
+-  const vitePluginModulesPath = fileURLToPath(import.meta.resolve('@likec4/vite-plugin/modules'))
++  const vitePluginModulesPath = fileURLToPath(import.meta.resolve("@likec4/vite-plugin/modules"));
+   if (!existsSync(vitePluginModulesPath)) {
+-    throw new Error(`vite-plugin modules not found: ${vitePluginModulesPath}`)
++    throw new Error(`vite-plugin modules not found: ${vitePluginModulesPath}`);
+   }
+-  console.info('Copy vite-plugin-modules from %s', vitePluginModulesPath)
+-  await copyFile(vitePluginModulesPath, './vite-plugin-modules.d.ts')
++  console.info("Copy vite-plugin-modules from %s", vitePluginModulesPath);
++  await copyFile(vitePluginModulesPath, "./vite-plugin-modules.d.ts");
+ }
+ 
+ async function copyReact() {
+-  const from = resolve('../react/dist/')
++  const from = resolve("../react/dist/");
+   if (!existsSync(from)) {
+-    throw new Error(`@likec4/react/dist/ not found: ${from}`)
++    throw new Error(`@likec4/react/dist/ not found: ${from}`);
+   }
+-  const to = resolve('./react/')
++  const to = resolve("./react/");
+ 
+-  await emptyDir(to)
+-  await mkdir(to, { recursive: true })
++  await emptyDir(to);
++  await mkdir(to, { recursive: true });
+ 
+-  console.info(`Copy @likec4/react`)
+-  console.info(`  from: ${from}`)
+-  console.info(`  to: ${to}`)
++  console.info(`Copy @likec4/react`);
++  console.info(`  from: ${from}`);
++  console.info(`  to: ${to}`);
+ 
+-  await fs.copy(from, to)
++  await fs.copy(from, to);
+ }
+ 
+ async function bundleApp() {
+-  const from = resolve('../likec4-spa/dist/')
++  const from = resolve("../likec4-spa/dist/");
+   if (!existsSync(from)) {
+-    throw new Error(`likec4 spa not found: ${from}`)
++    throw new Error(`likec4 spa not found: ${from}`);
+   }
+-  const to = resolve('__app__')
++  const to = resolve("__app__");
+ 
+-  await emptyDir(to)
+-  await mkdir(to, { recursive: true })
++  await emptyDir(to);
++  await mkdir(to, { recursive: true });
+ 
+-  console.info(`Copy @likec4/spa`)
+-  console.info(`  from: ${from}`)
+-  console.info(`  to: ${to}`)
++  console.info(`Copy @likec4/spa`);
++  console.info(`  from: ${from}`);
++  console.info(`  to: ${to}`);
+ 
+-  await fs.copy(from, to)
++  await fs.copy(from, to);
+ }
+ 
+ async function copyMcpAppAssets() {
+-  const from = resolve('../mcp/dist/app/')
++  const from = resolve("../mcp/dist/app/");
+   if (!existsSync(from)) {
+-    throw new Error(`@likec4/mcp dist/app not found: ${from}`)
++    throw new Error(`@likec4/mcp dist/app not found: ${from}`);
+   }
+-  const to = resolve('./dist/app/')
++  const to = resolve("./dist/app/");
+ 
+-  await mkdir(to, { recursive: true })
++  await mkdir(to, { recursive: true });
+ 
+-  console.info(`Copy @likec4/mcp app assets`)
+-  console.info(`  from: ${from}`)
+-  console.info(`  to: ${to}`)
++  console.info(`Copy @likec4/mcp app assets`);
++  console.info(`  from: ${from}`);
++  console.info(`  to: ${to}`);
+ 
+-  await fs.copy(from, to)
++  await fs.copy(from, to);
+ }
+ 
+ async function copySkills() {
+-  const skillDir = resolve('../../skills/likec4-dsl')
++  const skillDir = resolve("../../skills/likec4-dsl");
+   if (!existsSync(skillDir)) {
+-    throw new Error(`skills dir not found: ${skillDir}`)
++    throw new Error(`skills dir not found: ${skillDir}`);
+   }
+-  console.info('Copy SKILLs: %s', skillDir)
+-  await cp(skillDir, './skills/likec4-dsl', { recursive: true })
++  console.info("Copy SKILLs: %s", skillDir);
++  await cp(skillDir, "./skills/likec4-dsl", { recursive: true });
+ }
 diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
 index 472213ebb..7b9b6da4d 100644
 --- a/pnpm-lock.yaml

@@ -2,7 +2,8 @@
 
 This directory is the complete publication boundary for the local
 `likec4@1.60.0-chunkhound.1` fork. It modifies LikeC4's native element
-and relationship details; it does not add a renderer or public adapter API.
+and relationship details and preserves selected neutral boundary relationships;
+it does not add a renderer or public adapter API.
 No external fork remote, registry publication, or runtime download is required
 to consume the tarball. Normal npm dependencies still require installation.
 
@@ -10,7 +11,7 @@ to consume the tarball. Normal npm dependencies still require installation.
 
 - `manifest.json`: upstream and local fork commit identities, toolchain, build
   commands, and SHA-256 checksums.
-- `chunkhound.patch`: all six source/package/lockfile changes against the pinned
+- `chunkhound.patch`: all nine source/package/lockfile changes against the pinned
   upstream commit; sufficient to reconstruct the fork without its local Git DB.
 - `likec4-1.60.0-chunkhound.1.tgz`: the native `packages/likec4` package, not the
   monorepo root. Existing `likec4/react` and `likec4/vite-plugin` exports remain.
@@ -39,11 +40,13 @@ The archive is produced at
 parallel tasks can race when React reads diagram declaration files while
 diagram cleans its output. Serial Turbo scheduling avoids that race without
 skipping any native generate, styles, React, SPA, or plugin prerequisite.
-The successful build/pack chain above was repeated from a second clean
-upstream checkout plus the preserved patch. That independently packed archive
-passed the same real-browser contract. Gzip timestamps and embedded build
-identities need not be byte-identical; the checksum identifies this shipped
-archive, not every possible reconstruction.
+The successful build/pack chain above was repeated from a clean upstream
+checkout plus the preserved patch. The reconstructed archive passed the real
+plugin build and computed-model projection contracts: 20 elements, 15 individual
+relationships and 26 views. Native detail navigation was exercised when the
+detail patch was introduced. Gzip timestamps and embedded build identities need
+not be byte-identical; the checksum identifies this shipped archive, not every
+possible reconstruction.
 
 ## Consume
 
@@ -60,6 +63,16 @@ credential-free HTTP(S) or root-relative URLs. URLs with a nonempty parsed
 username/password, malformed URLs, and null/unsafe URLs render as plain labels
 without anchors; valid source and topic URLs retain their original hrefs.
 
+Selected direct container relationships carrying existing `metadata.chunkhound_id`
+remain visible beside expanded components. Ordinary unmarked models retain
+upstream redundancy semantics. The Node/plugin entry points bundle the patched
+core and all imported core subpaths into their shared native chunks; leaving the
+core dependency external would silently install upstream computation instead.
+Browser internals and the copied React artifacts continue sharing their existing
+external core runtime, so native model classes are not mixed across browser
+copies. Package exports, metadata schema and normal dependency installation are
+unchanged.
+
 For a fully local site, use LikeC4's existing `injectFontCss={false}` prop and
 locally bundled `@fontsource-variable/ibm-plex-sans` CSS, as the native SPA does.
 The React default font injector points to a CDN. The clean consumer proof used
@@ -69,8 +82,8 @@ API keys do not activate optional AI integrations during preview.
 
 ## Replace or upgrade
 
-Pin the new upstream commit, rebase only these native detail changes, update
-the local package version, and refresh the lockfile with the pinned pnpm.
+Pin the new upstream commit, rebase these native detail and neutral-boundary
+changes, update the local package version, and refresh the pinned pnpm lockfile.
 Run scoped oxfmt, upstream oxlint and typecheck, then the full native build and
 pack. Exercise an upstream-before/fork-after real consumer with one direct
 plus two nested relations, distinct statuses/sources, exact endpoint actions,

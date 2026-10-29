@@ -5,17 +5,17 @@
     "version": "1.60.0"
   },
   "fork": {
-    "commit": "a50e8566c801c786682647d7df1dd2bbe5438202"
+    "commit": "818a388bfee525a318b3536dea4f5870fb8c0331"
   },
   "patch": {
     "file": "chunkhound.patch",
-    "sha256": "fedde00ac718cdb6aadc110ffdbc2676351c955ab9a1a81a26ada4c8a8e88c20"
+    "sha256": "3aaad00fe9da7b2a39fe48d039f7f706459be59e36b6377060ad1e6530328b1f"
   },
   "artifact": {
     "file": "likec4-1.60.0-chunkhound.1.tgz",
     "package": "likec4",
     "version": "1.60.0-chunkhound.1",
-    "sha256": "b06c127792dc67605e6fc4a4c6ab35ad9d1b835c43143fbda5d7c3caff33d402"
+    "sha256": "9c250f271bc379a1f7911744581c20d14cd5e72eb1472c2339c0e60f9f55cd9d"
   },
   "license": {
     "file": "LICENSE",
@@ -36,7 +36,7 @@
   "reconstruction": {
     "base": "upstream.commit",
     "patch": "chunkhound.patch",
-    "verified": "Clean upstream checkout, patch apply, frozen install, full native build/pack, fresh tarball consumer build, and real browser element/relation/navigation contract.",
+    "verified": "Clean upstream checkout, full patch apply, frozen install, serialized full native build/pack, fresh tarball plugin build, and computed-model projection contracts (20 elements, 15 relationships, 26 views); native detail UI contract retained from initial patch verification.",
     "byteIdenticalArchiveRequired": false
   }
 }
