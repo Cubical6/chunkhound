@@ -1,8 +1,8 @@
 # AutoDoc C4-kaart — ontwerp
 
-Status: onafhankelijke review uitgevoerd; één open UX-keuze (O-TOPIC-UI) vóór gebruikersgoedkeuring van de geschreven specificatie; geen implementatiegoedkeuring.
+Status: onafhankelijke specificatiereview goedgekeurd; wacht op gebruikersgoedkeuring van de geschreven specificatie vóór het implementatieplan; geen implementatiegoedkeuring.
 
-Besluiten: [besluitenlog](../decisions/2026-10-27-autodoc-c4-map.md), in het bijzonder rij 32–48. Model: [autodoc-c4-map](../models/autodoc-c4-map.md). Geen programregister; de afzonderlijke `map`-designsessie is een afhankelijkheid, niet stilzwijgend onderdeel van deze uitvoering.
+Besluiten: [besluitenlog](../decisions/2026-10-27-autodoc-c4-map.md), in het bijzonder rij 32–48 en 52. Model: [autodoc-c4-map](../models/autodoc-c4-map.md). Geen programregister; de afzonderlijke `map`-designsessie is een afhankelijkheid, niet stilzwijgend onderdeel van deze uitvoering.
 
 ## Doel en afbakening
 
@@ -28,7 +28,6 @@ Open issues, gelijk aan model §1:
 
 - **O-DOSSIER · zonder dossier.** Handgeschreven model; geen automatische dossiercontrole of I3-checkpoint. I3-status: niet van toepassing, zonder dossier.
 - **O-MAP · Producent buiten deze scope.** Structuuranalyse, bronclassificatie en identiteitsevolutie worden in `map-structuur-design` uitgewerkt. Die sessie is niet automatisch gesynchroniseerd met latere contractbesluiten. Afstemming is een afhankelijkheid, geen uitgevoerde overdracht; deze sessie stuurt daar niet ongevraagd berichten heen.
-- **O-TOPIC-UI · Selectie in de topicgerichte weergave.** De onafhankelijke review vraagt te bepalen of `Hoort bij` en de topickaart uitsluitend direct gedekte elementen gebruiken of ook opgerold gedekte voorouders. Ook het geval met directe dekking van zowel een container als een component moet expliciet zijn. Dit is een open gebruikerskeuze, geen door de planner te kiezen standaard.
 
 ## Producentgrens: JSON-model
 
@@ -64,7 +63,9 @@ AutoDoc herclassificeert bronnen en status niet. Het bewaart de opgegeven bronne
 
 Voor ieder paar topic/element bewaart AutoDoc een verzameling gedeelde bestanden. Oprollen naar de container en het systeem is de **unie** van directe en onderliggende verzamelingen, niet de som van tellingen. Een topic verschijnt eenmaal per element; gewicht is de grootte van de unie en bepaalt alleen de aflopende volgorde van topiclinks. Gebruik een vaste secundaire volgorde voor gelijke gewichten. Gedeelde containerbestanden geven niet automatisch dekking aan componenten (model R3–R5; rij 12–13, 41).
 
-Alleen gedocumenteerde interne onderdelen zonder implementatiebestanden hebben geen directe dekking. Een container kan wel opgerolde dekking van werkelijk geïmplementeerde kinderen hebben. Zonder dekking verschijnt geen topickaart of regel “Hoort bij”.
+De regel “Hoort bij” en de doelen van de topicview gebruiken **uitsluitend directe dekking**. Opgerolde dekking blijft beschikbaar voor topiclinks bij bovenliggende elementen, maar voegt geen topicdoelen toe. Een topic dat rechtstreeks zowel een container als een component dekt, houdt beide als doel; filter de container niet weg omdat zijn component ook gedekt is. Directe buren in de kaart zijn niet daardoor ook topicdoelen. Eventueel getoonde bovenliggende kaders zijn architectuurcontext, geen extra dekking of extra links in “Hoort bij” (rij 52).
+
+Alleen gedocumenteerde interne onderdelen zonder implementatiebestanden hebben geen directe dekking. Een container kan wel opgerolde dekking van werkelijk geïmplementeerde kinderen hebben. Zonder directe dekking verschijnt geen topickaart of regel “Hoort bij”.
 
 ### Bronlinks
 
@@ -84,13 +85,13 @@ Bekende bronlinks worden native `link`-velden. Tekstbronnen blijven in `metadata
 
 ### Views en bediening
 
-| View                        | Inhoud en toegang                                                                                                                                                            |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Systeemcontext `index`      | Eigen systeem, personen en onderbouwde externe systemen; start op `/architecture/` en kleine homekaart.                                                                      |
-| Containerview               | Alle containers binnen het systeem en hun relevante directe buren op dit abstractieniveau; bereikbaar bij inzoomen op het systeem.                                           |
-| Componentview per container | Alle componenten van die container plus relevante directe buren, op het passende niveau; bereikbaar bij inzoomen op de container.                                            |
-| Focus-view per element      | Gekozen element met directe inkomende/uitgaande relaties en hun andere endpoints; ook zonder relaties blijft het gekozen element zichtbaar. Knop “Focus-view” in de details. |
-| Topicview                   | De door het topic gedekte elementen met hun directe relaties en buren; geen kaart voor een topic zonder dekking.                                                             |
+| View                        | Inhoud en toegang                                                                                                                                                               |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Systeemcontext `index`      | Eigen systeem, personen en onderbouwde externe systemen; start op `/architecture/` en kleine homekaart.                                                                         |
+| Containerview               | Alle containers binnen het systeem en hun relevante directe buren op dit abstractieniveau; bereikbaar bij inzoomen op het systeem.                                              |
+| Componentview per container | Alle componenten van die container plus relevante directe buren, op het passende niveau; bereikbaar bij inzoomen op de container.                                               |
+| Focus-view per element      | Gekozen element met directe inkomende/uitgaande relaties en hun andere endpoints; ook zonder relaties blijft het gekozen element zichtbaar. Knop “Focus-view” in de details.    |
+| Topicview                   | Rechtstreeks door het topic gedekte elementen met hun directe relaties en buren; geen kaart zonder directe dekking. Alleen opgerolde voorouders zijn geen topicdoelen (rij 52). |
 
 Views bevatten expliciet gekozen elementen, geen onbegrensde model-wildcards. Focus- en topicviews gebruiken gerichte relatie-includes zoals `include a -> x` en `include x -> b`, niet het eerder gecorrigeerde algemene patroon. Bij projectie op een hoger niveau bewaart LikeC4 alle onderliggende relaties (rij 22, 40).
 
@@ -114,9 +115,9 @@ Zie [model §2: ontwerpklassendiagram en modulegrenzen](../models/autodoc-c4-map
 
 De volgorde staat in [model §5](../models/autodoc-c4-map.md#5-sequencediagrammen): topics laden, model laden, definitieve pagina's koppelen, dekking oprollen en site schrijven. De bestaande eventuele LLM-topicopschoning blijft los van de kaartvertaling.
 
-Met een bruikbaar model schrijft AutoDoc de DSL, kaartcomponenten, `/architecture/`-pagina en benodigde gegevens. De zijbalk bevat de kaart; de homepagina krijgt een kleine systeemcontext met link naar de volledige kaart. Topicpagina's krijgen via `DocLayout.astro` de regel “Hoort bij” en kleine topicview. Topic-Markdown wordt daarvoor niet aangepast (rij 33, 41, 44).
+Met een bruikbaar model schrijft AutoDoc de DSL, kaartcomponenten, `/architecture/`-pagina en benodigde gegevens. De zijbalk bevat de kaart; de homepagina krijgt een kleine systeemcontext met link naar de volledige kaart. Topicpagina's krijgen via `DocLayout.astro` de regel “Hoort bij” met links naar uitsluitend rechtstreeks gedekte elementen en de kleine topicview van die doelen met hun directe relaties en buren. Topic-Markdown wordt daarvoor niet aangepast (rij 33, 41, 44, 52).
 
-`src/data/architecture.json` bestaat altijd: met publicatiegegevens of expliciet leeg. Het bevat de koppelingen naar view-id's, definitieve topic-URL's en gedekte elementen die het layout nodig heeft. De bestaande zoekindex krijgt records voor containers, componenten, personen en externe systemen met naam, soort, beschrijving, status en focus-view-URL. Geen relatiezoekrecords; bestaande topicrecords behouden hun contract (rij 37, 41).
+`src/data/architecture.json` bestaat altijd: met publicatiegegevens of expliciet leeg. Het bevat de koppelingen naar view-id's, definitieve topic-URL's en de rechtstreeks gedekte elementen voor de topicgerichte UI. De bestaande zoekindex krijgt records voor containers, componenten, personen en externe systemen met naam, soort, beschrijving, status en focus-view-URL. Geen relatiezoekrecords; bestaande topicrecords behouden hun contract (rij 37, 41, 52).
 
 De optionele `ArchitectureMap.astro` en `ArchitectureMiniMap.astro` importeren hun TSX-component rechtstreeks met `client:only="react"`. `DocLayout.astro` ontdekt de **Astro-wrappers** via `import.meta.glob`, niet dynamisch te hydrateren React-tags. `ArchitectureMap.tsx` verzorgt de volledige interactieve kaart; `ArchitectureMiniMap.tsx` de kleine kaarten via `LikeC4View`. Zonder model zijn wrappers, TSX-kaartcomponenten en virtuele LikeC4-imports afwezig (rij 41, gecorrigeerd door rij 46; [Astro client-directives](https://docs.astro.build/en/reference/directives-reference/#client-directives)).
 
@@ -182,6 +183,7 @@ Dit zijn eisen voor de implementatie, **geen reeds geslaagde controles**. Fixtur
 | R1/R11: niveaus en systeemgrens  | Gebouwde site met één systeem, meerdere repositories, container- en componentviews; geen code-elementen of impliciete repositoryfederatie.                                                                                                |
 | R2/R3/R6: onderbouwing en status | Echte details met code/config/doc-bronnen, zichtbaar gedocumenteerde interne onderdelen en relaties; geen topicpijlen of directe dekking voor documentatie-only onderdelen. Producent bepaalt classificatie, consument toont die correct. |
 | R4/R5: overlap en oprollen       | Contracttest met containerbestanden en overlappende covers: unieke bestandsunie, één topiclink, correct gewicht en definitieve URL; geen dekking door alleen dezelfde bestandsnaam in een andere repository.                              |
+| Directe topicdoelen              | Contracttest en browserproef: een rechtstreeks gedekte component krijgt een topiclink en topickaartdoel, zijn alleen opgerold gedekte ouders niet; bij directe container- én componentdekking blijven beide doelen staan. Directe buren/context worden geen extra “Hoort bij”-links; zonder directe dekking ontbreken de regel en minikaart. |
 | R7: samengevoegde relaties       | Gebouwde, aangeklikte uitgezoomde pijl met directe én afgeleide relaties, gemengde status en afzonderlijke bronnen; niets verdwijnt door samenvoegen.                                                                                     |
 | R8/R9: labels                    | Geleverd samenvattend label en deterministische terugval zichtbaar zonder `[...]`; maximaal 60 tekens voor samenvattende labels. Bundeling/cache van de LLM is een producentverplichting, niet een AutoDoc-test.                          |
 | R10: neutrale identiteit         | Hernoemde en botsende/non-ASCII namen leveren geldige DSL en behoud van neutrale metadata; geen claim dat LikeC4-slugs blijvende ids zijn. Identiteitsberekening zelf ligt bij `map`.                                                     |
@@ -197,7 +199,7 @@ Voer bij implementatie de relevante AutoDoc-tests uit, `uv run mypy chunkhound` 
 
 ## Sources en bewijsgrenzen
 
-- Domein, UX en grenzen: besluitenlog rij 11–48; methodiek [C4-abstracties](https://c4model.com/abstractions), [notatie](https://c4model.com/diagrams/notation), [grote modellen](https://c4model.com/faq#does-the-c4-model-scale). De tool is geen bron voor nieuwe domeinclaims.
+- Domein, UX en grenzen: besluitenlog rij 11–48 en 52; methodiek [C4-abstracties](https://c4model.com/abstractions), [notatie](https://c4model.com/diagrams/notation), [grote modellen](https://c4model.com/faq#does-the-c4-model-scale). De tool is geen bron voor nieuwe domeinclaims.
 - Bestaande consumentgrenzen: `chunkhound/autodoc/models.py:15-50`, `index_loader.py:76-105`, `generator.py:44-84,209-290`, `site_writer.py:40-112,124-129`; resourceverpakking `pyproject.toml:165-175`, `template_loader.py`; gezamenlijke bestandspaden `code_mapper/scope.py:19,63-66`.
 - LikeC4 API's: docs-mcp-zoekresultaten voor 1.60.0, plus de hierboven geopende versiegebonden officiële package-, build- en plugindocumentatie. `layoutLikeC4Model` bestaat: JSON plus Builder is een afgewezen alternatief, niet technisch onmogelijk (correctie rij 40). De gekozen DSL/pluginroute blijft staan.
 - **Ontbrekende bronnen:** deze worktree heeft geen eigen ChunkHound-index of gemounte ChunkHound-MCP; `find` mislukte met een onbeschikbaar zoekmodel (404), dus exact `grep`/`read` als fallback. Geen index gestart of uit een andere worktree geleend. Docs-mcp biedt voor Astro alleen 4.16.19, niet major 7; React, React DOM, Vite en `@astrojs/react` ontbreken. Daarvoor officiële web-/releasebronnen gebruikt; geen scrape gestart.
