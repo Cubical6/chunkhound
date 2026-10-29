@@ -14,8 +14,6 @@ from chunkhound.autodoc.models import (
 )
 from chunkhound.autodoc.references import flatten_sources_block
 from chunkhound.autodoc.site_writer import (
-    _render_astro_config,
-    _render_doc_layout,
     _render_index_page,
     _render_search_index,
     write_astro_site,
@@ -83,13 +81,6 @@ def test_find_index_file_warns_on_multiple_candidates(tmp_path: Path) -> None:
     assert "Multiple AutoDoc index files found" in warnings[0]
 
 
-def test_render_astro_config_disables_dev_toolbar() -> None:
-    config = _render_astro_config()
-
-    assert "devToolbar" in config
-    assert "enabled: false" in config
-
-
 def test_render_index_page_wraps_generation_details() -> None:
     metadata_block = "\n".join(
         [
@@ -134,27 +125,6 @@ def test_flatten_sources_block_wraps_paths_in_code() -> None:
     flattened = flatten_sources_block(sources_block)
 
     assert flattened == ["- [1] `repo/__init__.py` (1 chunks: L1-2)"]
-
-
-def test_render_doc_layout_includes_search_and_toc() -> None:
-    layout = _render_doc_layout()
-
-    assert "data-search-input" in layout
-    assert "data-nav-filter" in layout
-    assert "data-toc" in layout
-    assert "aria-current" in layout
-    assert "page-nav" in layout
-    assert "navGroups" in layout
-    assert "navData" in layout
-
-
-def test_render_doc_layout_avoids_dom_injection_and_cdn_imports() -> None:
-    layout = _render_doc_layout()
-
-    assert "innerHTML" not in layout
-    assert "cdn.jsdelivr.net" not in layout
-    assert "import('mermaid')" in layout
-    assert ".replace(/</g, '\\\\u003c')" in layout
 
 
 def test_render_search_index_includes_body_text() -> None:

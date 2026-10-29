@@ -1,10 +1,16 @@
 ---
+import type { MarkdownInstance } from 'astro';
 import '../styles/global.css';
 import site from '../data/site.json';
 import searchIndexData from '../data/search.json';
 import navData from '../data/nav.json';
 const { title, description } = Astro.props;
-const pages = await Astro.glob('../pages/topics/*.md');
+const pages = Object.values(
+  import.meta.glob<MarkdownInstance<{ title?: string; order?: number }>>(
+    '../pages/topics/*.md',
+    { eager: true },
+  ),
+);
 const topics = pages
   .map((page) => ({
     slug: page.url.split('/').filter(Boolean).pop(),
@@ -26,7 +32,9 @@ if (navData && Array.isArray(navData.groups)) {
   navGroups = groups.length ? groups : null;
 }
 const nav = navGroups ? navGroups.flatMap((group) => group.items) : topics;
-const glossaryPages = await Astro.glob('../pages/glossary.md');
+const glossaryPages = Object.values(
+  import.meta.glob('../pages/glossary.md', { eager: true }),
+);
 const hasGlossary = glossaryPages.length > 0;
 const pageTitle = title ? `${title} - ${site.title}` : site.title;
 const normalizePath = (value) => {

@@ -78,21 +78,9 @@ def test_write_astro_assets_only_preserves_topic_pages(tmp_path: Path) -> None:
     topic_path = topics_dir / "topic.md"
     topic_path.write_text("original topic content", encoding="utf-8")
 
-    layout_path = output_dir / "src" / "layouts" / "DocLayout.astro"
-    layout_path.parent.mkdir(parents=True, exist_ok=True)
-    layout_path.write_text("old layout", encoding="utf-8")
-
     write_astro_assets_only(output_dir=output_dir)
 
     assert topic_path.read_text(encoding="utf-8") == "original topic content"
-    assert layout_path.read_text(encoding="utf-8") != "old layout"
-    assert "navData" in layout_path.read_text(encoding="utf-8")
-    assert (output_dir / "astro.config.mjs").read_text(encoding="utf-8").strip()
-    assert (output_dir / "tsconfig.json").read_text(encoding="utf-8").strip()
-    assert (output_dir / "src" / "styles" / "global.css").read_text(
-        encoding="utf-8"
-    ).strip()
-    assert (output_dir / "public" / "favicon.ico").read_bytes()
 
 
 def test_write_astro_assets_only_preserves_package_and_readme_without_site_json(

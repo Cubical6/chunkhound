@@ -343,6 +343,10 @@ chunkhound map /path/to/project --out docs/ --high -j 4
 
 Generate an Astro documentation site from Code Mapper output.
 
+Building the generated Astro 7 / Vite 8 site requires **Node.js 22.23.4 or newer**
+and **npm 9.6.5 or newer**. These requirements apply to the site build, not to
+`chunkhound map`.
+
 ```bash
 chunkhound autodoc [map-in] [options]
 ```
@@ -385,6 +389,17 @@ chunkhound autodoc --assets-only --out-dir docs-site/
 # Full pipeline: map and generate docs
 chunkhound autodoc --out-dir docs-site/ --map-out-dir map-output/ --map-comprehensiveness high
 ```
+
+After generating or refreshing the site assets, install its dependencies and build:
+
+```bash
+npm --prefix docs-site/ install
+npm --prefix docs-site/ run build
+```
+
+To upgrade an existing generated site, run the `--assets-only` example above before
+these npm commands. This refreshes the template without regenerating topic pages;
+back up any customizations to generated template files first.
 
 ## `chunkhound calibrate`
 
