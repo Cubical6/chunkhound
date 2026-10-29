@@ -294,22 +294,27 @@ async def merge_container(
         apply(default(), False)
         return result
     prompt = _merge_prompt(container, pending, known, group_links)
+    report = llm.report(
+        "merge",
+        f"container {json.dumps(container.id)}: {len(pending)} niet-geclaimde groepen",
+    )
 
     async def attempt() -> MergeResult:
-        answer = await llm.call("merge", MergeAnswer, prompt, provider="synthesis")
-        check_merge_answer(answer, pending, container.id)
-        value = MergeResult(
-            _propose_components(answer, container.id, known),
-            sorted(answer.direct),
-            False,
-        )
-        value.titles = _merge_titles(answer, value, container.id, group_links)
-        return value
+        with report.attempt():
+            answer = await llm.call("merge", MergeAnswer, prompt, provider="synthesis")
+            check_merge_answer(answer, pending, container.id)
+            value = MergeResult(
+                _propose_components(answer, container.id, known),
+                sorted(answer.direct),
+                False,
+            )
+            value.titles = _merge_titles(answer, value, container.id, group_links)
+            return value
 
     try:
         apply(await attempt(), False)
     except TransientStepError:
-        retries.defer(f"merge:{container.id}", attempt, default, apply)
+        retries.defer(f"merge:{container.id}", attempt, default, apply, report=report)
     return result
 
 
@@ -349,16 +354,24 @@ async def title_relations(
             }
         )
     )
+    report = llm.report(
+        "titles",
+        f"container {json.dumps(container)}: "
+        f"{len(pending)} nieuwe of gewijzigde relaties",
+    )
 
     async def attempt() -> dict[str, str]:
-        answer = await llm.call("titles", _TitlesAnswer, prompt, provider="synthesis")
-        if Counter(row.fingerprint for row in answer.titles) != Counter(
-            {key: 1 for key in pending}
-        ) or any(not row.title.strip() for row in answer.titles):
-            raise AnswerRejectedError(
-                "titles: every fingerprint must occur exactly once"
+        with report.attempt():
+            answer = await llm.call(
+                "titles", _TitlesAnswer, prompt, provider="synthesis"
             )
-        return {row.fingerprint: row.title for row in answer.titles}
+            if Counter(row.fingerprint for row in answer.titles) != Counter(
+                {key: 1 for key in pending}
+            ) or any(not row.title.strip() for row in answer.titles):
+                raise AnswerRejectedError(
+                    "titles: every fingerprint must occur exactly once"
+                )
+            return {row.fingerprint: row.title for row in answer.titles}
 
     result: dict[str, str] = {}
 
@@ -368,5 +381,5 @@ async def title_relations(
     try:
         apply(await attempt(), False)
     except TransientStepError:
-        retries.defer(f"titles:{container}", attempt, default, apply)
+        retries.defer(f"titles:{container}", attempt, default, apply, report=report)
     return result

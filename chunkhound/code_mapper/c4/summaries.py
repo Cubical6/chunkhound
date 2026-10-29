@@ -2,9 +2,8 @@
 
 import hashlib
 import json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,9 +17,15 @@ from chunkhound.code_mapper.c4.llm import (
 from chunkhound.code_mapper.c4.model import Element, Marker, MergedArrow, Relation
 
 
+class _SummaryLabel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str
+    label: str = Field(min_length=1, max_length=60)
+
+
 class SummariesAnswer(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    labels: dict[str, Annotated[str, Field(min_length=1, max_length=60)]]
+    labels: list[_SummaryLabel]
 
 
 def summary_key(underlying: Iterable[tuple[str, str]]) -> str:
@@ -176,18 +181,20 @@ async def label_arrows(
             ensure_ascii=False,
         )
     )
+    report = llm.report("summaries", f"{len(pending)} nieuwe labels")
 
     async def attempt() -> dict[str, str]:
-        answer = await llm.call(
-            "summaries", SummariesAnswer, prompt, provider="utility"
-        )
-        if set(answer.labels) != set(pending) or any(
-            not value.strip() for value in answer.labels.values()
-        ):
-            raise AnswerRejectedError(
-                "summaries: exactly one nonblank label per supplied key required"
+        with report.attempt():
+            answer = await llm.call(
+                "summaries", SummariesAnswer, prompt, provider="utility"
             )
-        return answer.labels
+            if Counter(row.key for row in answer.labels) != Counter(
+                {key: 1 for key in pending}
+            ) or any(not row.label.strip() for row in answer.labels):
+                raise AnswerRejectedError(
+                    "summaries: exactly one nonblank label per supplied key required"
+                )
+            return {row.key: row.label for row in answer.labels}
 
     def applied(labels: dict[str, str], failed: bool) -> None:
         apply(labels, "fallback" if failed else None)
@@ -195,5 +202,5 @@ async def label_arrows(
     try:
         applied(await attempt(), False)
     except TransientStepError:
-        retries.defer("summaries", attempt, fallback, applied)
+        retries.defer("summaries", attempt, fallback, applied, report=report)
     return arrows

@@ -190,6 +190,8 @@ class _C4Run:
                 "(niet opgeslagen)"
             )
         logger.info(f"C4 LLM calls: {self.llm.calls}")
+        for line in self.llm.report_lines():
+            formatter.info(line)
 
 
 def _topic_sources(

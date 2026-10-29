@@ -122,7 +122,7 @@ def default_answers() -> dict[str, Answer]:
                 },
             ],
         },
-        "summaries": {"labels": {}},
+        "summaries": {"labels": []},
     }
 
 

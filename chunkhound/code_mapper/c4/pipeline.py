@@ -29,7 +29,7 @@ from chunkhound.code_mapper.c4.identity import (
     detect_renames,
     element_id,
 )
-from chunkhound.code_mapper.c4.llm import C4Llm, RetryQueue
+from chunkhound.code_mapper.c4.llm import C4Llm, RetryQueue, StepReport
 from chunkhound.code_mapper.c4.merge import (
     MergeResult,
     ProposedComponent,
@@ -85,13 +85,15 @@ class LlmSteps(RetryQueue):
         attempt: Callable[[], Awaitable[T]],
         fallback: Callable[[], T],
         apply: Callable[[T, bool], None],
+        *,
+        report: StepReport | None = None,
     ) -> None:
         def tracked(value: T, failed: bool) -> None:
             if failed:
                 self.fallbacks.add(key)
             apply(value, failed)
 
-        self.queue.defer(key, attempt, fallback, tracked)
+        self.queue.defer(key, attempt, fallback, tracked, report=report)
 
     async def drain(self) -> int:
         return await self.queue.drain()

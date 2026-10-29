@@ -156,6 +156,13 @@ def check_documented_answer(
         DocElement(item.kind, item.term, citation)
         for item in answer.elements
         if (citation := verified(item.citation)) is not None
+        and verify_quote(
+            project_root,
+            citation.file,
+            citation.start_line,
+            citation.end_line,
+            item.term,
+        )
     ]
     relations = [
         DocRelation(item.from_term, item.to_term, item.title, citation)
@@ -168,12 +175,27 @@ def check_documented_answer(
 
 
 def _previous_outcome(
-    locked: LockedDocumented | None, hashes: dict[str, str], *, fallback: bool
+    locked: LockedDocumented | None,
+    hashes: dict[str, str],
+    project_root: Path,
+    *,
+    fallback: bool,
 ) -> DocumentedOutcome:
     if locked is None:
         return DocumentedOutcome([], [], dict(hashes), fallback)
     return DocumentedOutcome(
-        TypeAdapter(list[DocElement]).validate_python(locked.elements),
+        [
+            item
+            for item in TypeAdapter(list[DocElement]).validate_python(locked.elements)
+            # Older locks retain the citation span, but not the original quote.
+            if verify_quote(
+                project_root,
+                item.citation.file,
+                item.citation.start_line,
+                item.citation.end_line,
+                item.term,
+            )
+        ],
         TypeAdapter(list[DocRelation]).validate_python(locked.relations),
         dict(locked.hashes),
         fallback,
@@ -199,11 +221,11 @@ async def extract_documented(
         file: hashlib.sha256(content).hexdigest() for file, content in documents.items()
     }
     if locked is not None and locked.hashes == hashes:
-        return _previous_outcome(locked, hashes, fallback=False)
+        return _previous_outcome(locked, hashes, project_root, fallback=False)
     if not documents:
         return DocumentedOutcome([], [], hashes, False)
     if llm.trial:
-        return _previous_outcome(locked, hashes, fallback=False)
+        return _previous_outcome(locked, hashes, project_root, fallback=False)
 
     prompt = (
         load_c4_prompt("documented")
@@ -227,16 +249,30 @@ async def extract_documented(
         )
     )
     result = DocumentedOutcome([], [], hashes, False)
+    if locked is None:
+        reason = "geen opgeslagen uitkomst"
+    else:
+        added = len(hashes.keys() - locked.hashes.keys())
+        removed = len(locked.hashes.keys() - hashes.keys())
+        changed = sum(
+            hashes[file] != locked.hashes[file]
+            for file in hashes.keys() & locked.hashes.keys()
+        )
+        reason = f"documentatieset gewijzigd (+{added}/-{removed}/~{changed})"
+    report = llm.report("documented", reason)
 
     async def attempt() -> DocumentedOutcome:
-        answer = await llm.call(
-            "documented", DocumentedAnswer, prompt, provider="utility"
-        )
-        elements, relations = check_documented_answer(answer, project_root, doc_files)
-        return DocumentedOutcome(elements, relations, hashes, False)
+        with report.attempt():
+            answer = await llm.call(
+                "documented", DocumentedAnswer, prompt, provider="utility"
+            )
+            elements, relations = check_documented_answer(
+                answer, project_root, doc_files
+            )
+            return DocumentedOutcome(elements, relations, hashes, False)
 
     def default() -> DocumentedOutcome:
-        return _previous_outcome(locked, hashes, fallback=True)
+        return _previous_outcome(locked, hashes, project_root, fallback=True)
 
     def apply(value: DocumentedOutcome, fallback: bool) -> None:
         result.elements = value.elements
@@ -247,5 +283,5 @@ async def extract_documented(
     try:
         apply(await attempt(), False)
     except TransientStepError:
-        retries.defer("documented", attempt, default, apply)
+        retries.defer("documented", attempt, default, apply, report=report)
     return result

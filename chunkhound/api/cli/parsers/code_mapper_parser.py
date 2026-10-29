@@ -33,7 +33,15 @@ def add_map_subparser(subparsers: Any) -> argparse.ArgumentParser:
         description=(
             "Generate agent-facing documentation for a folder using a two-phase "
             "pipeline: plan points of interest, then run deep research per point "
-            "and write topic artifacts plus an index."
+            "and write topic artifacts plus an index, a C4 model and evidence."
+        ),
+        epilog=(
+            "C4 files: <scope>_c4_model.json and <scope>_c4_evidence.json. "
+            "Reusable decisions and manual overrides live in "
+            "<project-root>/.chunkhound/map.lock.json, independently of --out. "
+            "To version the lock, add .chunkhound/* then "
+            "!.chunkhound/map.lock.json to .gitignore; map never edits it. "
+            "Trial runs do not update the lock. Concurrent runs are not locked."
         ),
     )
 

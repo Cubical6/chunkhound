@@ -14,6 +14,7 @@ from chunkhound.code_mapper.c4.llm import (
     AnswerRejectedError,
     C4Llm,
     RetryQueue,
+    StepReport,
     TransientStepError,
     load_c4_prompt,
 )
@@ -96,31 +97,36 @@ def _validate(answer: _ClassifyAnswer, items: Sequence[ClassifyItem]) -> dict[st
             else {"yes", "no"}
         )
         if values[item.key] not in allowed:
-            raise AnswerRejectedError(
-                f"classify: invalid {item.question} vote for {item.key}"
-            )
+            raise AnswerRejectedError("classify: invalid candidate vote")
     return values
 
 
 async def _round(
-    items: Sequence[ClassifyItem], llm: C4Llm, template: str, seed: int
+    items: Sequence[ClassifyItem],
+    llm: C4Llm,
+    template: str,
+    seed: int,
+    report: StepReport,
 ) -> dict[str, str]:
     shuffled = list(items)
     random.Random(seed).shuffle(shuffled)
     prompt = template + "\nItems:\n" + json.dumps([asdict(item) for item in shuffled])
     try:
-        answer = await llm.call("classify", _ClassifyAnswer, prompt, provider="utility")
-        return _validate(answer, items)
+        with report.attempt():
+            answer = await llm.call(
+                "classify", _ClassifyAnswer, prompt, provider="utility"
+            )
+            return _validate(answer, items)
     except TransientStepError:
         return {}
 
 
 async def _vote(
-    items: Sequence[ClassifyItem], llm: C4Llm, seed: int
+    items: Sequence[ClassifyItem], llm: C4Llm, seed: int, report: StepReport
 ) -> dict[str, Classification]:
     template = load_c4_prompt("classify")
     rounds = await asyncio.gather(
-        *(_round(items, llm, template, seed + index) for index in range(3))
+        *(_round(items, llm, template, seed + index, report) for index in range(3))
     )
     if not any(rounds):
         raise TransientStepError("classify: all three voting rounds failed")
@@ -139,6 +145,7 @@ def _defer_item(
     batch: Callable[[], Awaitable[dict[str, Classification]]],
     result: dict[str, Classification],
     retries: RetryQueue,
+    report: StepReport,
 ) -> None:
     async def attempt() -> Classification:
         return (await batch())[item.key]
@@ -146,7 +153,9 @@ def _defer_item(
     def apply(value: Classification, fallback: bool) -> None:
         result[item.key] = value
 
-    retries.defer(f"classify:{item.key}", attempt, lambda: _default(item), apply)
+    retries.defer(
+        f"classify:{item.key}", attempt, lambda: _default(item), apply, report=report
+    )
 
 
 def _defer_batch(
@@ -155,6 +164,7 @@ def _defer_batch(
     seed: int,
     result: dict[str, Classification],
     retries: RetryQueue,
+    report: StepReport,
 ) -> None:
     # One retry operation retains three bundled rounds, shared by all candidates.
     task: asyncio.Task[dict[str, Classification]] | None = None
@@ -162,11 +172,11 @@ def _defer_batch(
     async def batch() -> dict[str, Classification]:
         nonlocal task
         if task is None:
-            task = asyncio.create_task(_vote(items, llm, seed))
+            task = asyncio.create_task(_vote(items, llm, seed, report))
         return await task
 
     for item in items:
-        _defer_item(item, batch, result, retries)
+        _defer_item(item, batch, result, retries, report)
 
 
 async def classify(
@@ -189,8 +199,9 @@ async def classify(
         else:
             pending.append(item)
     if pending:
+        report = llm.report("classify", f"{len(pending)} nieuwe kandidaten")
         try:
-            result.update(await _vote(pending, llm, seed))
+            result.update(await _vote(pending, llm, seed, report))
         except TransientStepError:
-            _defer_batch(pending, llm, seed, result, retries)
+            _defer_batch(pending, llm, seed, result, retries, report)
     return result

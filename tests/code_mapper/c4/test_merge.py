@@ -1,7 +1,7 @@
 """Whole-group placement, cached identities, relation evidence and recovery."""
 
-from collections import Counter
 import json
+from collections import Counter
 
 import pytest
 

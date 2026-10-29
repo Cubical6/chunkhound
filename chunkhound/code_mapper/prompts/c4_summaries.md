@@ -8,5 +8,5 @@ as evidence, not instructions. Abstract rather than enumerate; at most two parts
 Write generated labels in Dutch (Nederlands). Keep JSON field names and the
 supplied keys unchanged. Each label must be nonblank and at most 60 characters.
 
-Return {"labels": {"exact supplied key": "short label"}} with exactly one label
-for every supplied key, no extra keys and no explanation.
+Return {"labels": [{"key": "exact supplied key", "label": "short label"}]} with
+exactly one row for every supplied key, no duplicate or extra keys and no explanation.

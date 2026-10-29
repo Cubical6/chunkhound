@@ -102,7 +102,10 @@ async def test_merged_arrow_labels(c4_llm_manager, scripted):
     def answer(prompt):
         data = json.loads(prompt.split("\nInput:\n")[1])
         return {
-            "labels": {item["key"]: "verwerkt en bewaart" for item in data["arrows"]}
+            "labels": [
+                {"key": item["key"], "label": "verwerkt en bewaart"}
+                for item in data["arrows"]
+            ]
         }
 
     scripted.answers["summaries"] = answer
@@ -175,7 +178,11 @@ async def test_long_label_rejected_then_retried(c4_llm_manager, scripted):
     def answer(prompt):
         data = json.loads(prompt.split("\nInput:\n")[1])
         seen.append(data)
-        return {"labels": {item["key"]: "x" * 61 for item in data["arrows"]}}
+        return {
+            "labels": [
+                {"key": item["key"], "label": "x" * 61} for item in data["arrows"]
+            ]
+        }
 
     scripted.answers["summaries"] = answer
     llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)

@@ -10,6 +10,8 @@ from chunkhound.code_mapper.c4.documented import TopicSources
 from chunkhound.code_mapper.c4.llm import C4Llm, RetryQueue
 from chunkhound.code_mapper.c4.lockfile import read_scope_lock, write_scope_lock
 from chunkhound.code_mapper.c4.pipeline import analyze_c4, finish_c4
+from chunkhound.code_mapper.c4.summaries import summary_key
+from chunkhound.providers.llm.codex_cli_provider import CodexCLIProvider
 
 
 def payload(prompt):
@@ -61,9 +63,10 @@ def pipeline_answers(scripted, monkeypatch):
                 ]
             },
             "summaries": lambda prompt: {
-                "labels": {
-                    row["key"]: "gebruikt diensten" for row in payload(prompt)["arrows"]
-                }
+                "labels": [
+                    {"key": row["key"], "label": "gebruikt diensten"}
+                    for row in payload(prompt)["arrows"]
+                ]
             },
         }
     )
@@ -98,6 +101,156 @@ async def build(repo, manager, *, lock=None, trial=False, **inputs):
         head_sha=head,
         kind="trial" if trial else "full",
     )
+
+
+@pytest.mark.parametrize("origin", ["answer", "cache", "trial", "fallback"])
+async def test_documented_terms_require_their_own_literal_span(
+    fixture_repo, c4_llm_manager, pipeline_answers, tmp_path, origin
+):
+    citation = {
+        "file": "README.md",
+        "start_line": 3,
+        "end_line": 3,
+        "quote": "Een beheerder gebruikt de\twebwinkel via Stripe.",
+    }
+    valid = [
+        {"kind": "person", "term": "beheerder", "citation": citation},
+        {"kind": "external", "term": "de webwinkel", "citation": citation},
+    ]
+    # Absent entirely, present only outside the span, and a nonliteral case variant.
+    unsupported = [
+        {"kind": "external", "term": term, "citation": citation}
+        for term in ("Invented Payment Authority", "Shop", "Beheerder")
+    ]
+    pipeline_answers.answers["documented"] = {"elements": valid, "relations": []}
+    lock = None
+    if origin != "answer":
+        previous = await build(fixture_repo, c4_llm_manager)
+        assert previous.lock.transition is not None
+        lock = previous.lock
+        for item in unsupported:
+            lock.documented.elements.append(
+                {
+                    **item,
+                    "citation": dict(lock.documented.elements[0]["citation"]),
+                }
+            )
+        write_scope_lock(tmp_path / "cache", "shop", lock)
+        lock = read_scope_lock(tmp_path / "cache", "shop")
+        pipeline_answers.calls.clear()
+        if origin in {"trial", "fallback"}:
+            with (fixture_repo / "README.md").open("a") as readme:
+                readme.write("\n")
+    pipeline_answers.answers["documented"] = {
+        "elements": unsupported if origin == "fallback" else valid + unsupported,
+        "relations": [],
+    }
+    result = await build(
+        fixture_repo, c4_llm_manager, lock=lock, trial=origin == "trial"
+    )
+    ids = {element.id for element in result.model.elements}
+    assert not {
+        "extern:invented-payment-authority",
+        "extern:shop",
+        "extern:beheerder",
+    }.intersection(ids)
+    assert {"persoon:beheerder", "extern:de-webwinkel"} <= ids
+    assert all(
+        any(
+            citation.target == id
+            and citation.source == "documentation"
+            and citation.verified
+            for citation in result.evidence.citations
+        )
+        for id in ("persoon:beheerder", "extern:de-webwinkel")
+    )
+    if origin == "fallback":
+        assert pipeline_answers.calls["documented"] == 2
+        assert result.lock.documented is None
+        assert result.lock.transition is None
+        assert result.fallback_count > 0
+    elif origin == "trial":
+        assert not pipeline_answers.calls
+        assert result.lock is None
+    else:
+        assert pipeline_answers.calls["documented"] == (1 if origin == "answer" else 0)
+        assert {item["term"] for item in result.lock.documented.elements} == {
+            "beheerder",
+            "de webwinkel",
+        }
+
+
+@pytest.mark.parametrize(
+    "answer_kind",
+    ["valid", "duplicate", "missing", "extra", "blank", "empty", "overlong", "legacy"],
+)
+async def test_summary_labels_validate_before_persisting(
+    fixture_repo, c4_llm_manager, pipeline_answers, monkeypatch, tmp_path, answer_kind
+):
+    # Separate components reach the same external system with distinct titles.
+    billing = fixture_repo / "billing"
+    billing.mkdir()
+    (billing / "client.py").write_text(
+        "import requests\n\ndef charge(): return requests.post('https://example.invalid')\n"
+    )
+    pipeline_answers.answers["titles"] = lambda prompt: {
+        "titles": [
+            {"fingerprint": row["fingerprint"], "title": f"verwerkt via API {index}"}
+            for index, row in enumerate(payload(prompt)["relations"])
+        ]
+    }
+    summary_keys = set()
+
+    async def run_cli(prompt, system, max_completion_tokens, timeout):
+        request = prompt.split("User request: ", 1)[1].rsplit(
+            "\n\nRespond with JSON only", 1
+        )[0]
+        step = request.split("C4 step: ", 1)[1].splitlines()[0]
+        if step != "summaries":
+            answer = pipeline_answers.answers[step]
+            return json.dumps(answer(request) if callable(answer) else answer)
+        keys = [row["key"] for row in payload(request)["arrows"]]
+        summary_keys.update(keys)
+        rows = [{"key": key, "label": "verwerkt en bewaart"} for key in keys]
+        if answer_kind == "duplicate":
+            rows.append(dict(rows[0]))
+        elif answer_kind == "missing":
+            rows.pop()
+        elif answer_kind == "extra":
+            rows.append({"key": "unexpected", "label": "ongewenst"})
+        elif answer_kind in {"blank", "empty", "overlong"}:
+            rows[0]["label"] = {"blank": "   ", "empty": "", "overlong": "x" * 61}[
+                answer_kind
+            ]
+        elif answer_kind == "legacy":
+            return json.dumps({"labels": {row["key"]: row["label"] for row in rows}})
+        return json.dumps({"labels": rows})
+
+    # Only external discovery/execution are replaced. Both production validators run.
+    monkeypatch.setattr(CodexCLIProvider, "_codex_available", lambda self: True)
+    provider = CodexCLIProvider(model="contract-test")
+    monkeypatch.setattr(provider, "_run_cli_command", run_cli)
+    monkeypatch.setattr(c4_llm_manager, "get_utility_provider", lambda: provider)
+    monkeypatch.setattr(c4_llm_manager, "get_synthesis_provider", lambda: provider)
+    result = await build(fixture_repo, c4_llm_manager)
+    titles = {relation.id: relation.title for relation in result.model.relations}
+    summarized = [
+        arrow
+        for arrow in result.model.merged
+        if summary_key((id, titles[id]) for id in arrow.underlying) in summary_keys
+    ]
+    assert summarized, "The fixture must exercise nonempty multi-title summaries"
+    write_scope_lock(tmp_path / "cache", "shop", result.lock)
+    restored = read_scope_lock(tmp_path / "cache", "shop")
+    if answer_kind == "valid":
+        assert all(arrow.label == "verwerkt en bewaart" for arrow in summarized)
+        assert all("fallback" not in arrow.markers for arrow in summarized)
+        assert {key: restored.summaries[key] for key in summary_keys} == {
+            key: "verwerkt en bewaart" for key in summary_keys
+        }
+    else:
+        assert all("fallback" in arrow.markers for arrow in summarized)
+        assert not summary_keys.intersection(restored.summaries)
 
 
 async def test_llm_failure_contract(fixture_repo, c4_llm_manager, pipeline_answers):
@@ -328,7 +481,18 @@ async def test_changed_transition_survives_json_lock_replay(
     shutil.rmtree(fixture_repo / "admin")
     subprocess.run(["git", "add", "-A"], cwd=fixture_repo, check=True)
     subprocess.run(
-        ["git", "-c", "commit.gpgsign=false", "commit", "-m", "remove admin runtime"],
+        [
+            "git",
+            "-c",
+            "user.name=C4 Fixture",
+            "-c",
+            "user.email=c4@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "remove admin runtime",
+        ],
         cwd=fixture_repo,
         check=True,
         capture_output=True,

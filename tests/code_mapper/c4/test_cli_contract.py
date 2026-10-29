@@ -18,6 +18,7 @@ from chunkhound.autodoc.index_loader import (
     parse_index_file,
 )
 from chunkhound.code_mapper.c4 import pipeline as c4_pipeline
+from chunkhound.code_mapper.c4.llm import AnswerRejectedError
 from chunkhound.code_mapper.c4.lockfile import LOCK_RELATIVE_PATH
 from chunkhound.code_mapper.c4.model import load_c4_pair
 from chunkhound.code_mapper.models import CodeMapperPOI
@@ -121,9 +122,10 @@ def cli(fixture_repo, c4_llm_manager, scripted, monkeypatch, tmp_path):
                 ]
             },
             "summaries": lambda prompt: {
-                "labels": {
-                    row["key"]: "gebruikt diensten" for row in payload(prompt)["arrows"]
-                }
+                "labels": [
+                    {"key": row["key"], "label": "gebruikt diensten"}
+                    for row in payload(prompt)["arrows"]
+                ]
             },
         }
     )
@@ -240,6 +242,88 @@ async def test_rerun_unchanged_zero_calls_stable_output(cli):
         name: data for name, data in snapshot(cli.out).items() if name.endswith(".json")
     } == first
     assert lock_path.read_bytes() == lock
+
+
+@pytest.mark.parametrize(
+    "response", ["accepted", "quote_rejected", "schema_rejected", "unsafe_rejection"]
+)
+async def test_call_report_names_step_and_reason(cli, capsys, response):
+    private_file = "private-context.md"
+    private_text = "PRIVATE_PROMPT_CONTENT"
+    (cli.repo / private_file).write_text(private_text)
+    await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
+    capsys.readouterr()
+    cli.provider.calls.clear()
+    cli.result.poi_sections_indexed[0][2]["metadata"]["sources"]["files"].append(
+        private_file
+    )
+    if response == "quote_rejected":
+        answer = deepcopy(cli.provider.answers["documented"])
+        for item in [*answer["elements"], *answer["relations"]]:
+            if "term" in item:
+                item["term"] = "PRIVATE_RESPONSE_CONTENT"
+            item["citation"]["quote"] = "PRIVATE_RESPONSE_CONTENT"
+        cli.provider.answers["documented"] = answer
+    elif response == "schema_rejected":
+        cli.provider.answers["documented"] = {"PRIVATE_RESPONSE_CONTENT": private_text}
+    elif response == "unsafe_rejection":
+        cli.provider.answers["documented"] = AnswerRejectedError(
+            f"documented: PRIVATE_RESPONSE_CONTENT {private_text} {private_file}"
+        )
+    await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
+    output = capsys.readouterr().out
+    report = [line for line in output.splitlines() if "C4 documented:" in line]
+    assert set(cli.provider.calls) == {"documented"}
+    assert len(report) == 1
+    line = report[0]
+    assert "documentatieset gewijzigd" in line
+    assert "+1/-0/~0" in line
+    for secret in (private_file, private_text, "PRIVATE_RESPONSE_CONTENT"):
+        assert secret not in line
+    if response == "accepted":
+        assert cli.provider.calls["documented"] == 1
+        assert "1 pogingen" in line
+        assert "geaccepteerd" in line
+    else:
+        assert cli.provider.calls["documented"] == 2
+        assert "2 pogingen" in line
+        assert line.count("afgekeurd") == 2
+        assert "terugval" in line
+        rule = {
+            "quote_rejected": "no proposed item has a literal quote",
+            "schema_rejected": "invalid answer schema",
+            "unsafe_rejection": "answer validation",
+        }[response]
+        assert rule in line
+
+
+@pytest.mark.parametrize("recover", [True, False])
+async def test_call_report_counts_bundled_rounds_and_retry_outcome(
+    cli, capsys, recover
+):
+    valid = cli.provider.answers["classify"]
+
+    def respond(prompt):
+        if not recover or cli.provider.calls["classify"] <= 3:
+            raise TimeoutError("PRIVATE_PROVIDER_ERROR")
+        return valid(prompt)
+
+    cli.provider.answers["classify"] = respond
+    await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
+    lines = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("[INFO] C4 ")
+    ]
+    assert len(lines) == 5
+    line = next(line for line in lines if "C4 classify:" in line)
+    assert cli.provider.calls["classify"] == 6
+    assert "6 pogingen" in line
+    assert "nieuwe kandidaten" in line
+    assert line.count("tijdelijke fout") == (3 if recover else 6)
+    assert ("terugval" in line) is not recover
+    assert ("geaccepteerd" in line) is recover
+    assert "PRIVATE_PROVIDER_ERROR" not in line
 
 
 async def test_output_validates_against_schema(cli):
