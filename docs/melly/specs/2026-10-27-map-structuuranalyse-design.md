@@ -1,6 +1,7 @@
 # Spec: `chunkhound map` levert de C4-structuur
 
 - Datum: 2026-10-27 · Branch: `Cubical6/map-structuur-design` (basis `829ec586`)
+- **Status:** opgeleverd 2026-10-29 (`51a87488`); historie, de code is leidend
 - Besluitenlog: [2026-10-27-map-structuuranalyse.md](../decisions/2026-10-27-map-structuuranalyse.md) (rij 1–40; "rij N" hieronder)
 - Bindend kader: AutoDoc-C4-log `autodoc-c4-design/docs/melly/decisions/2026-10-27-autodoc-c4-map.md` rij 11–32 ("C4-log rij N")
 - Model: [map-structuuranalyse.md](../models/map-structuuranalyse.md)
@@ -61,7 +62,7 @@ Nieuw subpakket `chunkhound/code_mapper/c4/` naast de bestaande topicstroom (rij
 
 **Volgorde** ([model §5](../models/map-structuuranalyse.md#5-sequencediagrammen)): lockbestand lezen → topics en C4-tak parallel → `documented` (heeft de door topics geciteerde documenten nodig) → identiteit, dekking, `summaries` → schrijven → lockbestand. Herpogingen komen na de rest (rij 19, 30).
 
-**Exacte herhaling (gebruiker: "optie 1", taak 13):** een uitvoering met ongewijzigde relevante invoer herhaalt de laatste succesvolle analysetransitie, inclusief geschiedenis en runmetadata; zij is geen nieuwe identiteitsgebeurtenis. Een deterministische invoervingerafdruk omvat bestandsinhoud (ook dirty wijzigingen), HEAD, scope, configuratie, topics en overrides. Bij gewijzigde invoer berekent de analyse een nieuwe transitie met de gewone rename-/geschiedenisregels.
+**Exacte herhaling (gebruiker: "optie 1", taak 13):** een uitvoering met ongewijzigde relevante invoer herhaalt de laatste succesvolle analysetransitie, inclusief geschiedenis en runmetadata; zij is geen nieuwe identiteitsgebeurtenis. Topics komen per run opnieuw uit HyDE (rij 33). Een volledige tweede run op ongewijzigde code geeft daarom alleen exacte herhaling als de topics toevallig gelijk zijn; de belofte geldt per stap (§8 Hergebruik), niet per CLI-run. Een deterministische invoervingerafdruk omvat bestandsinhoud (ook dirty wijzigingen), HEAD, scope, configuratie, topics en overrides. Bij gewijzigde invoer berekent de analyse een nieuwe transitie met de gewone rename-/geschiedenisregels.
 
 Ook de verse `ReferenceScan`-uitkomsten tellen mee: verwijzingen met doel/status, import-only-bestanden en externe importplekken. Importresolutie raadpleegt het hele project; dirty verschijnen of verdwijnen van een doel buiten de gekozen scope mag daarom geen oude geschiedenis/runmetadata terugzetten. Gebruik de reeds berekende scan, zonder extra projectbrede bestandssysteemloop.
 
@@ -85,6 +86,7 @@ Parser `chunkhound/api/cli/parsers/code_mapper_parser.py`; commando `chunkhound/
 ## 7. Statische analyse en groepen
 
 - **Bestandslijst:** dezelfde bestandssysteemloop als HyDE (`chunkhound/code_mapper/scope.py:8-70`) zonder het plafond `max_scope_files` (`:50`), omdat R7 volledig bewijs eist (rij 32).
+- **Goedgekeurde aanvulling bestandsselectie (gebruiker: “1”, 2026-10-29):** de gedeelde `map`-bestandsselectie voor C4 en Markdown respecteert ook lokale Git-regels uit `.git/info/exclude`, inclusief het gemeenschappelijke Git-metadata-pad van een worktree. Dit volgt de bestaande Git-ignore-instelling en regelprioriteit; geen hardgecodeerde `.scratch`-uitzondering, automatische fixture-uitsluiting of wijziging van gebruikersconfiguratie. Het afzonderlijke fixturebeleid blijft ongewijzigd.
 - **Imports** voor alle talen met mapping, zonder database: `ImportContextService` (`chunkhound/services/research/shared/import_context.py:98-106`) en `resolve_import_paths` (`chunkhound/services/research/shared/import_resolver.py:91-116`). Als de service voor TS/JS/TSX/JSX geen imports teruggeeft, leest `references.py` de importnodes zelf uit de `ParserFactory`-AST, met oorspronkelijke bronposities en behoud van `import type`-bewijs. Gedeelde parsers/services en `resolve_import_paths` blijven ongewijzigd (gebruikersbesluit 2026-10-28).
 - **Aanroepen en overerving** voor Python, TS/JS/TSX/JSX, PHP via de gekopieerde `source_inspector`, doel via de import-binding; zonder binding geen pijl. Andere talen: alleen imports, marker `imports_only` (rij 15, 20).
 - **Filters:** type-only (Python `if TYPE_CHECKING:`, TS `import type`) → in het bewijs, status `type_only`, geen pijl; een import waarvan de naam nergens anders in het bestand voorkomt → status `unused`, geen pijl, tenzij re-export (`__init__.py`, `index.ts`, `__all__`) (rij 7, 11).
@@ -98,18 +100,19 @@ Parser `chunkhound/api/cli/parsers/code_mapper_parser.py`; commando `chunkhound/
 
 Alle aanroepen via `complete_structured_typed` (`chunkhound/interfaces/llm_provider.py:293-333`) binnen de `--jobs`-limiet (`code_mapper_parser.py:135`). Utility- en syntheseprovider uit `chunkhound/llm_manager.py:313,326`. Bij `--plan` nul aanroepen.
 
-| Stap | Model | Wanneer | Invoer → uitvoer | Rij |
-|---|---|---|---|---|
-| `classify` | utility | Alleen kandidaten niet in het lockbestand; 3 parallelle gebundelde rondes | Dependencies (naam, importplekken, configverwijzingen, omschrijving), siteframeworks, twijfelgevallen, opslagkandidaten → stem `library`/`external_system`/`storage_driver` (en container-ja/nee) | 9, 12, 22 |
-| `merge` | synthese | 1 per container bij eerste run of bij nieuwe niet-geclaimde groepen | Groepen (prefix, bestandsnamen), verwijzingen tussen groepen, bestaande componenten → indeling, naam, omschrijving, relatietitels | 25, 27 |
-| `titles` | synthese | 1 per container met nieuwe of gewijzigde relaties zonder `merge` | Relaties met soorten verwijzingen → titels "werkwoord + via" | 33 |
-| `documented` | utility | 1 per run als een bronbestand een andere hash heeft | Root-README van de scope + documentatiebestanden die topics citeren → personen, externe systemen, containers, componenten, relaties met letterlijk citaat en bestand:regel | 34 |
-| `summaries` | utility | 1 per run met nieuwe labels | Samengevoegde pijlen met ≥2 verschillende titels → label ≤60 tekens | 35 |
+| Stap         | Model    | Wanneer                                                                                                     | Invoer → uitvoer                                                                                                                                                                                  | Rij       |
+| ------------ | -------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `classify`   | utility  | Alleen kandidaten niet in het lockbestand; 3 parallelle gebundelde rondes                                   | Dependencies (naam, importplekken, configverwijzingen, omschrijving), siteframeworks, twijfelgevallen, opslagkandidaten → stem `library`/`external_system`/`storage_driver` (en container-ja/nee) | 9, 12, 22 |
+| `merge`      | synthese | 1 per container bij eerste run of bij nieuwe niet-geclaimde groepen                                         | Groepen (prefix, bestandsnamen), verwijzingen tussen groepen, bestaande componenten → indeling, naam, omschrijving, relatietitels                                                                 | 25, 27    |
+| `titles`     | synthese | 1 per container met nieuwe of gewijzigde relaties zonder `merge`                                            | Relaties met soorten verwijzingen → titels "werkwoord + via"                                                                                                                                      | 33        |
+| `documented` | utility  | 1 per run als de geselecteerde documentatieset of een bronhash wijzigt, of geen opgeslagen uitkomst bestaat | Root-README van de scope + documentatiebestanden die topics citeren → personen, externe systemen, containers, componenten, relaties met letterlijk citaat en bestand:regel                        | 34        |
+| `summaries`  | utility  | 1 per run met nieuwe labels                                                                                 | Samengevoegde pijlen met ≥2 verschillende titels → label ≤60 tekens                                                                                                                               | 35        |
 
 - **Telling `classify`:** 3–0 → soort; 2–1 → meerderheid + `disputed` met afwijkende stem; 1–1–1 → bibliotheek + gemarkeerd; mislukt één ronde, dan tellen de twee overige (rij 12). Volgorde per ronde geschud met vaste seed.
-- **Hergebruik:** relatietitel zolang de vingerafdruk (componentpaar + gesorteerde set `(soort, doelbestand)`) gelijk is (rij 33); label zolang de set (relatie-id, titel) gelijk is (rij 35); documentatie-uitkomst zolang de hashes van de bronbestanden gelijk zijn (rij 34).
+- **Hergebruik:** relatietitel zolang de vingerafdruk (componentpaar + gesorteerde set `(soort, doelbestand)`) gelijk is (rij 33); label zolang de set (relatie-id, titel) gelijk is (rij 35); documentatie-uitkomst zolang de geselecteerde set bronbestanden en hun hashes gelijk zijn (rij 34).
 - **Antwoordcontrole:** schema; elke groep precies één keer geplaatst, in één component óf rechtstreeks onder de container (gedeelde code; nooit een automatische verzamelcomponent zoals "Helpers", C4-log rij 13; rij 38); component binnen één container; stem binnen de vaste soorten; citaat staat letterlijk op het opgegeven bestand:regel; label ≤60 tekens. Afgekeurd telt als tijdelijke fout (rij 33, 34, 35).
 - **Fouten** via `_is_retryable_poi_error` (`chunkhound/code_mapper/service.py:95-119`): tijdelijk → één herpoging na de rest, daarna gemarkeerde terugval, niet opgeslagen; niet-tijdelijk of setupfout → exitcode 1, niets geschreven (rij 19, 33).
+- **Zichtbaarheid:** na de run één regel per stap met aanroeppogingen en de reden van elke aanroep: `classify` N nieuwe kandidaten; `merge` per container N niet-geclaimde groepen; `titles` N nieuwe of gewijzigde relaties; `documented` documentatieset gewijzigd (+toegevoegd/−verwijderd/gewijzigde hashes) of geen opgeslagen uitkomst; `summaries` N nieuwe labels. Per poging de uitkomst: geaccepteerd, afgekeurd (regelnaam uit de `AnswerRejectedError`-melding), tijdelijke fout, terugval. Nooit prompt- of antwoordtekst. Naast de bestaande regel `C4 LLM calls: N` (`code_mapper.py:192`); model, bewijs en lockbestand veranderen niet. Researchaanroepen vallen erbuiten; tokens en kosten worden niet gemeten.
 
 | Stap | Terugval (marker `fallback`) |
 |---|---|
@@ -131,6 +134,7 @@ Alle aanroepen via `complete_structured_typed` (`chunkhound/interfaces/llm_provi
 - **Documentatierelaties:** een relatie tussen twee _aangetroffen_ interne elementen zonder statische verwijzing komt niet op de kaart maar als niet-geverifieerd citaat in het bewijs (R1; rij 1). Een relatie met een persoon, extern systeem of _gedocumenteerd_ element komt op de kaart met status _gedocumenteerd_ (C4-log rij 21, 22, 25).
 - **Documentatie-eindpunten (uitvoeringsbesluit S):** een geverifieerd `DocElement.kind` bindt de kale relatieterm aan die soort en de toegewezen identiteit. Bij dezelfde systeem- en containernaam kiest een containerhint dus de container. Zonder hint moet de modelmatch uniek zijn; onopgeloste ambiguïteit blijft een niet-geverifieerd citaat, zonder pijl.
 - **Dekking:** na de topics, zonder taalmodel, per element via gedeelde geciteerde bestanden; component zonder topic → `undescribed`; bij `--plan` "niet berekend"; _gedocumenteerd_ element zonder bestanden heeft geen dekking; een bestand rechtstreeks onder een container levert alleen dekking voor die container (rij 23, 38; C4-log rij 12, 13, 25).
+- **Research-broncontract (goedgekeurd herstel 2026-10-29):** de producent levert `metadata.sources.files` en `metadata.sources.chunks` (bestand, begin- en eindregel) van de werkelijk voor synthese gebruikte bronnen, overeenkomstig de bestaande Sources-sectie en na dezelfde bestandsbudgetfiltering. De mapper gebruikt deze gegevens voor legacy-bronstatistiek en C4-topicdekking; niet alle opgehaalde context en geen parsing van de Markdown-weergave. Geen broninhoud dupliceren in metadata. Regressie en lokale smoke zonder echte provider/index; de oorspronkelijke volledige acceptatie blijft open.
 - **Samengevoegde pijlen:** views context, containers en componenten per container worden deterministisch afgeleid; één onderliggende titel → overgenomen zonder aanroep, voor het label afgekapt op maximaal 60 tekens zonder de relatietitel te wijzigen (rij 35; C4-log rij 27, 28).
 
 ## 10. Schema's en lockbestand
@@ -154,37 +158,38 @@ Schema 3 voegt verplichte `direct_groups: {container_id: [group_id]}` toe voor e
 
 Volgens TESTING_PHILOSOPHY in `AGENTS.md`: alleen contracten. Map `tests/code_mapper/c4/`, fixture-repo met Python, TS, PHP, manifest, Dockerfile en README; taalmodellen via `FakeLLMProvider` (`tests/fixtures/fake_providers.py:20,133`) (rij 36).
 
-| Test | Contract | Rij |
-|---|---|---|
-| `test_no_c4_output_matches_upstream` | `--no-c4` byte-gelijk aan huidige uitvoer | 17 |
-| `test_conflicting_output_flags_exit_2` | Twee vlagcombinaties → exitcode 2 | 31 |
-| `test_plan_no_markdown_zero_calls_no_db` | 0 aanroepen, geen database, lockbestand ongewijzigd, `kind: trial` | 28, 32 |
-| `test_rerun_unchanged_zero_calls_stable_output` | Tweede run: 0 aanroepen, zelfde model, bewijs, `run.id` en lockbestand (op `head_sha` na) | 18, 27, 39 |
-| `test_component_identity_majority` | Voorbeelden (a), (b), (b′), een rename en een nieuwe gelijknamige container (bestaand id blijft, nieuwkomer krijgt pad) | 3, 40 |
-| `test_static_reference_rules` | Gebruikt/ongebruikt/type-only/re-export/aanroep met en zonder binding | 1, 7, 11 |
-| `test_llm_failure_contract` | Tijdelijk → terugval, exitcode 0, lockbestand zonder terugval; niet-tijdelijk → exitcode 1, niets geschreven | 19, 33 |
-| `test_output_validates_against_schema` | Beide bestanden valide; elk id in het bewijs bestaat in het model; `load_c4_pair()` weigert een paar met verschillende `run.id` | 24, 35, 39 |
-| `test_autodoc_loads_only_topics` | Echte `index_loader` leest precies de topics | 29 |
-| `test_documented_quote_must_exist` | Niet-letterlijk citaat afgekeurd | 34 |
-| `test_override_wins` | `overrides` gaan voor | 31 |
+| Test                                            | Contract                                                                                                                                                                   | Rij        |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `test_no_c4_output_matches_upstream`            | `--no-c4` byte-gelijk aan huidige uitvoer                                                                                                                                  | 17         |
+| `test_conflicting_output_flags_exit_2`          | Twee vlagcombinaties → exitcode 2                                                                                                                                          | 31         |
+| `test_plan_no_markdown_zero_calls_no_db`        | 0 aanroepen, geen database, lockbestand ongewijzigd, `kind: trial`                                                                                                         | 28, 32     |
+| `test_rerun_unchanged_zero_calls_stable_output` | Tweede run: 0 aanroepen, zelfde model, bewijs, `run.id` en lockbestand (op `head_sha` na)                                                                                  | 18, 27, 39 |
+| `test_component_identity_majority`              | Voorbeelden (a), (b), (b′), een rename en een nieuwe gelijknamige container (bestaand id blijft, nieuwkomer krijgt pad)                                                    | 3, 40      |
+| `test_static_reference_rules`                   | Gebruikt/ongebruikt/type-only/re-export/aanroep met en zonder binding                                                                                                      | 1, 7, 11   |
+| `test_llm_failure_contract`                     | Tijdelijk → terugval, exitcode 0, lockbestand zonder terugval; niet-tijdelijk → exitcode 1, niets geschreven                                                               | 19, 33     |
+| `test_output_validates_against_schema`          | Beide bestanden valide; elk id in het bewijs bestaat in het model; `load_c4_pair()` weigert een paar met verschillende `run.id`                                            | 24, 35, 39 |
+| `test_autodoc_loads_only_topics`                | Echte `index_loader` leest precies de topics                                                                                                                               | 29         |
+| `test_documented_quote_must_exist`              | Niet-letterlijk citaat afgekeurd                                                                                                                                           | 34         |
+| `test_override_wins`                            | `overrides` gaan voor                                                                                                                                                      | 31         |
+| `test_call_report_names_step_and_reason`        | Tweede run met alleen een gewijzigde documentatieset: alleen `documented` roept aan, de regel noemt stap en reden; afgekeurd antwoord toont regelnaam zonder antwoordtekst | 19, 34     |
 
-Gedragstests van de gekopieerde CodeBoarding-code gaan mee met MIT-kop. Smoke op deze repo met echte provider: aanroepen, tokens en duur van de eerste run; tweede run 0 aanroepen; handmatige beoordeling van de groepen. Kwaliteitscommando's: zie §13.
+Gedragstests van de gekopieerde CodeBoarding-code gaan mee met MIT-kop. Smoke op deze repo met echte provider: aanroeppogingen en duur van de eerste run; tweede run: elke stap met gelijke eigen invoer doet 0 aanroepen; elke resterende aanroep staat in de zichtbaarheidsregels met een reden die past bij de waargenomen invoerwijziging of bij een gemelde afkeuring/terugval. Tokens en kosten worden niet gemeten. Handmatige beoordeling van de groepen en gemelde terugvallen. Kwaliteitscommando's: zie §13.
 
 ## 12. Risico's
 
-| Risico | Maatregel / status | Rij |
-|---|---|---|
-| Dode functies leveren pijlen | Bekend; alleen ongebruikte imports gefilterd | 7, 11 |
-| Gezamenlijke stemfout in alle 3 rondes | `disputed` + `overrides`; CLI-providers lagere concurrency (`chunkhound/providers/llm/base_cli_provider.py:470-485`) | 12 |
-| Drempel 0,5 gemeten op één Python-project (CodeBoarding-geschiedenis) | Niet gemeten op ChunkHound | 10, 14 |
-| Zonder dossier | Open issue | 13 |
-| Aanroepen via afgeleide types (`self.service.run()`) | Geen pijl; bekend gat | 20 |
-| Groepskwaliteit op ChunkHound niet gemeten | Smoke met handmatige beoordeling | 21 |
-| Geen bestandsplafond en geen parse-cache | Duur gemeten in smoke; cache later indien nodig | 32, 36 |
-| Gelijktijdige runs | Laatste schrijver wint | 31 |
-| Verzonnen documentatie-extractie | Letterlijke citaatcontrole | 34 |
-| Titelfrequentie ±20–28% van codecommits (proxy) | Gemeten met `.scratch/new_arrow_probe.py`; werkelijk lager `[INFERENCE]` | 33 |
-| Eerste run kosten: ±40k invoertokens `classify` + `merge` + `documented` ±2–10k | Geschat `[INFERENCE]`; gemeten in smoke | 22, 34 |
+| Risico                                                                          | Maatregel / status                                                                                                   | Rij    |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------ |
+| Dode functies leveren pijlen                                                    | Bekend; alleen ongebruikte imports gefilterd                                                                         | 7, 11  |
+| Gezamenlijke stemfout in alle 3 rondes                                          | `disputed` + `overrides`; CLI-providers lagere concurrency (`chunkhound/providers/llm/base_cli_provider.py:470-485`) | 12     |
+| Drempel 0,5 gemeten op één Python-project (CodeBoarding-geschiedenis)           | Niet gemeten op ChunkHound                                                                                           | 10, 14 |
+| Zonder dossier                                                                  | Open issue                                                                                                           | 13     |
+| Aanroepen via afgeleide types (`self.service.run()`)                            | Geen pijl; bekend gat                                                                                                | 20     |
+| Groepskwaliteit op ChunkHound niet gemeten                                      | Smoke met handmatige beoordeling                                                                                     | 21     |
+| Geen bestandsplafond en geen parse-cache                                        | Duur gemeten in smoke; cache later indien nodig                                                                      | 32, 36 |
+| Gelijktijdige runs                                                              | Laatste schrijver wint                                                                                               | 31     |
+| Verzonnen documentatie-extractie                                                | Letterlijke citaatcontrole                                                                                           | 34     |
+| Titelfrequentie ±20–28% van codecommits (proxy)                                 | Gemeten met `.scratch/new_arrow_probe.py`; werkelijk lager `[INFERENCE]`                                             | 33     |
+| Eerste run kosten: ±40k invoertokens `classify` + `merge` + `documented` ±2–10k | Geschat `[INFERENCE]`; smoke meet aanroeppogingen en duur, geen tokens of kosten                                     | 22, 34 |
 
 ## 13. Tooling
 

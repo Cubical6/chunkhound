@@ -426,7 +426,8 @@ Run: `uv run pytest tests/code_mapper/c4/test_output_contract.py tests/code_mapp
 - **Aanvullend bewijs:** initiële JSON-lock-roundtrip met exacte uitvoergelijkheid; gewijzigde analyse gevolgd door exacte herhaling inclusief haar geschiedenis; gewijzigde dirty invoer bij dezelfde HEAD is geen replay; directe plaatsingen zonder aanroepen; mislukte merge opnieuw geprobeerd; echte pipeline/schrijver/lock-roundtrip.
 
 **Acceptance:**
-- Promise: een tijdelijke storing levert een gemarkeerde maar volledige kaart op die niet onthouden wordt; een herhaalrun op ongewijzigde code kost niets en geeft exact dezelfde uitvoer.
+
+- Promise: een tijdelijke storing levert een gemarkeerde maar volledige kaart op die niet onthouden wordt; een herhaalrun met gelijke volledige invoer, inclusief vaste topics, doet geen C4-aanroepen en geeft exact dezelfde uitvoer.
 - Evidence: `test_llm_failure_contract` (R12; deel pipeline): `merge` faalt twee keer met `TimeoutError` → `fallback_count > 0`, componenten met `fallback`, `C4Build.lock.components` leeg voor die container; `ValueError("bad config")` in `classify` → exceptie komt door. `test_rerun_unchanged_zero_calls_stable_output` (deel pipeline): run 2 met `lock` van run 1 → `scripted.calls` leeg, `model`, `evidence` en `lock` gelijk aan run 1. `test_trial_run_uses_lock_only`: `trial=True` met lock → 0 aanroepen, `run.kind == "trial"`, `lock is None`, coverage `not_computed`.
 - Judged by: user — R12 en kosten.
 
@@ -468,22 +469,32 @@ Run: `uv run pytest tests/code_mapper/c4/test_output_contract.py tests/code_mapp
 **Files:**
 - Modify: `CHANGELOG.md:9` (`## [Unreleased]` → `### Added`: C4-uitvoer van `map`, vlaggen, lockbestand en `.gitignore`-advies `.chunkhound/*` + `!.chunkhound/map.lock.json`)
 - Modify: `chunkhound/api/cli/parsers/code_mapper_parser.py` (alleen `help`/`epilog` als Task 14 dat nog mist)
+- Modify (goedgekeurd herstel 2026-10-29): `chunkhound/services/research/v1/pluggable_research_service.py` en uitsluitend noodzakelijke bestaande research-bronhulpen; relevante research/mapper-contracttests; bestaande changelog-entry. Geen wijziging aan C4-model-/lockschema, extra CLI-vlag, retries of provider-/indexconfig.
+- Modify (goedgekeurd herhaalcontract 2026-10-29): `chunkhound/code_mapper/c4/llm.py` (`C4Llm`, `RetryQueue`), de C4-stapmodules en `chunkhound/api/cli/commands/code_mapper.py` — aanroepzichtbaarheid volgens spec §8, zonder wijziging van herpoginggedrag of model-/bewijs-/lockformaat.
+- Test: `tests/code_mapper/c4/test_cli_contract.py` — `test_call_report_names_step_and_reason`; behoud de vaste-topics-herhaaltests hier en in `test_pipeline.py`.
 
 **Classes:** —
 
-**Read:** spec §6, §10 laatste alinea, §11 laatste alinea, §12; `CHANGELOG.md:1-25`.
+**Read:** spec §6, §8 Zichtbaarheid, §10 laatste alinea, §11 laatste alinea, §12; `CHANGELOG.md:1-25`.
 
 **Tools:**
 - `uv run pytest tests/test_smoke.py -v -n auto` — verplicht vóór commit (`AGENTS.md`).
 - `uv run pytest tests/ -v` — volledige suite vóór de PR (`AGENTS.md`).
 - `uv run chunkhound map . --out .scratch/c4-smoke --low --verbose` twee keer, in de execution-worktree met haar eigen `.chunkhound/db` en een echte provider uit de gebruikersconfig. Ontbreekt de index of provider: rapporteer `missing: <wat>`; de coördinator vraagt de gebruiker.
+- `uv run pytest tests/code_mapper/c4/test_cli_contract.py tests/code_mapper/c4/test_pipeline.py -v` — per-stapzichtbaarheid en bestaande exacte herhaling bij vaste topics, met lokale providerfake.
+- Goedgekeurde voortzetting (gebruiker: “1”, 2026-10-29): herstel eerst de gedeelde C4/Markdown-bestandsselectie zodat lokale `.git/info/exclude`-regels, inclusief common metadata van worktrees, worden gevolgd wanneer Git-ignore actief is. Behoud configuratie-excludes, gewone `.gitignore`-prioriteit, expliciet uitgeschakelde Git-ignore en repositorygrenzen; geen hardgecodeerde scratch-/fixturefilters of wijziging van andere commando's. Bewijs via echte tijdelijke Git-repository/worktree en mapperselectie zonder provider/database. De oorspronkelijke twee-run-, full-suite- en gebruikersacceptatie blijft gelden; deze aanvulling autoriseert niet automatisch een nieuwe volledige analyse.
+- Goedgekeurd vervolg (gebruiker: “optie 1”, 2026-10-29): herstel daarna `metadata.sources.files/chunks` aan de research-producent met werkelijk gebruikte, voor synthese gebudgetteerde bronnen zoals in de bestaande Sources-sectie. Behoud lege-context-, single-pass- en reduce-gedrag, bestaande antwoordtekst en geldige chunkbereiken; voorkom inhoudsduplicatie en Markdown-parsing. Bewijs werkelijk producentresultaat naar legacy-bronstatistiek én C4-topicdekking via een consumentgerichte regressie en lokale provider-vrije smoke. Inspecteer alle publieke/MCP-consumenten vóór edit. Geen nieuwe volledige analyse of betaalde modelaanroep; overige Task15-criteria blijven ongewijzigd.
+- Bevestigde testacceptatie (gebruiker: “optie 2”, 2026-10-29): de volledige suite moet groen zijn; gerichte feature-QA vervangt dit niet. Voer eerst breder oorzakelijk QA-herstel uit vanuit de bewaarde volledige-suitefouten. Relevante tests/fixtures en aantoonbare bronoorzaken vallen onder deze voortzetting; minimale wijzigingen binnen bestaande publieke contracten, geen testuitsluitingen/xfails, verzwakte assertions, ongevraagde productiecontractwijzigingen of configuratie-/indexreparatie. Leg omgevingsprerequisites en ontbrekende toestemmingen afzonderlijk vast. Herhaal bekende fouten niet alleen ter bevestiging; gerichte post-fixproef en volledige suite na materieel herstel. De twee-run- en gebruikerscriteria blijven ongewijzigd en vereisen afzonderlijke nieuwe uitvoertoestemming.
 
 **Acceptance:**
-- Promise: de gebruiker ziet op ChunkHound zelf een bruikbare eerste kaart en een tweede run zonder kosten.
-- Evidence: smoke-rapport met `C4 LLM calls` en duur van run 1, `C4 LLM calls: 0` in run 2, `diff` van beide modelbestanden leeg, en de lijst componenten per container; `test_smoke.py` en volledige suite groen.
-- Judged by: user — groepskwaliteit en kosten zijn een oordeel (spec §12 rij 21, 22).
+
+- Promise: de gebruiker ziet op ChunkHound zelf een bruikbare eerste kaart; een tweede run op ongewijzigde code hergebruikt elke C4-stap met gelijke eigen invoer, en elke resterende aanroep is verklaard.
+- Evidence: run 1 met `C4 LLM calls` en duur; run 2 met de zichtbaarheidsregels, waarbij elke aanroep een reden heeft die past bij de werkelijk gewijzigde stapinvoer (bijv. andere documentatieset) of bij een gemelde afkeuring/terugval; lockvelden van stappen zonder aanroep gelijk; lijst componenten per container; `test_rerun_unchanged_zero_calls_stable_output`, `test_smoke.py` en volledige suite groen.
+- Judged by: user — groepskwaliteit, kosten en de gemelde terugvallen (spec §12 rij 21, 22).
 
 - [ ] **Step 1: Schrijf de changelog-regels.**
+- [ ] **Step 1a: Implementeer zichtbaarheid per C4-stap** volgens spec §8 in `C4Llm`, `RetryQueue`, de stapmodules en het CLI-commando. Schrijf eerst `test_call_report_names_step_and_reason`: tweede run met alleen een gewijzigde documentatieset roept uitsluitend `documented` aan en meldt stap en reden; afgekeurd antwoord toont regelnaam zonder prompt-/antwoordtekst. Bewijs FAIL vóór en PASS na implementatie, behoud vaste-topics-herhaling en herpoginggedrag; update de changelog. Gebruik een lokale providerfake, geen externe provider of indexmutatie.
+- Twee nieuwe echte smoke-runs vragen afzonderlijke toestemming van de gebruiker; de eerdere A/B is geen bewijs van de nog te implementeren zichtbaarheidsregels.
 - [ ] **Step 2: Run** smoke- en volledige suite → PASS.
 - [ ] **Step 3: Draai** de twee smoke-runs; leg aanroepen, duur en componentenlijst vast in het rapport.
 - [ ] **Step 4: Commit** `docs(c4): changelog voor map C4-uitvoer`.
