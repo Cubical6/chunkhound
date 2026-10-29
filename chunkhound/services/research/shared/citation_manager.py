@@ -78,6 +78,32 @@ class CitationManager:
         """
         return [c for c in chunks if c.get("file_path") in files]
 
+    def build_sources_metadata(
+        self,
+        chunks: list[dict[str, Any]],
+        files: dict[str, str],
+    ) -> dict[str, Any]:
+        """Describe the same synthesized context as the footer, without content."""
+        selected_chunks = self.filter_chunks_to_files(chunks, files)
+        selected_chunks.sort(
+            key=lambda chunk: (
+                chunk["file_path"],
+                chunk.get("start_line") or 0,
+                chunk.get("end_line") or 0,
+            )
+        )
+        return {
+            "files": sorted(files),
+            "chunks": [
+                {
+                    "file_path": chunk["file_path"],
+                    "start_line": chunk.get("start_line"),
+                    "end_line": chunk.get("end_line"),
+                }
+                for chunk in selected_chunks
+            ],
+        }
+
     def build_file_reference_map(
         self, chunks: list[dict[str, Any]], files: dict[str, str]
     ) -> dict[str, int]:
