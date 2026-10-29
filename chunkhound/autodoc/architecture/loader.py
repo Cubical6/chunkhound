@@ -295,8 +295,12 @@ def _read_labels(
 ) -> list[MergedLabel]:
     relation_by_id = {relation.id: relation for relation in relations}
     labels = []
-    for row in _records(data, "merged_labels"):
+    rows = data.get("merged_labels")
+    if not isinstance(rows, list):
+        raise _InvalidModelError("merged_labels: expected an array")
+    for value in rows:
         try:
+            row = _object(value)
             label = MergedLabel(
                 source_id=_text(row, "source"),
                 target_id=_text(row, "target"),

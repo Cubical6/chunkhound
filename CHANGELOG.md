@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Neutral AutoDoc architecture input** — Added a version-1 C4 model consumer bound to the selected Code Mapper index, with producer identities, statuses and evidence preserved. Topic coverage uses index-root file paths, unique-file union weights and final page slugs; direct targets remain separate from rolled-up parent links. Source links use each repository's pinned commit on GitHub, GitLab or Bitbucket, without credentials or branch fallback. Invalid input warns and skips only the affected content. This consumer boundary does not yet publish an architecture map.
+- **Neutral AutoDoc architecture input** — Added a version-1 C4 model consumer bound to the selected Code Mapper index, with producer identities, statuses and evidence preserved. Topic coverage uses index-root file paths, unique-file union weights and final page slugs; direct targets remain separate from rolled-up parent links. Source links use each repository's pinned commit on GitHub, GitLab or Bitbucket, without credentials or branch fallback. Invalid input warns and skips only the affected content; malformed merged-label rows do not discard valid architecture or other label overrides. This consumer boundary does not yet publish an architecture map.
 
 ### Changed
 

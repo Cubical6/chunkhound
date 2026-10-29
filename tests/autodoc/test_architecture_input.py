@@ -242,7 +242,10 @@ def test_unusable_merged_label_does_not_remove_relations(
     assert warnings
 
 
-def test_relation_provenance_and_valid_projection_label_are_preserved(tmp_path: Path):
+@pytest.mark.parametrize("malformed_row", [None, "not an object", []])
+def test_malformed_merged_label_rows_preserve_valid_architecture(
+    tmp_path: Path, malformed_row: object
+):
     document = model_document()
     relation = {
         "id": "code-link",
@@ -264,15 +267,26 @@ def test_relation_provenance_and_valid_projection_label_are_preserved(tmp_path: 
         },
     ]
     document["merged_labels"] = [
+        malformed_row,
         {
             "source": "container",
             "target": "system",
             "relations": ["code-link", "doc-link"],
             "label": "Exchanges status and events",
-        }
+        },
+        malformed_row,
     ]
-    model = load_document(tmp_path, document)
+    warnings: list[str] = []
+    model = load_document(tmp_path, document, warnings)
     assert model is not None
+    assert model.system.id == "system"
+    assert [element.id for element in model.elements] == [
+        "container",
+        "component",
+        "planned",
+    ]
+    assert [source.id for source in model.sources] == ["code", "doc"]
+    assert len(warnings) == 2
     assert [(r.id, r.status.value, r.source_ids) for r in model.relations] == [
         ("code-link", "aangetroffen", ["code", "doc"]),
         ("doc-link", "gedocumenteerd", ["doc"]),
