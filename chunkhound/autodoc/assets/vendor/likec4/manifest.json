@@ -5,17 +5,17 @@
     "version": "1.60.0"
   },
   "fork": {
-    "commit": "bb67656a1c76e5444fa29c48ac8652655a7f5e1f"
+    "commit": "a50e8566c801c786682647d7df1dd2bbe5438202"
   },
   "patch": {
     "file": "chunkhound.patch",
-    "sha256": "d19d90856fc73cf9bd49938da64da74d350938ff47872e01e0a67c1bf99e75d8"
+    "sha256": "fedde00ac718cdb6aadc110ffdbc2676351c955ab9a1a81a26ada4c8a8e88c20"
   },
   "artifact": {
     "file": "likec4-1.60.0-chunkhound.1.tgz",
     "package": "likec4",
     "version": "1.60.0-chunkhound.1",
-    "sha256": "27bea311f5a30cfa389fbd7ad8c9b0a06f763b2f8e5df856ab80aa21709b723b"
+    "sha256": "b06c127792dc67605e6fc4a4c6ab35ad9d1b835c43143fbda5d7c3caff33d402"
   },
   "license": {
     "file": "LICENSE",

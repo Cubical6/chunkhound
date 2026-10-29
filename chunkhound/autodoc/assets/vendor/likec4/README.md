@@ -56,7 +56,9 @@ version 1: element kind/status/sources/topics/focusView/defaultView, or relation
 status/sources/source/target. The patch is the authoritative decoder contract.
 Focus resolves a metadata view ID using native navigation; relationship
 endpoints use the actual underlying native model FQN. Source links accept
-HTTP(S) or root-relative URLs; null/unsafe URLs stay plain text.
+credential-free HTTP(S) or root-relative URLs. URLs with a nonempty parsed
+username/password, malformed URLs, and null/unsafe URLs render as plain labels
+without anchors; valid source and topic URLs retain their original hrefs.
 
 For a fully local site, use LikeC4's existing `injectFontCss={false}` prop and
 locally bundled `@fontsource-variable/ibm-plex-sans` CSS, as the native SPA does.

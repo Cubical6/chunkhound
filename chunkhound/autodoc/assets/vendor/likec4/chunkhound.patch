@@ -12,10 +12,10 @@ index 700483107..567411411 100644
      "rimraf": "^6.1.3",
 diff --git a/packages/diagram/src/chunkhound/metadata.ts b/packages/diagram/src/chunkhound/metadata.ts
 new file mode 100644
-index 000000000..741886932
+index 000000000..447c259e0
 --- /dev/null
 +++ b/packages/diagram/src/chunkhound/metadata.ts
-@@ -0,0 +1,130 @@
+@@ -0,0 +1,137 @@
 +// SPDX-License-Identifier: MIT
 +// Copyright (c) 2026 ChunkHound contributors
 +
@@ -136,10 +136,17 @@ index 000000000..741886932
 +  return value && endpoint(value["source"]) && endpoint(value["target"]) ? (value as unknown as RelationDetail) : null;
 +}
 +
-+/** Permit web links and local final topic paths, never script or editor schemes. */
++/** Permit web links without credentials and local final topic paths, never script or editor schemes. */
 +export function detailHref(url: string | null): string | undefined {
 +  if (!url || /[\u0000-\u0020\\]/u.test(url)) return undefined;
-+  return /^https?:\/\//u.test(url) || (url.startsWith("/") && !url.startsWith("//")) ? url : undefined;
++  if (url.startsWith("/") && !url.startsWith("//")) return url;
++  if (!/^https?:\/\//u.test(url)) return undefined;
++  try {
++    const parsed = new URL(url);
++    return parsed.username || parsed.password ? undefined : url;
++  } catch {
++    return undefined;
++  }
 +}
 +
 +/** Keep source labels useful in private and public output without exposing raw URLs. */
@@ -147,7 +154,7 @@ index 000000000..741886932
 +  return `${value.kind}: ${value.path}:${value.startLine}–${value.endLine}`;
 +}
 diff --git a/packages/diagram/src/likec4diagram/relationship-popover/RelationshipPopover.tsx b/packages/diagram/src/likec4diagram/relationship-popover/RelationshipPopover.tsx
-index e9ea7cd52..181b58994 100644
+index e9ea7cd52..8f93ce7bc 100644
 --- a/packages/diagram/src/likec4diagram/relationship-popover/RelationshipPopover.tsx
 +++ b/packages/diagram/src/likec4diagram/relationship-popover/RelationshipPopover.tsx
 @@ -5,13 +5,13 @@
@@ -963,7 +970,7 @@ index e9ea7cd52..181b58994 100644
          {metadataTooltipLabel && (
            <Tooltip
              label={metadataTooltipLabel}
-@@ -549,34 +577,48 @@ const Relationship = forwardRef<
+@@ -549,34 +577,51 @@ const Relationship = forwardRef<
              withinPortal
              styles={{
                tooltip: {
@@ -989,19 +996,22 @@ index e9ea7cd52..181b58994 100644
 +        <VStack alignItems="stretch" gap="1">
 +          {detail.status && <Text size="xs">status: {detail.status}</Text>}
 +          <Label>bronnen</Label>
-+          {detail.sources.map((source, index) => (
-+            <Text
-+              component="a"
-+              size="xs"
-+              key={index}
-+              href={detailHref(source.url)}
-+              target="_blank"
-+              rel="noopener noreferrer"
-+              style={{ overflowWrap: "anywhere" }}
-+            >
-+              {sourceLabel(source)}
-+            </Text>
-+          ))}
++          {detail.sources.map((source, index) => {
++            const href = detailHref(source.url);
++            return (
++              <Text
++                component={href ? "a" : "span"}
++                size="xs"
++                key={index}
++                href={href}
++                target="_blank"
++                rel="noopener noreferrer"
++                style={{ overflowWrap: "anywhere" }}
++              >
++                {sourceLabel(source)}
++              </Text>
++            );
++          })}
 +        </VStack>
 +      )}
        {r.kind && (
@@ -1024,7 +1034,7 @@ index e9ea7cd52..181b58994 100644
              {r.technology}
            </Text>
          </HStack>
-@@ -586,64 +628,62 @@ const Relationship = forwardRef<
+@@ -586,64 +631,62 @@ const Relationship = forwardRef<
            <Label>description</Label>
            <Box
              css={{
@@ -1124,7 +1134,7 @@ index e9ea7cd52..181b58994 100644
 +  return { full, short };
  }
 diff --git a/packages/diagram/src/overlays/element-details/ElementDetailsCard.tsx b/packages/diagram/src/overlays/element-details/ElementDetailsCard.tsx
-index 84cf01efe..a05355dd5 100644
+index 84cf01efe..be9f2d5ed 100644
 --- a/packages/diagram/src/overlays/element-details/ElementDetailsCard.tsx
 +++ b/packages/diagram/src/overlays/element-details/ElementDetailsCard.tsx
 @@ -5,18 +5,9 @@
@@ -1867,7 +1877,7 @@ index 84cf01efe..a05355dd5 100644
  }
  
  function ElementTags({ tags, onClick }: { tags: readonly string[]; onClick: (tag: string) => void }) {
-@@ -623,13 +604,63 @@ function ElementTags({ tags, onClick }: { tags: readonly string[]; onClick: (tag
+@@ -623,13 +604,66 @@ function ElementTags({ tags, onClick }: { tags: readonly string[]; onClick: (tag
            key={tag}
            tag={tag}
            cursor="pointer"
@@ -1903,18 +1913,21 @@ index 84cf01efe..a05355dd5 100644
 +      {detail.status && <ElementProperty title="status">{detail.status}</ElementProperty>}
 +      <ElementProperty title="bronnen">
 +        <Stack gap="xs">
-+          {detail.sources.map((source, index) => (
-+            <Text
-+              component="a"
-+              key={index}
-+              href={detailHref(source.url)}
-+              target="_blank"
-+              rel="noopener noreferrer"
-+              style={{ overflowWrap: "anywhere" }}
-+            >
-+              {sourceLabel(source)}
-+            </Text>
-+          ))}
++          {detail.sources.map((source, index) => {
++            const href = detailHref(source.url);
++            return (
++              <Text
++                component={href ? "a" : "span"}
++                key={index}
++                href={href}
++                target="_blank"
++                rel="noopener noreferrer"
++                style={{ overflowWrap: "anywhere" }}
++              >
++                {sourceLabel(source)}
++              </Text>
++            );
++          })}
 +        </Stack>
 +      </ElementProperty>
 +      <ElementProperty title="topics">
