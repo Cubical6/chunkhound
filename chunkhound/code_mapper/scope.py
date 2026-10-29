@@ -38,9 +38,12 @@ def collect_scope_files(
         if ignore_sources is None:
             ignore_sources = ["gitignore"]
 
+        # Map needs Git-aware pruning, including repository-local excludes.
+        sources = [*ignore_sources, "map_scope"]
+
         ignore_engine = build_repo_aware_ignore_engine(
             root=project_root,
-            sources=list(ignore_sources),
+            sources=sources,
             chignore_file=".chignore",
             config_exclude=list(indexing_excludes),
             backend=gitignore_backend,

@@ -577,7 +577,7 @@ class ValidatingEmbeddingProvider(FakeEmbeddingProvider):
 
     Intercepts all texts sent to embed() and validates they conform
     to the min/max chunk size constraints:
-    - max_chunk_size: 1200 non-whitespace chars
+    - max_chunk_size: 1200 non-whitespace content chars (metadata excluded)
     - min_chunk_size: 25 non-whitespace chars (soft threshold)
     - safe_token_limit: 6000 tokens (estimated as len(text) // 3)
 
@@ -594,7 +594,7 @@ class ValidatingEmbeddingProvider(FakeEmbeddingProvider):
         """Initialize validating embedding provider.
 
         Args:
-            max_chunk_size: Maximum non-whitespace chars per chunk (default 1200)
+            max_chunk_size: Maximum non-whitespace content chars (default 1200)
             min_chunk_size: Soft threshold for suspiciously small chunks (default 25)
             safe_token_limit: Maximum estimated tokens per chunk (default 6000)
             **kwargs: Arguments passed to FakeEmbeddingProvider
@@ -616,25 +616,25 @@ class ValidatingEmbeddingProvider(FakeEmbeddingProvider):
     def _extract_language_from_header(self, text: str) -> str | None:
         """Extract language from embedding header if present.
 
-        Header format: "# path/to/file.py (python)\n"
+        Header format: "# path/to/file.py (python) [optional metadata]\n"
         Returns language string (lowercase) or None if not found.
         """
         if not text.startswith("# "):
             return None
-        # Look for language in parentheses within first 200 chars
-        match = re.search(r"\((\w+)\)\n", text[:200])
+        header = text.partition("\n")[0]
+        match = re.search(r"\((\w+)\)(?: \[.*\])?$", header)
         return match.group(1).lower() if match else None
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings while validating chunk size constraints."""
         for text in texts:
             self.all_texts.append(text)
-            # Measure non-whitespace chars (same as ChunkMetrics.from_content)
-            non_ws_chars = len(re.sub(r"\s", "", text))
+            language = self._extract_language_from_header(text)
+            # cAST limits source content, not the variable-length metadata header.
+            content = text.partition("\n")[2] if language is not None else text
+            non_ws_chars = len(re.sub(r"\s", "", content))
             # Estimate tokens (conservative: len // 3)
             estimated_tokens = len(text) // 3
-            # Extract language from header for violation tracking
-            language = self._extract_language_from_header(text)
 
             # Update stats
             self.chunk_stats["total"] += 1

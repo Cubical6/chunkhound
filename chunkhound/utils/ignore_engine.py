@@ -99,6 +99,31 @@ def _collect_global_gitignore_patterns() -> list[str]:
     return patterns
 
 
+def _collect_git_info_exclude_patterns(root: Path, sources: list[str]) -> list[str]:
+    """Resolve local excludes through Git, including linked-worktree metadata."""
+    if "map_scope" not in sources:
+        return []
+
+    from chunkhound.utils.git_safe import GitCommandError, run_git
+
+    try:
+        result = run_git(["rev-parse", "--git-path", "info/exclude"], cwd=root)
+        if result.returncode != 0:
+            return []
+        exclude = Path(result.stdout.strip())
+        if not exclude.is_absolute():
+            exclude = root / exclude
+        lines = exclude.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except (GitCommandError, OSError):
+        return []
+    patterns: list[str] = []
+    for raw in lines:
+        line = raw.strip()
+        if line and not line.startswith("#"):
+            patterns.extend(_transform_gitignore_line(".", line))
+    return patterns
+
+
 def build_ignore_engine(
     root: Path,
     sources: list[str],
@@ -129,7 +154,9 @@ def build_ignore_engine(
             pre_spec = None
             if config_exclude:
                 pre_spec = _compile_gitwildmatch(config_exclude)
-            pats = _collect_gitignore_patterns(root, pre_spec)
+            # Local rules have lower priority than .gitignore; never load globals.
+            pats = _collect_git_info_exclude_patterns(root, sources)
+            pats.extend(_collect_gitignore_patterns(root, pre_spec))
             if pats:
                 compiled.append((root / ".gitignore", _compile_gitwildmatch(pats)))
         # "chignore" source is no longer supported.
@@ -448,6 +475,7 @@ class RepoAwareIgnoreEvaluator:
             reverse=True,
         )
         self.sources = sources
+        self.requires_python_walk = "map_scope" in sources
         self.chignore_file = chignore_file
         self.config_exclude = list(config_exclude or [])
 
@@ -709,6 +737,7 @@ class RepoAwareLibgit2Evaluator:
             reverse=True,
         )
         self.sources = sources
+        self.requires_python_walk = "map_scope" in sources
         self.chignore_file = chignore_file
         self.config_exclude = list(config_exclude or [])
 

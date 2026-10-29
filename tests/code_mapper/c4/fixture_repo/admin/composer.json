@@ -1,0 +1,11 @@
+{
+  "name": "acme/admin",
+  "bin": [
+    "src/Admin.php"
+  ],
+  "autoload": {
+    "psr-4": {
+      "Acme\\Admin\\": "src/"
+    }
+  }
+}

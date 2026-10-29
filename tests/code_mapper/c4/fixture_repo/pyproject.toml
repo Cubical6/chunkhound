@@ -1,0 +1,7 @@
+[project]
+name = "shop"
+version = "0.1.0"
+dependencies = ["requests"]
+
+[project.scripts]
+shop = "shop.cli:main"

@@ -242,7 +242,10 @@ def test_version_helper_contract(scenario: str, expected_version: str | None) ->
             _create_tagged_repo(repo_dir, "v4.3.0rc1")
         elif scenario == "git_tag_only":
             _create_tagged_repo(repo_dir, "v4.3.0rc1")
-        elif scenario != "no_sources":
+        elif scenario == "no_sources":
+            # A real, untagged repo stops discovery at this disposable root.
+            _run(["git", "init"], repo_dir)
+        else:
             raise AssertionError(f"Unhandled scenario {scenario}")
 
         result = _run_version_helper(repo_dir, env)

@@ -159,6 +159,7 @@ def run_code_mapper(
             self.path = scope_path
             self.verbose = False
             self.overview_only = False
+            self.c4 = False
             self.out = out_dir
             self.comprehensiveness = "low"
             self.combined = None

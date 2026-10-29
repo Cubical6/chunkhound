@@ -3,6 +3,30 @@
 ## Overview
 This document outlines the comprehensive testing strategy for the unified configuration system to ensure it works correctly and prevent regressions.
 
+## Local QA isolation
+
+`tests/conftest.py::isolated_user_config` gives ordinary tests an empty,
+function-scoped `HOME` and `USERPROFILE`, inherited by their CLI subprocesses.
+The home is a sibling of each test's `tmp_path`, so subprocess caches cannot
+be discovered as project input. Tests for global configuration can populate
+that home or override it explicitly. API keys and integration opt-ins are not
+cleared by this fixture. Existing `integration`-marked tests retain their real
+home because CLI authentication can depend on it; they are not made offline
+or skipped by this isolation.
+
+Use a disposable database and explicit target/config for indexing tests; the
+indexed-root guard is a safety contract, not an obstacle to bypass. Tests that
+need Git semantics must initialize a real disposable repository and supply
+their own commit identity rather than depend on the enclosing checkout or
+developer Git configuration.
+
+Mocked Watchman tests that never bind a socket may opt into
+`fake_watchman_listener` to use their owned placeholder path. Real sidecar
+lifecycle and socket path-limit tests must retain the production resolver.
+Embedding size checks distinguish the parser's non-whitespace source-content
+limit from the provider's full formatted-input token limit; variable-length
+file metadata is not a fixed content allowance.
+
 ## Testing Approaches
 
 ### 1. Unit Tests (test_unified_config_system.py)

@@ -11,8 +11,10 @@ def _run(cmd: list[str], cwd: Path | None = None, timeout: int = 30) -> subproce
 
 def test_diagnose_reports_mismatch_for_default_excludes(tmp_path: Path) -> None:
     root = tmp_path
-    # Create a git repo (no .gitignore rules)
-    (root / ".git").mkdir()
+    # A real repo prevents Git from discovering the enclosing execution checkout.
+    subprocess.run(
+        ["git", "init", str(root)], check=True, capture_output=True, text=True
+    )
     # File under a default-excluded directory; Git won't ignore it, CH will
     (root / "other" / "build").mkdir(parents=True, exist_ok=True)
     (root / "other" / "build" / "tool.txt").write_text("x")

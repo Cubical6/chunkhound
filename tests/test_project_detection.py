@@ -167,11 +167,13 @@ class TestProjectRootDetection:
             result = find_project_root(other_project)
             assert result == other_project
 
-    def test_fails_when_no_markers_found(self):
+    def test_fails_when_no_markers_found(self, monkeypatch):
         """Should exit with error when no markers found."""
         with tempfile.TemporaryDirectory() as tmpdir:
             empty_dir = Path(tmpdir) / "empty"
             empty_dir.mkdir()
+            # Stop discovery at the disposable tree, not the enclosing checkout.
+            monkeypatch.setattr(Path, "home", lambda: Path(tmpdir).resolve())
 
             # Clean any leftover markers from temp directory tree
             def clean_markers(root_path: Path, current_path: Path):

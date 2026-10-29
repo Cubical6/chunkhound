@@ -28,13 +28,8 @@ logger = logging.getLogger(__name__)
 
 # Derive constraints from CASTConfig to avoid drift
 _config = CASTConfig()
-# Content limit is max_chunk_size non-ws chars, but embedded text includes
-# header overhead. Header format: "# {file_path} ({language})\n"
-# Components: "# " (2) + tmp_path (varies by OS, up to ~100) + "/" (1)
-# + filename (~20) + " (" (2) + language (~10) + ")\n" (2) ≈ 137 max.
-# Rounded to 150 for safety margin.
-HEADER_OVERHEAD = 150
-MAX_CHUNK_SIZE = _config.max_chunk_size + HEADER_OVERHEAD  # non-ws chars
+# cAST constrains content; the provider separately checks full embedding tokens.
+MAX_CHUNK_SIZE = _config.max_chunk_size
 # Intentionally lower than CASTConfig.min_chunk_size (50) — this is a soft
 # warning threshold for the test harness, not an enforcement limit. Using a
 # lower value avoids false-positive warnings from legitimate small chunks

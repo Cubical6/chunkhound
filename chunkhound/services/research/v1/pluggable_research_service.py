@@ -496,6 +496,10 @@ class PluggableResearchService(ProgressEmitterMixin):
         }
 
         logger.info(f"Deep research completed: {metadata}")
+        # Keep per-source provenance out of completion logs and progress payloads.
+        metadata["sources"] = self._citation_manager.build_sources_metadata(
+            prioritized_chunks, budgeted_files
+        )
 
         # Emit completion event
         await self._emit_event(

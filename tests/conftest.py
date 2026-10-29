@@ -149,6 +149,37 @@ def free_opencode_models() -> list[str]:
     return servable
 
 
+@pytest.fixture(autouse=True)
+def isolated_user_config(tmp_path_factory, monkeypatch, request):
+    """Keep user-level config out of tests and their CLI subprocesses.
+
+    Tests exercising global discovery can populate this home or override it.
+    Live integration tests retain their home-based CLI authentication; API keys
+    and integration opt-ins are intentionally left unchanged for every test.
+    """
+    if request.node.get_closest_marker("integration"):
+        return
+    # Keep caches written by subprocesses outside the tree a test may index.
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+
+@pytest.fixture
+def fake_watchman_listener(monkeypatch):
+    """Use an owned placeholder path only when the test never binds a socket.
+
+    Real sidecar lifecycle and path-limit tests must use the production resolver.
+    """
+    from chunkhound.watchman.sidecar import WatchmanSidecarPaths
+
+    monkeypatch.setattr(
+        WatchmanSidecarPaths,
+        "_resolve_socket_path",
+        staticmethod(lambda *, project_root, project_socket_path: project_socket_path),
+    )
+
+
 @pytest.fixture
 def clean_environment(monkeypatch):
     """Ensure tests run with a clean environment.
