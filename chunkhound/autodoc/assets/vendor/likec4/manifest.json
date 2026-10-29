@@ -1,0 +1,42 @@
+{
+  "upstream": {
+    "url": "https://github.com/likec4/likec4",
+    "commit": "0375d146f8de2eb919033bd3b43b3701194f518b",
+    "version": "1.60.0"
+  },
+  "fork": {
+    "commit": "bb67656a1c76e5444fa29c48ac8652655a7f5e1f"
+  },
+  "patch": {
+    "file": "chunkhound.patch",
+    "sha256": "d19d90856fc73cf9bd49938da64da74d350938ff47872e01e0a67c1bf99e75d8"
+  },
+  "artifact": {
+    "file": "likec4-1.60.0-chunkhound.1.tgz",
+    "package": "likec4",
+    "version": "1.60.0-chunkhound.1",
+    "sha256": "27bea311f5a30cfa389fbd7ad8c9b0a06f763b2f8e5df856ab80aa21709b723b"
+  },
+  "license": {
+    "file": "LICENSE",
+    "spdx": "MIT",
+    "sha256": "536b1e1c961552038f0bda5c755fff467883f914c21535c5d20a7f08c2a5ead2"
+  },
+  "toolchain": {
+    "node": "24.18.1",
+    "pnpm": "11.28.5",
+    "oxfmt": "0.75.0",
+    "bun": "1.4.4"
+  },
+  "buildCommands": [
+    "pnpm install --frozen-lockfile",
+    "pnpm turbo run build --filter=likec4 --concurrency=1",
+    "pnpm turbo run pack --filter=likec4"
+  ],
+  "reconstruction": {
+    "base": "upstream.commit",
+    "patch": "chunkhound.patch",
+    "verified": "Clean upstream checkout, patch apply, frozen install, full native build/pack, fresh tarball consumer build, and real browser element/relation/navigation contract.",
+    "byteIdenticalArchiveRequired": false
+  }
+}
