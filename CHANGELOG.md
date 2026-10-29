@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Neutral AutoDoc architecture input** — Added a version-1 C4 model consumer bound to the selected Code Mapper index, with producer identities, statuses and evidence preserved. Topic coverage uses index-root file paths, unique-file union weights and final page slugs; direct targets remain separate from rolled-up parent links. Source links use each repository's pinned commit on GitHub, GitLab or Bitbucket, without credentials or branch fallback. Invalid input warns and skips only the affected content. This consumer boundary does not yet publish an architecture map.
+
 ### Changed
 
 - **Astro 7 / Vite 8 documentation sites** — Upgraded both the AutoDoc template and project website to Astro 7.4.2, with Vite 8 supplied by Astro. Building either site now requires Node.js 22.23.4 or newer and npm 9.6.5 or newer; CI uses Node.js 24. Existing generated sites can refresh their template with `chunkhound autodoc --assets-only --out-dir docs-site/`, followed by `npm install` and `npm run build` in that directory. Markdown/GFM, syntax highlighting and the existing Mermaid major versions are retained.
