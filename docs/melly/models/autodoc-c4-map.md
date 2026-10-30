@@ -145,6 +145,8 @@ classDiagram
         +ViewLevel level
         +text scope_element_id
         +list~text~ include_rules
+        +text title
+        +list~text~ relation_ids
     }
     %% technical: onderscheid tussen de afgesproken gegenereerde projecties
     class ViewLevel {
@@ -171,7 +173,7 @@ classDiagram
     }
     %% technical: extern model lezen, contract controleren en verwachte invoerproblemen melden
     class ModelLoader {
-        +load(input_dir, scope) C4Model?
+        +load(index_path, log_warning) C4Model?
     }
     %% technical: publicatie naar LikeC4-taal, geen architectuuronderzoek
     class LikeC4Writer {
@@ -235,11 +237,15 @@ classDiagram
 | `chunkhound/autodoc/generator.py`          | Model laden na topics, bundel maken en bestaande generatie aanroepen.                                                                            |
 | `chunkhound/autodoc/site_writer.py`        | Gewone site plus optionele kaart publiceren; volledige generatie versus `--assets-only` onderscheiden.                                           |
 | Gegenereerde Astro/React-assets            | Kaart en minikaart weergeven met de fork; geen modelinferentie.                                                                                  |
-| LikeC4-fork                                | `ElementDetailsCard.tsx` en `RelationshipPopover.tsx`: gestructureerde ChunkHound-metadata, bronnen, topics en status per onderliggende relatie. |
+| LikeC4-fork                                | Native detailvensters voor metadata, bronnen, topics en status; daarnaast metadata-begrensde hierarchyondersteuning door validatie, viewberekening, layout en bestaande relatiebediening. |
 
 De optionele Astro-assets zijn `ArchitectureMap.astro` en `ArchitectureMiniMap.astro`: wrappers die hun React-kind rechtstreeks importeren en `client:only="react"` toepassen. `DocLayout.astro` ontdekt de wrappers, niet dynamisch te hydrateren React-tags. Zo blijft de kaart interactief en zijn zonder model geen LikeC4-virtuele imports nodig. De plugin gebruikt `throwIfInvalid: true` om eigen ongeldige DSL-generatie niet stil te accepteren. Bron: besluitenlog rij 46, [Astro client-directives](https://docs.astro.build/en/reference/directives-reference/#client-directives) en [LikeC4 v1.60.0 Vite-plugin-documentatie](https://github.com/likec4/likec4/blob/v1.60.0/apps/docs/src/content/docs/tooling/vite-plugin.mdx).
 
 De LikeC4-fork wordt als gebouwd `.tgz`-pakket met ChunkHound gedistribueerd. AutoDoc kopieert het naar de gegenereerde site; `package.json` verwijst ernaar als lokale `file:`-dependency met pakketnaam `likec4`. De forkbuild verwerkt de aangepaste diagramcomponenten via de React-bundel in het uiteindelijke `likec4`-pakket. Forkupdates vervangen het archief; de uitvoering legt bronrevisie en licentievermeldingen vast. Geen eigen npm-publicatie en geen bewering dat overige npm-dependencies offline beschikbaar zijn. Bron: besluitenlog rij 47 en [LikeC4 v1.60.0 packagebuild](https://github.com/likec4/likec4/blob/v1.60.0/packages/likec4/tsdown.config.mts).
+
+Technische herziening Task3 (besluitenlog rij 60–62; specificatie §Native ondersteuning van hiërarchische relaties): de bestaande `metadata.chunkhound_id` begrenst de native uitbreiding per relatie. Systeem↔container/component en container↔component blijven echte relaties tussen de bestaande neutrale identiteiten; geen proxyentities, nieuwe domeinklassen, afgevlakte hiërarchie of alternatief exportformaat. Alle oorspronkelijke eindpunten/status/bronnen blijven behouden, ook wanneer een view op een hoger niveau projecteert. Correcte native layout en aanklikbare details zijn verplicht; alleen een berekende relatie is geen renderingbewijs. Domeinregels R1–R11 en directe topicdoelen veranderen niet.
+
+De technische signatures volgen de reeds geaccepteerde execution-Rulings1, 3 en 4 (`.superpowers/sdd/2026-10-29-autodoc-c4-map/progress.md`, besluitenlog rij 65): `ModelLoader.load` ontvangt de gekozen `index_path` en optionele waarschuwingcallback; `ViewSpec.title` is optioneel met `""`, `ViewSpec.relation_ids` met `None`. `None` betekent alle modelrelaties, `[]` géén; de oorspronkelijke vier verplichte `ViewSpec`-velden blijven bestaan. Deze interne selectiedata zijn geen nieuwe producentvelden of domeinregels. Het Task3-plan legt de concrete native relationcontext en geometriehelper vast; R1–R11 veranderen niet.
 
 Bestandslijsten (`Element.files`, `CoveredElement.files`) en `Source.path` gebruiken dezelfde padruimte: POSIX-paden relatief aan de gezamenlijke indexroot. `Repository.path` ligt in die padruimte; alleen voor de codehost-URL wordt het repositoryvoorvoegsel van het bronpad verwijderd. `TopicCoverage.file` is daarentegen een topicbestandsnaam relatief aan de map-uitvoermap, gekoppeld aan de bestaande `DocsitePage.source_path`. Bron: besluitenlog rij 48, `chunkhound/code_mapper/scope.py:63-66` en `chunkhound/autodoc/index_loader.py:84-85`.
 
