@@ -49,7 +49,7 @@ def _json(value: object) -> str:
 def _label(model: C4Model, source: str, target: str, relations: list[Relation]) -> str:
     titles = sorted({relation.title for relation in relations})
     if len(titles) == 1:
-        return titles[0]
+        return titles[0][:60]
     relation_ids = {relation.id for relation in relations}
     for label in model.merged_labels:
         if label.source_id != source or label.target_id != target:

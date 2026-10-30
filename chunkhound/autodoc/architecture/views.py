@@ -36,15 +36,6 @@ def component_view_id(container_id: str) -> str:
     return "components_" + container_id.encode("utf-8").hex()
 
 
-def _contains(parents: dict[str, str | None], ancestor: str, descendant: str) -> bool:
-    parent = parents[descendant]
-    while parent is not None:
-        if parent == ancestor:
-            return True
-        parent = parents[parent]
-    return False
-
-
 def project_relations(
     model: C4Model, visible: set[str], relation_ids: list[str] | None = None
 ) -> dict[tuple[str, str], list[Relation]]:
@@ -65,9 +56,6 @@ def project_relations(
             continue
         source, target = project(relation.source_id), project(relation.target_id)
         if source is None or target is None or source == target:
-            continue
-        # Native LikeC4 omits edges within the same parent/child hierarchy.
-        if _contains(parents, source, target) or _contains(parents, target, source):
             continue
         pairs.setdefault((source, target), []).append(relation)
     return pairs
