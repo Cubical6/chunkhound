@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Op OMP coördineert `sp-execute` seriële Orca-workers en onafhankelijke taakreviews; geen Native-uitvoering. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** door de gebruiker goedgekeurd op 2026-10-29 (besluitenlog rij 56). Uitvoering via de vaste Subagent-driven-coördinator in de afzonderlijke execution-worktree; nog geen productimplementatie vanuit deze designsessie.
+**Status:** oorspronkelijke plan goedgekeurd op 2026-10-29 (besluitenlog rij 56); execution nu gepauzeerd bij Task3, met één onopgeloste Important. De technische richting voor native hierarchyondersteuning is goedgekeurd; de geschreven specificatieherziening van 2026-10-30 en daarna de concrete Task3-planherziening vereisen nog afzonderlijke gebruikersgoedkeuring. Onderstaande oorspronkelijke Task3 is daarvoor niet uitvoerbaar. Task1/2 blijven goedgekeurd; Task4–6/final review zijn niet gestart. Geen nieuwe execution-worktree, Run, coördinator of productimplementatie vanuit design.
 
 **Goal:** Publiceer het neutrale C4-model uit map-uitvoer als navigeerbare AutoDoc-kaart met controleerbare bronnen, individuele relaties en directe topicdoelen.
 
@@ -10,7 +10,7 @@
 
 **Tech Stack:** bestaande Python/uv/dataclasses/pytest/Ruff/mypy; Astro 7.4.2, Vite 8.3.5, React/React DOM 19.3.0, `@astrojs/react` 7.1.1; LikeC4-fork vanaf 1.60.0; Node ≥22.23.4, CI 24; forkworkspace pnpm 11.28.5.
 
-**Spec:** [goedgekeurde specificatie](../specs/2026-10-29-autodoc-c4-map-design.md). **Model:** [klassen, R1–R11 en sequenties](../models/autodoc-c4-map.md). **Decisions:** [besluitenlog](../decisions/2026-10-27-autodoc-c4-map.md), inclusief rij 54 en 56. Geen programregister. `map-structuur-design` blijft een afzonderlijke producentafhankelijkheid.
+**Spec:** [normatieve specificatie met native herziening ter beoordeling](../specs/2026-10-29-autodoc-c4-map-design.md). **Model:** [klassen, R1–R11 en sequenties](../models/autodoc-c4-map.md). **Decisions:** [besluitenlog](../decisions/2026-10-27-autodoc-c4-map.md), inclusief rij 54, 56 en 60–62. Geen programregister. `map-structuur-design` blijft een afzonderlijke producentafhankelijkheid.
 
 ## Project Commands
 
