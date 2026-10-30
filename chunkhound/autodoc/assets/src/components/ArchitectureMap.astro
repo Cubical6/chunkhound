@@ -1,0 +1,53 @@
+---
+import ArchitectureMap from './ArchitectureMap.tsx';
+import type { ArchitectureData } from './ArchitectureMap';
+interface Props {
+  data: ArchitectureData;
+}
+const { data } = Astro.props;
+---
+
+<ArchitectureMap data={data} client:only="react">
+  <p slot="fallback">Loading architecture map…</p>
+</ArchitectureMap>
+
+<style is:global>
+  .architecture-map {
+    min-width: 0;
+  }
+  .architecture-map-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.5rem;
+  }
+  .architecture-map-toolbar label {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .architecture-map-toolbar select {
+    min-width: 0;
+    max-width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 0.4rem;
+    background: var(--panel);
+    color: var(--ink);
+    font: inherit;
+  }
+  .architecture-map-help,
+  .architecture-map-legend {
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+  .architecture-map-warning {
+    padding: 0.75rem;
+    border: 1px solid var(--accent-strong);
+    border-radius: 0.4rem;
+    overflow-wrap: anywhere;
+  }
+</style>
