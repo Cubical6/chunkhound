@@ -4,6 +4,14 @@ import '../styles/global.css';
 import site from '../data/site.json';
 import searchIndexData from '../data/search.json';
 import navData from '../data/nav.json';
+import architecture from '../data/architecture.json';
+
+// Each discovered Astro wrapper directly imports its own client island.
+const mapComponents = import.meta.glob(
+  {{ARCHITECTURE_COMPONENT_GLOB}}, { eager: true }
+);
+const ArchitectureMiniMap = Object.values(mapComponents)[0]?.default;
+const hasArchitecture = architecture.schemaVersion === 1 && architecture.enabled === true;
 const { title, description } = Astro.props;
 const pages = Object.values(
   import.meta.glob<MarkdownInstance<{ title?: string; order?: number }>>(
@@ -44,6 +52,8 @@ const normalizePath = (value) => {
 const current = normalizePath(Astro.url.pathname);
 const isActive = (url) => current === normalizePath(url);
 const activeTopic = nav.find((item) => isActive(item.url));
+const topicArchitecture = activeTopic ? architecture.topics[activeTopic.slug] : null;
+const directElements = topicArchitecture?.directElementIds ?? [];
 const currentIndex = nav.findIndex((item) => isActive(item.url));
 const prevTopic = currentIndex > 0 ? nav[currentIndex - 1] : null;
 const nextTopic =
@@ -115,6 +125,7 @@ const breadcrumb = activeTopic ? `Topics / ${activeTopic.title}` : 'Overview';
             >
               Overview
             </a>
+            {hasArchitecture && <a href="/architecture/">Architecture</a>}
             {hasGlossary && (
               <a
                 href="/glossary/"
@@ -177,6 +188,20 @@ const breadcrumb = activeTopic ? `Topics / ${activeTopic.title}` : 'Overview';
                 <span></span>
               )}
             </div>
+          )}
+          {hasArchitecture && current === '/' && ArchitectureMiniMap && (
+            <ArchitectureMiniMap viewId={architecture.contextView} />
+          )}
+          {hasArchitecture && directElements.length > 0 && (
+            <section class="topic-architecture" aria-label="Topic architecture">
+              <p>Hoort bij: {directElements.map((id) => {
+                const element = architecture.elements[id];
+                return <a href={`/architecture/?view=${encodeURIComponent(element.focusView)}`}>{element.name}</a>;
+              })}</p>
+              {ArchitectureMiniMap && topicArchitecture?.view && (
+                <ArchitectureMiniMap viewId={topicArchitecture.view} />
+              )}
+            </section>
           )}
           <article class="page-content">
             <slot />

@@ -33,18 +33,28 @@ def _render_font_license_text(filename: str) -> str:
     return load_text(f"public/fonts/licenses/{filename}")
 
 
-def _render_package_json(site: DocsiteSite) -> str:
+def _render_package_json(
+    site: DocsiteSite, *, architecture_enabled: bool = False
+) -> str:
     safe_name = safe_scope_label(site.scope_label).replace("_", "-")
     package_name = f"chunkhound-docs-{safe_name}" if safe_name else "chunkhound-docs"
-    return load_text("package.json").replace("{{PACKAGE_NAME}}", package_name)
+    payload = json.loads(load_text("package.json"))
+    payload["name"] = package_name
+    if not architecture_enabled:
+        for dependency in ("@astrojs/react", "react", "react-dom", "likec4"):
+            payload["dependencies"].pop(dependency, None)
+    return json.dumps(payload, indent=2) + "\n"
 
 
 def _render_astro_config() -> str:
     return load_text("astro.config.mjs")
 
 
-def _render_tsconfig() -> str:
-    return load_text("tsconfig.json")
+def _render_tsconfig(*, architecture_enabled: bool = False) -> str:
+    payload = json.loads(load_text("tsconfig.json"))
+    if not architecture_enabled:
+        payload["compilerOptions"]["types"].remove("likec4/vite-plugin-modules")
+    return json.dumps(payload, indent=2) + "\n"
 
 
 def _render_readme(site: DocsiteSite) -> str:
@@ -64,7 +74,10 @@ def _render_site_json(site: DocsiteSite) -> str:
     return json.dumps(payload, ensure_ascii=True, indent=2) + "\n"
 
 
-def _render_search_index(pages: list[DocsitePage]) -> str:
+def _render_search_index(
+    pages: list[DocsitePage],
+    architecture_records: list[dict[str, str]] | None = None,
+) -> str:
     records: list[dict[str, str]] = []
     for page in pages:
         body = strip_references_section(page.body_markdown)
@@ -78,6 +91,7 @@ def _render_search_index(pages: list[DocsitePage]) -> str:
                 "url": f"/topics/{page.slug}/",
             }
         )
+    records.extend(architecture_records or [])
     return json.dumps(records, ensure_ascii=True, indent=2)
 
 
@@ -120,12 +134,21 @@ def _render_glossary_page(terms: list[GlossaryTerm]) -> str:
     )
 
 
-def _render_doc_layout() -> str:
-    return load_text("src/layouts/DocLayout.astro")
+def _render_doc_layout(*, architecture_enabled: bool = False) -> str:
+    return load_text("src/layouts/DocLayout.astro").replace(
+        "{{ARCHITECTURE_COMPONENT_GLOB}}",
+        '"../components/ArchitectureMiniMap.astro"' if architecture_enabled else "[]",
+    )
 
 
-def _render_global_css() -> str:
-    return load_text("src/styles/global.css")
+def _render_global_css(*, architecture_enabled: bool = False) -> str:
+    # The shipped stylesheet is private (not a package export); npm installs it here.
+    fonts = (
+        '@import "../../node_modules/likec4/__app__/src/fonts.css";\n'
+        if architecture_enabled
+        else ""
+    )
+    return fonts + load_text("src/styles/global.css")
 
 
 def _render_index_page(

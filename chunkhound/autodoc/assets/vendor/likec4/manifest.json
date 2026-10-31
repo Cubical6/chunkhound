@@ -1,0 +1,42 @@
+{
+  "upstream": {
+    "url": "https://github.com/likec4/likec4",
+    "commit": "0375d146f8de2eb919033bd3b43b3701194f518b",
+    "version": "1.60.0"
+  },
+  "fork": {
+    "commit": "bb2398b72db19d034d604a6571a4021a1e9a3ca0"
+  },
+  "patch": {
+    "file": "chunkhound.patch",
+    "sha256": "5f6bc59c5962d8a43b5554a464569b2970114722b0862bce2f4d7a4245363101"
+  },
+  "artifact": {
+    "file": "likec4-1.60.0-chunkhound.1.tgz",
+    "package": "likec4",
+    "version": "1.60.0-chunkhound.1",
+    "sha256": "f2e53729c31faf5f04f10e043d451dccdee5713b8ad2c1013a275d60d3d37a78"
+  },
+  "license": {
+    "file": "LICENSE",
+    "spdx": "MIT",
+    "sha256": "536b1e1c961552038f0bda5c755fff467883f914c21535c5d20a7f08c2a5ead2"
+  },
+  "toolchain": {
+    "node": "24.18.1",
+    "pnpm": "11.28.5",
+    "oxfmt": "0.75.0",
+    "bun": "1.4.4"
+  },
+  "buildCommands": [
+    "pnpm install --frozen-lockfile",
+    "pnpm turbo run build --filter=likec4 --concurrency=1",
+    "pnpm turbo run pack --filter=likec4"
+  ],
+  "reconstruction": {
+    "base": "upstream.commit",
+    "patch": "chunkhound.patch",
+    "verified": "Committed fork build/pack and independent clean upstream plus full patch, frozen install, serialized build/pack; both installed archives passed computed and layouted exact-selection/original-endpoint contracts, all six native hierarchy directions with frame-boundary geometry and clickable status/source details plus Focus navigation, direct-plus-derived and marked-plus-ordinary aggregation, hostile text safety, local fonts, and valid/invalid strict Vite plugin builds.",
+    "byteIdenticalArchiveRequired": false
+  }
+}

@@ -668,3 +668,21 @@ input:focus-visible {
     pointer-events: auto;
   }
 }
+
+.topic-architecture {
+  margin-block: 1.5rem;
+}
+
+.topic-architecture > p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.architecture-mini-map {
+  margin-block: 1rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}

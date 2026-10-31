@@ -11,10 +11,11 @@ from chunkhound.autodoc.models import (
     CodeMapperTopic,
     DocsitePage,
     DocsiteSite,
+    SiteExtras,
 )
 from chunkhound.autodoc.references import flatten_sources_block
 from chunkhound.autodoc.site_writer import (
-    _render_index_page,
+
     _render_search_index,
     write_astro_site,
 )
@@ -57,6 +58,8 @@ def test_write_astro_site_removes_stale_topics(tmp_path: Path) -> None:
         pages=pages,
         index=index,
         allow_delete_topics_dir=True,
+        extras=SiteExtras(),
+        log_warning=None,
     )
 
     assert not stale_path.exists()
@@ -80,36 +83,6 @@ def test_find_index_file_warns_on_multiple_candidates(tmp_path: Path) -> None:
     assert warnings
     assert "Multiple AutoDoc index files found" in warnings[0]
 
-
-def test_render_index_page_wraps_generation_details() -> None:
-    metadata_block = "\n".join(
-        [
-            "agent_doc_metadata:",
-            "  generated_at: 2025-01-01T00:00:00Z",
-        ]
-    )
-    index = CodeMapperIndex(
-        title="AutoDoc Topics",
-        scope_label="/",
-        metadata_block=metadata_block,
-        topics=[],
-    )
-
-    output = _render_index_page(
-        site=DocsiteSite(
-            title="Test",
-            tagline="Tag",
-            scope_label="/",
-            generated_at="2025-12-22T00:00:00Z",
-            source_dir=".",
-            topic_count=0,
-        ),
-        pages=[],
-        index=index,
-    )
-
-    assert "<details" in output
-    assert "Generation Details" in output
 
 
 def test_flatten_sources_block_wraps_paths_in_code() -> None:

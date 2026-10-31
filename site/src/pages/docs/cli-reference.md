@@ -347,6 +347,22 @@ Building the generated Astro 7 / Vite 8 site requires **Node.js 22.23.4 or newer
 and **npm 9.6.5 or newer**. These requirements apply to the site build, not to
 `chunkhound map`.
 
+If a usable version-1 `<scope>_c4_model.json` is placed beside the selected
+`<scope>_code_mapper_index.md` (or legacy `<scope>_autodoc_index.md`), AutoDoc
+also publishes `/architecture/`, an overview mini-map, direct topic targets and
+architecture search results. Missing or invalid models warn and leave a normal
+documentation site with no React/LikeC4 dependencies. Map sites ship a local
+LikeC4 archive and fonts; invalid published DSL makes the build fail explicitly.
+This sidecar is a separate producer input: AutoDoc does not infer its neutral
+model from Markdown. The automatic mapping example below is not a promise that
+every mapper version emits a C4 sidecar.
+
+Architecture source links point to the recorded commit of each source's own
+repository, with inclusive line ranges, for recognized `github.com`,
+`gitlab.com` and `bitbucket.org` remotes. Missing or unrecognized remotes,
+invalid/missing commits or unresolved repository/path mappings leave a readable
+source path and range instead of a link. AutoDoc does not publish moving-branch
+links, editor URLs or remote credentials.
 ```bash
 chunkhound autodoc [map-in] [options]
 ```
@@ -357,25 +373,25 @@ chunkhound autodoc [map-in] [options]
 
 **Options:**
 
-| Flag | Description |
-|---|---|
-| `--out-dir DIR` | Output directory (required) |
-| `--force` | Allow deletion of existing topics |
-| `--assets-only` | Update only Astro assets |
-| `--site-title TEXT` | Override site title |
-| `--site-tagline TEXT` | Override site tagline |
-| `--cleanup-mode {llm}` | Cleanup pass mode |
-| `--cleanup-batch-size N` | Sections per LLM batch |
-| `--cleanup-max-tokens N` | Max tokens per cleanup |
-| `--audience {technical,balanced,end-user}` | Target audience |
-| `--index-pattern GLOB` | Override index globs |
-| `--map-out-dir DIR` | Output directory for auto-generated maps |
-| `--map-comprehensiveness {minimal,low,medium,high,ultra}` | Mapping depth |
-| `--map-audience` | Audience for auto-generated maps |
-| `--map-context PATH` | Context file for mapper |
-| `--config PATH` | Path to configuration file |
-| `--verbose` | Verbose output |
-| `--debug` | Debug output |
+| Flag                                                      | Description                                                                                  |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `--out-dir DIR`                                           | Output directory (required)                                                                  |
+| `--force`                                                 | Allow deletion of existing topics                                                            |
+| `--assets-only`                                           | Refresh managed presentation/runtime assets, preserving topics and published map/search data |
+| `--site-title TEXT`                                       | Override site title                                                                          |
+| `--site-tagline TEXT`                                     | Override site tagline                                                                        |
+| `--cleanup-mode {llm}`                                    | Cleanup pass mode                                                                            |
+| `--cleanup-batch-size N`                                  | Sections per LLM batch                                                                       |
+| `--cleanup-max-tokens N`                                  | Max tokens per cleanup                                                                       |
+| `--audience {technical,balanced,end-user}`                | Target audience                                                                              |
+| `--index-pattern GLOB`                                    | Override index globs                                                                         |
+| `--map-out-dir DIR`                                       | Output directory for auto-generated maps                                                     |
+| `--map-comprehensiveness {minimal,low,medium,high,ultra}` | Mapping depth                                                                                |
+| `--map-audience`                                          | Audience for auto-generated maps                                                             |
+| `--map-context PATH`                                      | Context file for mapper                                                                      |
+| `--config PATH`                                           | Path to configuration file                                                                   |
+| `--verbose`                                               | Verbose output                                                                               |
+| `--debug`                                                 | Debug output                                                                                 |
 
 **Examples:**
 
@@ -397,10 +413,30 @@ npm --prefix docs-site/ install
 npm --prefix docs-site/ run build
 ```
 
+Keep `vendor/likec4/` with the generated map site. Its `likec4` dependency is a
+local `file:` archive from the installed Python package, not an upstream npm
+substitute; npm still downloads the archive's normal dependencies. Fonts and
+map styles are served locally. To inspect the built site:
+
+```bash
+npm --prefix docs-site/ run preview -- --host 127.0.0.1
+```
+
+Use the View selector and native navigation for context, containers, components,
+focus and topic views. Element details expose status, evidence, weighted topic
+links and Focus; a merged arrow keeps direct and derived relationship details
+separate. “Link to this view” retains the chosen view, including search targets.
+Unknown view IDs display a notice and open system context.
 To upgrade an existing generated site, run the `--assets-only` example above before
 these npm commands. This refreshes the template without regenerating topic pages;
 back up any customizations to generated template files first.
 
+For an existing architecture site, assets-only preserves `src/data/architecture.json`,
+`likec4/*.c4`, topic Markdown, search and navigation bytes; it does not read a changed
+producer model or recalculate coverage. Run full generation to publish model changes.
+Older sites receive disabled map metadata and remain ordinary sites. Full generation
+without a usable model removes only fixed map outputs owned by a previous enabled
+publication; unrelated and unowned files are preserved.
 ## `chunkhound calibrate`
 
 Calibrate embedding and reranking batch sizes for optimal performance.

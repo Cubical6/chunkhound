@@ -1,0 +1,22 @@
+LikeC4 fork for ChunkHound
+
+Upstream: https://github.com/likec4/likec4
+Revision: 0375d146f8de2eb919033bd3b43b3701194f518b
+License: MIT (full text in LICENSE and the package archive).
+Copyright (c) 2023-2026 Denis Davydkov
+
+The modified ElementDetailsCard.tsx retains this upstream notice:
+Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+The modified RelationshipPopover.tsx retains these upstream notices:
+Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+Portions of this file have been modified by NVIDIA CORPORATION & AFFILIATES.
+
+Both files retain their SPDX-License-Identifier: MIT headers in chunkhound.patch.
+New metadata support: Copyright (c) 2026 ChunkHound contributors, MIT.
+
+This is a local, unpublished source modification, not an official LikeC4 release.
+The packed distribution retains upstream bundled dependency license notices;
+separately installed dependencies retain their own licenses. Preserve these
+notices and the included MIT permission notice when replacing or redistributing
+the source patch or packed artifact.

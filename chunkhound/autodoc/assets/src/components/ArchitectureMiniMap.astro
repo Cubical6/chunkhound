@@ -1,0 +1,11 @@
+---
+import ArchitectureMiniMap from './ArchitectureMiniMap.tsx';
+interface Props {
+  viewId: string;
+}
+const { viewId } = Astro.props;
+---
+
+<ArchitectureMiniMap viewId={viewId} client:only="react">
+  <p slot="fallback">Loading architecture preview…</p>
+</ArchitectureMiniMap>

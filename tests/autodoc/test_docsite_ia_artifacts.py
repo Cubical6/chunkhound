@@ -11,6 +11,7 @@ from chunkhound.autodoc.models import (
     DocsiteSite,
     GlossaryTerm,
     NavGroup,
+    SiteExtras,
 )
 from chunkhound.autodoc.site_writer import write_astro_site
 from chunkhound.interfaces.llm_provider import LLMProvider, LLMResponse
@@ -182,10 +183,13 @@ def test_write_astro_site_writes_nav_and_glossary_when_present(
         pages=pages,
         index=index,
         allow_delete_topics_dir=False,
-        nav_groups=[NavGroup(title="Group", slugs=["topic-one"])],
-        glossary_terms=[
-            GlossaryTerm(term="Term", definition="Definition.", pages=["topic-one"])
-        ],
+        extras=SiteExtras(
+            nav_groups=[NavGroup(title="Group", slugs=["topic-one"])],
+            glossary_terms=[
+                GlossaryTerm(term="Term", definition="Definition.", pages=["topic-one"])
+            ],
+        ),
+        log_warning=None,
     )
 
     nav_path = output_dir / "src" / "data" / "nav.json"
@@ -197,8 +201,8 @@ def test_write_astro_site_writes_nav_and_glossary_when_present(
 
     assert glossary_path.exists()
     glossary = glossary_path.read_text(encoding="utf-8")
-    assert 'title: "Glossary"' in glossary
-    assert "## Term" in glossary
+    assert "Definition." in glossary
+    assert "/topics/topic-one" in glossary
 
 
 def test_write_astro_site_removes_stale_nav_and_glossary(tmp_path: Path) -> None:
@@ -229,8 +233,8 @@ def test_write_astro_site_removes_stale_nav_and_glossary(tmp_path: Path) -> None
         pages=[],
         index=index,
         allow_delete_topics_dir=False,
-        nav_groups=None,
-        glossary_terms=None,
+        extras=SiteExtras(),
+        log_warning=None,
     )
 
     nav_path = output_dir / "src" / "data" / "nav.json"

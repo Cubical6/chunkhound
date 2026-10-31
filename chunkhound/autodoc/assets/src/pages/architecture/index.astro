@@ -1,0 +1,11 @@
+---
+import DocLayout from '../../layouts/DocLayout.astro';
+import ArchitectureMap from '../../components/ArchitectureMap.astro';
+import type { ArchitectureData } from '../../components/ArchitectureMap';
+import architectureData from '../../data/architecture.json';
+const data = architectureData as ArchitectureData;
+---
+
+<DocLayout title="Architecture" description="Explore the system, containers, components and their evidence.">
+  <ArchitectureMap data={data} />
+</DocLayout>

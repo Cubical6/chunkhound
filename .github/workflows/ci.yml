@@ -422,6 +422,15 @@ jobs:
           CHUNKHOUND_BUILD_PACKAGED_WATCHMAN_RUNTIME: "1"
         run: uv build --wheel --clear
 
+      - name: Set up Node for AutoDoc distribution verification
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Verify AutoDoc wheel resources and installed fork exports
+        shell: bash
+        run: uv run python scripts/verify_autodoc_wheel_resources.py dist/*.whl
+
       - name: Build repaired native wheel
         uses: ./.github/actions/build-native-wheel
         with:
