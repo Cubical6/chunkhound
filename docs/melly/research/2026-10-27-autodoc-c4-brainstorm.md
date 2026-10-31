@@ -122,6 +122,7 @@ Hier zit een concrete noodzakelijke wijziging: de bestaande Sources-footer toont
 
 De volledige brongegevens moeten daarom rechtstreeks vanuit de onderzoeksmetadata in het gestructureerde exportbestand terechtkomen. Bestand en regelbereiken zijn daar al beschikbaar (`code_mapper/public_utils.py:50-73`).
 
+> **Correctie (onderzoek open punten, zie hieronder):** deze bewering klopt niet. `merge_sources_metadata` leest `metadata.sources`, maar geen enkele producent vult dat veld: de overview zet het leeg (`chunkhound/code_mapper/service.py:263-272`) en het deep-research-resultaat heeft geen `sources`-sleutel (`chunkhound/services/research/v1/pluggable_research_service.py:490-511`).
 Ook moet onderbouwing bij inzoomen en uitzoomen behouden blijven: als één hoger-niveaupijl meerdere onderliggende relaties samenvat, mag niet slechts één willekeurige bron overblijven. Gedocumenteerde relaties blijven herkenbaar als **gedocumenteerd**, niet als aangetroffen aanroep.
 
 ## Wat nog een uitvoerbare proef vereist
@@ -156,6 +157,82 @@ Nog uit te werken: welke model-, layout-, viewer- en navigatieonderdelen we herg
 
 Nu alleen de ontwerpkeuze vastgelegd; geen upgrades uitgevoerd of LikeC4-fork aangemaakt.
 
+## Onderzoek open punten domeinmodel
+
+Uitgevoerd na de domeinbesluiten in rijen 21–25 van het besluitenlog. Alleen lezen; geen productcode gewijzigd. LikeC4-bronnen op tag `v1.60.0`.
+
+### Stabiele identiteit
+
+- Topicnamen zijn LLM-tekst met een lopend volgnummer (`chunkhound/code_mapper/render.py:82-131`, `chunkhound/code_mapper/pipeline.py:279-319`); AutoDoc nummert positioneel (`chunkhound/autodoc/markdown_utils.py:164`).
+- `chunks.id` en `files.id` zijn reeksnummers en veranderen bij herindexering (`chunkhound/providers/database/duckdb/schema_constants.py`, `chunkhound/services/indexing_coordinator.py:1119-1163`); `generate_chunk_id` hasht inhoud (`chunkhound/utils/chunk_hashing.py:12-50`).
+- LikeC4: element-id = FQN uit de DSL-naam (`packages/language-server/src/model/fqn-index.ts`); relatie-id = hash van document, positioneel AST-pad en eindpunten (`packages/language-server/src/model/parser/ModelParser.ts`, `parseRelation`). Relaties met een onoplosbaar eindpunt vallen stil weg (`buildModel.ts`). DSL-namen: alleen letters, cijfers, `-`, `_`, niet beginnend met een cijfer.
+- Feynman-rapport §6: canonieke ID's uit een deterministische inventaris (`/home/disorder/Projects/Local/Melly/outputs/c4-diagrams-from-code.md`).
+
+### Rechtstreekse relatie naast samengevoegde pijl
+
+- `prefer = only(directRelsList)`: bestaat er precies één rechtstreekse relatie X→Y, dan overschrijven haar titel en technologie het samengevoegde label ([`element-view/utils.ts`](https://github.com/likec4/likec4/blob/v1.60.0/packages/core/src/compute-view/element-view/utils.ts) r. 40, 114-115; [`merge-props-from-relationships.ts`](https://github.com/likec4/likec4/blob/v1.60.0/packages/core/src/compute-view/utils/merge-props-from-relationships.ts)).
+- Een view-override `include X -> Y with { title ... }` wint altijd (`applyCustomRelationProperties.ts`).
+- Structurizr maakt geen afgeleide relatie als er al een relatie tussen de ouders bestaat (https://docs.structurizr.com/dsl/implied-relationships).
+
+### Status bij gemengde bronnen
+
+- Geen precedent voor één gemengd label: Structurizr en LikeC4 laten bewijssoort aan de modelleur (properties/perspectives resp. metadata/links); het Feynman-rapport hangt bewijs per bron aan elementen en relaties.
+- ChunkHound kent per chunk twee kenmerken: de taal van het bestand (`Language`, bijv. `MARKDOWN`, `YAML`, `TOML`, `TEXT`; `chunkhound/core/types/common.py:154-207`) en het chunktype (`ChunkType`). `ChunkType.is_code` (`common.py:102-134`) en `ChunkType.is_documentation` (`common.py:136-150`) splitsen chunktypes; documentatie omvat Markdown-koppen en -alinea's, maar ook commentaar en docstrings in code.
+- Correctie op een eerdere [INFERENCE]: dat commentaar en docstrings onder documentatie vallen, past bij de betekenis van _gedocumenteerd_ (een bewering in proza, geen aangetroffen aanroep). Geen van beide kenmerken volstaat echter alleen: tekstbestanden worden als `PARAGRAPH` opgeslagen (`chunkhound/parsers/chunk_splitter.py:175-227`) en een `Dockerfile` krijgt `Language.TEXT` (`common.py:224-228`), zodat configuratie als documentatie zou tellen. De classificatieregel is een ontwerpkeuze. [INFERENCE]
+- ChunkHound heeft geen aanroepgraaf; bronnen zijn chunks die deep research via semantisch en regex-zoeken vindt en citeert. _Aangetroffen_ betekent daarom "onderbouwd door een geciteerde code- of configuratiechunk", niet "geverifieerde aanroep" zoals bij CodeBoarding (`is_static`). [INFERENCE] op basis van het ontbreken van call-graph-code in `chunkhound/`.
+
+### Meerdere services en repositories
+
+- Eén database hoort bij precies één geïndexeerde root; openen onder een andere root wordt geweigerd (`chunkhound/providers/database/duckdb_provider.py:406-445`).
+- Die root mag een werkmap met meerdere geneste git-repositories zijn: ChunkHound detecteert repository-roots en past per repository de eigen `.gitignore` toe (`chunkhound/utils/ignore_engine.py:219-353, 437-459`).
+- `map` werkt op één root plus een scope binnen die root (`chunkhound/code_mapper/scope.py:10-66`). Repositories in afzonderlijke databases kunnen dus niet samen in één `map`-run. [INFERENCE]
+
+### Samenvoegen met de CodeBoarding-engine
+
+- Licentie MIT (`.scratch/codeboarding/LICENSE`), dus overnemen mag met behoud van de copyrightvermelding.
+- `static_analyzer/` is ±16.000 regels Python en hangt af van `infra/` (±6.000 regels): ignore-regels, padhulpjes, de downloader van language servers (`infra.tool_registry`, `infra.install`), cluster-id's en telemetrie.
+- CodeBoarding vereist Python `>=3.12,<3.13` en pint `tree-sitter==0.25.2` plus losse grammatica's (`.scratch/codeboarding/pyproject.toml:11, 56-57`); ChunkHound ondersteunt Python `>=3.10,<3.15` met `tree-sitter>=0.25.0` en `tree-sitter-language-pack` (`pyproject.toml:18, 48-51`).
+- Runtime: per taal een language server, Node.js voor Python/TS/JS/PHP, een JDK voor Java, ±360 MB voor Kotlin (`.scratch/codeboarding/README.md:156, 250-252`).
+- Mogelijke vormen: (1) `static_analyzer` overnemen in ChunkHound, (2) CodeBoarding als optionele externe stap en zijn `analysis.json` inlezen, (3) een lichte eigen controle op ChunkHounds eigen tree-sitter-chunks (imports, identifiers, URL's). Keuze hoort bij de benaderingen (stap 4), niet bij het domeinmodel. [INFERENCE]
+- `map` bouwt vandaag geen structuur maar onderwerpen: HyDE-planning vanuit bestandslijst plus codesteekproef levert twee genummerde lijsten _points of interest_ (architectural, operational; `chunkhound/code_mapper/pipeline.py:132-423`), daarna per punt deep research (`chunkhound/code_mapper/service.py:249-479`), dekking via geciteerde versus niet-geciteerde bestanden (`chunkhound/code_mapper/coverage.py:48-75`) en topic-Markdown (`chunkhound/code_mapper/writer.py:26-95`). Juist de componentindeling en code-relaties ontbreken; dat is wat CodeBoarding levert. CodeBoarding vult daarmee het componentniveau aan, ChunkHound houdt context, containers, documentatie en topics. [INFERENCE]
+
+### Volledige bronnen
+
+- Volledige regelbereiken worden nergens op schijf bewaard. Topicbestanden bevatten alleen de ingekorte Sources-footer (`chunkhound/services/research/shared/citation_manager.py:385-391`); `map` schrijft geen JSON (`chunkhound/code_mapper/writer.py:54-95`). AutoDoc leest alleen die footer (`chunkhound/autodoc/references.py:66`).
+
+### Zichtbare vorm van _gedocumenteerd_
+
+- LikeC4 kent geen ingebouwde status hiervoor. Elementtags zijn standaard onzichtbaar (`enableElementTags` standaard uit, `packages/diagram/src/context/DiagramFeatures.tsx`); relatietags worden niet getekend. [INFERENCE]
+- Elementen: view-stijlregel op tag met `border`, `opacity`, `color` (`applyViewRuleStyles.ts`). Relaties: alleen `line`/`color` via `include … with { }` of een relatiesoort in de specificatie.
+- De legenda (`NotationPanel`) toont alleen elementen en staat standaard uit (`enableNotations`).
+
+## Vergelijking: CodeBoarding
+
+Onderzocht op verzoek van de gebruiker vóór de keuze over een rechtstreekse relatie naast een samengevoegde pijl. Bron: https://github.com/CodeBoarding/CodeBoarding, commit `13adc4a0` (2026-10-27), MIT. Paden hieronder zijn relatief aan die repository; alleen gelezen, niet uitgevoerd.
+
+### Elementen en identiteit
+
+- Geen C4: één boom van componenten (root → component → bestanden), zonder personen, externe systemen of containerniveau. Diepte volgt uit omvanglimieten, niet uit abstractieniveaus (`static_analyzer/clustering/names/draft.py:40-80`, `diagram_analysis/run_context.py:7-11`).
+- De indeling is deterministisch: regels op mappadprefixen plus een woordstemming, bewaard als `tree_spec` in `analysis.json` (`docs/design/name-tree.md:33-41`). Een component-id is het regel-id (`diagram_analysis/scope_assembly.py:50-55`); het taalmodel kiest alleen naam, beschrijving en sleutelentiteiten, en bij een naamconflict valt de naam terug op de regelnaam (`scope_assembly.py:127-137`).
+- Volgende runs spelen de bewaarde regels opnieuw af; gemeten verplaatsing van ongewijzigde bestanden: 0,00% over 27 repositories (`name-tree.md:270-272`). Zonder bewaarde `tree_spec` geen incrementele run (`name-tree.md:298-300`).
+- Een bestand kan in het datamodel bij meerdere componenten horen (`diagram_analysis/file_index.py:84, 102-104`); bij meerdere eigenaren is de toewijzing leeg (`agents/component_ownership.py:40`).
+- Verwijzingen die het taalmodel noemt maar die niet in de statische analyse bestaan, worden verwijderd (`diagram_analysis/reference_resolver.py:47-52, 73-114`).
+
+### Relaties en samenvoegen
+
+- Relaties komen uit de statische aanroepgraaf, per componentpaar gegroepeerd (`diagram_analysis/cluster_relations.py:50-87`). Het taalmodel geeft ze een label op basis van de onderliggende aanroepen; paren zonder label krijgen `"calls"` (`agents/prompts/shared.py:45`, `infra/constants.py:20`).
+- Een relatie die alleen het taalmodel voorstelt, blijft alleen bestaan met tekstueel bewijs én herleidbare aanroepen (`diagram_analysis/scope_assembly.py:198-205`).
+- Elke relatie bewaart haar onderliggende aanroepen met bestand en regel (`key_edges`, `all_edges`) en een vlag `is_static` (`agents/agent_responses.py:163-270`).
+- Labels per niveau: het taalmodel labelt relaties binnen elke scope. Elke bladrelatie erft het label van de diepste door het taalmodel gelabelde relatie die haar omvat (`diagram_analysis/cluster_relations.py:123-135, 181-205`).
+- Uitzoomen: elke bladrelatie wordt naar de dichtstbijzijnde zichtbare voorouder getild en per paar samengevoegd (`output_generators/rendering.py:23-60`). Het label van de eerste bladrelatie in sorteervolgorde `(src_id, dst_id, label)` blijft staan; de andere labels vallen weg (`agents/relation_edges.py:11-25`; vastgelegd in `tests/output_generators/test_rendering.py:85-105`). Er is geen samenvattend label en geen onderscheid tussen rechtstreeks en afgeleid.
+- Documentatie is geen bron voor elementen of relaties; er bestaat geen status vergelijkbaar met _gedocumenteerd_.
+- Weergave: Mermaid (Markdown/MDX/Sphinx) of Cytoscape (HTML). Pijlen tonen alleen het label; doorklikken naar onderliggende aanroepen bestaat niet, wel per component naar code met regelbereik (`output_generators/html.py:25-113`, `output_generators/markdown.py:20-34, 92-116`).
+
+### Ter vergelijking: C4 en Structurizr
+
+- C4 schrijft geen samenvoegalgoritme voor; de methode is notatie-onafhankelijk. Wel eist zij dat elke lijn een label heeft dat past bij richting en bedoeling van de relatie, zo specifiek mogelijk, liefst niet alleen "Uses" (https://c4model.com/diagrams/notation, https://c4model.com/diagrams/checklist).
+- Structurizr kopieert bij een afgeleide relatie omschrijving en technologie van de eerste onderliggende relatie (`AbstractImpliedRelationshipsStrategy.createImpliedRelationship`). Bestaat er al een relatie tussen de ouders, dan wordt er geen afgeleide gemaakt (`CreateImpliedRelationshipsUnlessAnyRelationshipExistsStrategy`; https://github.com/structurizr/java).
+
 ## Hervatpunt
 
-Het samengestelde domeinmodel is voorgelegd, maar nog niet afzonderlijk als geheel goedgekeurd. Er is nog geen goedgekeurde C4-specificatie of implementatieplan. Hervat de Superpowers-brainstorm bij de eerste onvoltooide gate en stel reeds besloten individuele keuzes niet opnieuw ter discussie. Nieuwe ontwerpkeuzes horen in de nieuwe design-worktree; de Astro/Vite-upgrade blijft in de oorspronkelijke worktree.
+Het domeinmodel is nog niet als geheel goedgekeurd. Rij 26–29 beslissen identiteit, pijllabels en status bij gemengde bronnen; rij 31 beslist één softwaresysteem per `map`-run. Hoe `map` de structuur bouwt (componentindeling, code-relaties, eventueel CodeBoarding-engine) loopt in de aparte designsessie `map-structuur-design` (rij 30); de opslag van volledige bronnen hoort daar ook bij. De domeinmodelpoort is voorgelegd; open voor de ontwerpfase: de zichtbare vorm van _gedocumenteerd_; "zonder dossier" als open punt in de spec. Er is nog geen goedgekeurde C4-specificatie of implementatieplan. Stel reeds besloten keuzes niet opnieuw ter discussie; de Astro/Vite-upgrade blijft in de worktree `autodoc-c4-map`.
