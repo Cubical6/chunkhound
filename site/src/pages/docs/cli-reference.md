@@ -347,12 +347,19 @@ Building the generated Astro 7 / Vite 8 site requires **Node.js 22.23.4 or newer
 and **npm 9.6.5 or newer**. These requirements apply to the site build, not to
 `chunkhound map`.
 
-If a usable version-1 `<selected-stem>_c4_model.json` accompanies the selected
-`<selected-stem>_code_mapper_index.md` (or legacy `_autodoc_index.md`), AutoDoc
+If a usable version-1 `<scope>_c4_model.json` is placed beside the selected
+`<scope>_code_mapper_index.md` (or legacy `<scope>_autodoc_index.md`), AutoDoc
 also publishes `/architecture/`, an overview mini-map, direct topic targets and
 architecture search results. Missing or invalid models warn and leave a normal
 documentation site with no React/LikeC4 dependencies. Map sites ship a local
 LikeC4 archive and fonts; invalid published DSL makes the build fail explicitly.
+
+Architecture source links point to the recorded commit of each source's own
+repository, with inclusive line ranges, for recognized `github.com`,
+`gitlab.com` and `bitbucket.org` remotes. Missing or unrecognized remotes,
+invalid/missing commits or unresolved repository/path mappings leave a readable
+source path and range instead of a link. AutoDoc does not publish moving-branch
+links, editor URLs or remote credentials.
 
 ```bash
 chunkhound autodoc [map-in] [options]

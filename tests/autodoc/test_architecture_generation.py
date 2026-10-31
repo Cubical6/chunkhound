@@ -1,6 +1,9 @@
 """Generation owns only map outputs attested by its prior publication data."""
 
 import json
+import os
+import re
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,6 +13,10 @@ import pytest
 from chunkhound.autodoc.generator import generate_docsite
 from chunkhound.autodoc.models import CleanupConfig
 from chunkhound.llm_manager import LLMManager
+from tests.fixtures.openai_compatible_server import (
+    ChatCompletionScript,
+    OpenAICompatibleTestServer,
+)
 
 
 async def _recorded_llm_reply(client, request: httpx.Request, **kwargs):
@@ -233,3 +240,109 @@ async def test_no_model_preserves_unowned_paths_and_disables_map_imports(
         assert (
             not {"react", "react-dom", "likec4", "@astrojs/react"} & dependencies.keys()
         )
+
+
+def test_missing_model_is_warning_not_cli_failure(tmp_path: Path) -> None:
+    root, output = tmp_path / "input", tmp_path / "site"
+    model_path = write_input(root)
+    model_path.unlink()
+    cleanup_response = (
+        "## Overview\n\nRecorded full CLI cleanup reached ordinary documentation.\n"
+    )
+    assert cleanup_response.strip() not in (root / "original.md").read_text()
+    scripts = [
+        ChatCompletionScript(
+            name="information-architecture",
+            content=json.dumps({"nav": {"groups": []}, "glossary": []}),
+            predicate=lambda body, _: bool(body.get("response_format")),
+        ),
+        ChatCompletionScript(
+            name="cleanup",
+            content=cleanup_response,
+            predicate=lambda body, _: any(
+                message["role"] == "system" for message in body["messages"]
+            ),
+        ),
+        ChatCompletionScript(
+            name="homepage",
+            content="Ordinary application documentation.",
+            predicate=lambda body, _: not any(
+                message["role"] == "system" for message in body["messages"]
+            ),
+        ),
+    ]
+    home = tmp_path / "home"
+    home.mkdir()
+    # Isolate all config layers and provider/proxy variables from the subprocess.
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key in {"PATH", "SYSTEMROOT", "WINDIR"}
+    }
+    env.update(
+        HOME=str(home),
+        USERPROFILE=str(home),
+        TMPDIR=str(tmp_path),
+        TMP=str(tmp_path),
+        TEMP=str(tmp_path),
+        CHUNKHOUND_NO_RICH="1",
+    )
+    with OpenAICompatibleTestServer(scripts) as server:
+        config_path = tmp_path / "config.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "llm": {
+                        "provider": "openai",
+                        "model": "task5-recorded-cleanup",
+                        "api_key": "task5-fixture-only",
+                        "base_url": server.base_url,
+                        "max_retries": 0,
+                    }
+                }
+            )
+        )
+        completed = subprocess.run(
+            [
+                "uv",
+                "run",
+                "--project",
+                str(Path(__file__).resolve().parents[2]),
+                "--no-sync",
+                "chunkhound",
+                "autodoc",
+                str(root),
+                "--out-dir",
+                str(output),
+                "--config",
+                str(config_path),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    diagnostic = completed.stdout + completed.stderr
+    assert completed.returncode == 0, diagnostic
+    warning = diagnostic.lower()
+    assert model_path.name in warning
+    assert any(
+        cause in warning for cause in ("no such file", "cannot find", "not found")
+    )
+    assert re.search(r"\bregenerat\w*\b", warning) and re.search(r"\bmap\b", warning)
+    assert json.loads((output / "src/data/architecture.json").read_text()) == {
+        "schemaVersion": 1,
+        "enabled": False,
+        "contextView": "index",
+        "views": {},
+        "elements": {},
+        "topics": {},
+    }
+    records = json.loads((output / "src/data/search.json").read_text())
+    assert len(records) == 1
+    topic = output / "src/pages/topics" / f"{records[0]['slug']}.md"
+    assert cleanup_response.strip() in topic.read_text()
+    assert records[0]["url"] == f"/topics/{topic.stem}/"
+    dependencies = json.loads((output / "package.json").read_text())["dependencies"]
+    assert not {"react", "react-dom", "likec4", "@astrojs/react"} & dependencies.keys()
