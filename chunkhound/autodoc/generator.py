@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from chunkhound.autodoc.architecture.loader import ModelLoader
 from chunkhound.autodoc.cleanup import _cleanup_with_llm
 from chunkhound.autodoc.ia import _synthesize_homepage_overview, _synthesize_site_ia
 from chunkhound.autodoc.index_loader import (
@@ -25,6 +26,7 @@ from chunkhound.autodoc.models import (
     DocsiteSite,
     GlossaryTerm,
     NavGroup,
+    SiteExtras,
 )
 from chunkhound.autodoc.references import (
     _apply_reference_normalization,
@@ -234,6 +236,7 @@ async def generate_docsite(
         index=index,
         log_warning=log_warning,
     )
+    architecture = ModelLoader.load(index_path=index_path, log_warning=log_warning)
 
     pages = await cleanup_topics(
         topics=topics,
@@ -277,9 +280,13 @@ async def generate_docsite(
         pages=pages,
         index=index,
         allow_delete_topics_dir=allow_delete_topics_dir,
-        nav_groups=nav_groups,
-        glossary_terms=glossary_terms,
-        homepage_overview=homepage_overview,
+        extras=SiteExtras(
+            nav_groups=nav_groups,
+            glossary_terms=glossary_terms,
+            homepage_overview=homepage_overview,
+            architecture=architecture,
+        ),
+        log_warning=log_warning,
     )
 
     return DocsiteResult(

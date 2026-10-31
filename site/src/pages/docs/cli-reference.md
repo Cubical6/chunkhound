@@ -347,6 +347,13 @@ Building the generated Astro 7 / Vite 8 site requires **Node.js 22.23.4 or newer
 and **npm 9.6.5 or newer**. These requirements apply to the site build, not to
 `chunkhound map`.
 
+If a usable version-1 `<selected-stem>_c4_model.json` accompanies the selected
+`<selected-stem>_code_mapper_index.md` (or legacy `_autodoc_index.md`), AutoDoc
+also publishes `/architecture/`, an overview mini-map, direct topic targets and
+architecture search results. Missing or invalid models warn and leave a normal
+documentation site with no React/LikeC4 dependencies. Map sites ship a local
+LikeC4 archive and fonts; invalid published DSL makes the build fail explicitly.
+
 ```bash
 chunkhound autodoc [map-in] [options]
 ```
@@ -357,25 +364,25 @@ chunkhound autodoc [map-in] [options]
 
 **Options:**
 
-| Flag | Description |
-|---|---|
-| `--out-dir DIR` | Output directory (required) |
-| `--force` | Allow deletion of existing topics |
-| `--assets-only` | Update only Astro assets |
-| `--site-title TEXT` | Override site title |
-| `--site-tagline TEXT` | Override site tagline |
-| `--cleanup-mode {llm}` | Cleanup pass mode |
-| `--cleanup-batch-size N` | Sections per LLM batch |
-| `--cleanup-max-tokens N` | Max tokens per cleanup |
-| `--audience {technical,balanced,end-user}` | Target audience |
-| `--index-pattern GLOB` | Override index globs |
-| `--map-out-dir DIR` | Output directory for auto-generated maps |
-| `--map-comprehensiveness {minimal,low,medium,high,ultra}` | Mapping depth |
-| `--map-audience` | Audience for auto-generated maps |
-| `--map-context PATH` | Context file for mapper |
-| `--config PATH` | Path to configuration file |
-| `--verbose` | Verbose output |
-| `--debug` | Debug output |
+| Flag                                                      | Description                                                                                  |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `--out-dir DIR`                                           | Output directory (required)                                                                  |
+| `--force`                                                 | Allow deletion of existing topics                                                            |
+| `--assets-only`                                           | Refresh managed presentation/runtime assets, preserving topics and published map/search data |
+| `--site-title TEXT`                                       | Override site title                                                                          |
+| `--site-tagline TEXT`                                     | Override site tagline                                                                        |
+| `--cleanup-mode {llm}`                                    | Cleanup pass mode                                                                            |
+| `--cleanup-batch-size N`                                  | Sections per LLM batch                                                                       |
+| `--cleanup-max-tokens N`                                  | Max tokens per cleanup                                                                       |
+| `--audience {technical,balanced,end-user}`                | Target audience                                                                              |
+| `--index-pattern GLOB`                                    | Override index globs                                                                         |
+| `--map-out-dir DIR`                                       | Output directory for auto-generated maps                                                     |
+| `--map-comprehensiveness {minimal,low,medium,high,ultra}` | Mapping depth                                                                                |
+| `--map-audience`                                          | Audience for auto-generated maps                                                             |
+| `--map-context PATH`                                      | Context file for mapper                                                                      |
+| `--config PATH`                                           | Path to configuration file                                                                   |
+| `--verbose`                                               | Verbose output                                                                               |
+| `--debug`                                                 | Debug output                                                                                 |
 
 **Examples:**
 
@@ -400,6 +407,13 @@ npm --prefix docs-site/ run build
 To upgrade an existing generated site, run the `--assets-only` example above before
 these npm commands. This refreshes the template without regenerating topic pages;
 back up any customizations to generated template files first.
+
+For an existing architecture site, assets-only preserves `src/data/architecture.json`,
+`likec4/*.c4`, topic Markdown, search and navigation bytes; it does not read a changed
+producer model or recalculate coverage. Run full generation to publish model changes.
+Older sites receive disabled map metadata and remain ordinary sites. Full generation
+without a usable model removes only fixed map outputs owned by a previous enabled
+publication; unrelated and unowned files are preserved.
 
 ## `chunkhound calibrate`
 

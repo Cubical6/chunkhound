@@ -12,8 +12,13 @@
     "preview": "astro preview"
   },
   "dependencies": {
-    "@astrojs/markdown-remark": "^7.3.4",
-    "astro": "^7.4.2",
+    "@astrojs/markdown-remark": "7.3.4",
+    "@astrojs/react": "7.1.1",
+    "astro": "7.4.2",
+    "vite": "8.3.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "likec4": "file:vendor/likec4/likec4-1.60.0-chunkhound.1.tgz",
     "mermaid": "^10.9.0",
     "remark-gfm": "^4.0.0"
   }

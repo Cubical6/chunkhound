@@ -43,6 +43,7 @@ def test_autodoc_parser_accepts_audience_numeric_and_named_values() -> None:
     assert parser.parse_args([*base, "end-user"]).audience == "end-user"
     assert parser.parse_args([*base, "end_user"]).audience == "end-user"
 
+
 def test_autodoc_parser_accepts_map_audience() -> None:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command")
@@ -98,3 +99,47 @@ def test_write_astro_assets_only_preserves_package_and_readme_without_site_json(
 
     assert package_json_path.read_text(encoding="utf-8") == "sentinel package.json"
     assert readme_path.read_text(encoding="utf-8") == "sentinel README"
+
+
+def test_assets_only_preserves_architecture_and_ignores_changed_input_model(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "site"
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    producer = input_dir / "scope_c4_model.json"
+    producer.write_text('{"schema_version": 999}')
+    originals = {
+        "src/data/architecture.json": (
+            b'{"schemaVersion":1,"enabled":true,"contextView":"index",'
+            b'"views":{},"elements":{},"topics":{}}\n'
+        ),
+        "src/data/search.json": b'[{"title":"Original"}]\n',
+        "src/data/nav.json": b'{"groups":[]}\n',
+        "src/pages/topics/original.md": b"# Original topic\n",
+        "likec4/model.c4": b"// original model\n",
+        "likec4/specification.c4": b"// original specification\n",
+        "likec4/views.c4": b"// original views\n",
+        "likec4/user.txt": b"user content\n",
+    }
+    for relative, content in originals.items():
+        path = output / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    write_astro_assets_only(output_dir=output)
+    for relative, content in originals.items():
+        assert (output / relative).read_bytes() == content
+    assert producer.read_text() == '{"schema_version": 999}'
+    assert (output / "src/pages/architecture/index.astro").exists()
+
+
+def test_assets_only_initializes_disabled_data_for_older_site(tmp_path: Path) -> None:
+    write_astro_assets_only(output_dir=tmp_path)
+    assert json.loads((tmp_path / "src/data/architecture.json").read_text()) == {
+        "schemaVersion": 1,
+        "enabled": False,
+        "contextView": "index",
+        "views": {},
+        "elements": {},
+        "topics": {},
+    }

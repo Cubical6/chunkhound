@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from chunkhound.autodoc.architecture.model import C4Model
+
 
 @dataclass
 class IndexTopicEntry:
@@ -77,3 +79,11 @@ class GlossaryTerm:
     term: str
     definition: str
     pages: list[str]
+
+
+@dataclass
+class SiteExtras:
+    nav_groups: list[NavGroup] | None = None
+    glossary_terms: list[GlossaryTerm] | None = None
+    homepage_overview: str | None = None
+    architecture: C4Model | None = None
