@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Optional AutoDoc architecture maps** — AutoDoc now consumes the selected index's neutral version-1 C4 sidecar and publishes native LikeC4 full maps, overview/topic previews, direct topic targets and architecture search links. Producer identity, evidence and commit-pinned source links survive projection; missing or invalid models warn and leave an ordinary site without optional React/LikeC4 dependencies. Map sites bundle the pinned runtime and local fonts, with strict build-time DSL validation. Full regeneration removes only fixed map outputs attested by a previous enabled publication; assets-only refreshes presentation/runtime while preserving topic, map, DSL, search and navigation bytes.
+- **Packaged AutoDoc map verification** — The existing wheel verifier now checks pinned LikeC4 archive/patch/license integrity, packaged resources and executable root/React/Vite exports through a temporary local-archive npm consumer. The existing wheel CI job runs this explicit distribution integration check with Node.js 24; maintenance instructions cover sdist rebuilds and outside-checkout installed-site proof. Missing or invalid fork artifacts fail instead of falling back to upstream.
 
 ### Changed
 

@@ -353,6 +353,9 @@ also publishes `/architecture/`, an overview mini-map, direct topic targets and
 architecture search results. Missing or invalid models warn and leave a normal
 documentation site with no React/LikeC4 dependencies. Map sites ship a local
 LikeC4 archive and fonts; invalid published DSL makes the build fail explicitly.
+This sidecar is a separate producer input: AutoDoc does not infer its neutral
+model from Markdown. The automatic mapping example below is not a promise that
+every mapper version emits a C4 sidecar.
 
 Architecture source links point to the recorded commit of each source's own
 repository, with inclusive line ranges, for recognized `github.com`,
@@ -410,6 +413,21 @@ After generating or refreshing the site assets, install its dependencies and bui
 npm --prefix docs-site/ install
 npm --prefix docs-site/ run build
 ```
+
+Keep `vendor/likec4/` with the generated map site. Its `likec4` dependency is a
+local `file:` archive from the installed Python package, not an upstream npm
+substitute; npm still downloads the archive's normal dependencies. Fonts and
+map styles are served locally. To inspect the built site:
+
+```bash
+npm --prefix docs-site/ run preview -- --host 127.0.0.1
+```
+
+Use the View selector and native navigation for context, containers, components,
+focus and topic views. Element details expose status, evidence, weighted topic
+links and Focus; a merged arrow keeps direct and derived relationship details
+separate. “Link to this view” retains the chosen view, including search targets.
+Unknown view IDs display a notice and open system context.
 
 To upgrade an existing generated site, run the `--assets-only` example above before
 these npm commands. This refreshes the template without regenerating topic pages;

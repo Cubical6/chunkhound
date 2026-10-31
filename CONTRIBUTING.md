@@ -41,6 +41,41 @@ For an existing AutoDoc site, refresh its assets with
 and `npm run build` in that output directory. This preserves topic pages, but
 replaces generated template files; back up custom template changes first.
 
+#### AutoDoc distribution checks
+
+Use Node.js 24 for the wheel integration check, matching CI:
+
+```bash
+uv build --wheel --clear
+uv run python scripts/verify_autodoc_wheel_resources.py dist/*.whl
+uv build --sdist --out-dir dist
+```
+
+Do not set `CHUNKHOUND_BUILD_PACKAGED_WATCHMAN_RUNTIME` for this pure-Python
+distribution check. The verifier checks packaged resource reads, the pinned
+LikeC4 manifest/archive integrity and executable root/React/Vite exports using a
+temporary consumer. It needs npm registry access for normal dependencies; the
+ordinary AutoDoc unit tests remain network-free.
+
+Unpack the sdist into a new directory outside the checkout, run
+`uv build --wheel --out-dir <rebuilt-dist>` there and verify the rebuilt wheel
+with the same script. Inspect both archives for templates, fonts, manifest,
+source patch, license/notice and the actual `.tgz`; retain calculated hashes.
+No additional packaging mechanism should bypass the existing resource loader.
+
+For end-to-end proof, create a fresh `uv venv <venv>` and install the wheel with
+`uv pip install --python <venv>/bin/python <wheel>`. Generate from an outside
+cwd using that installed environment, with `PYTHONPATH` unset and isolated
+configuration. Confirm imports resolve to its `site-packages`, not an editable
+checkout. Exercise `npm install`, `npm run build` and native browser details,
+navigation, local fonts and CSS in the generated site. A controlled external
+LLM response may make this proof deterministic, but cleanup and generation must
+still run with a configured LLM manager. Fixture proof does not demonstrate
+producer output quality or a real mapper-to-AutoDoc pipeline.
+
+See `chunkhound/autodoc/assets/vendor/likec4/README.md` for pinned reconstruction
+and upgrade gates. Do not replace the bundled fork with an upstream fallback.
+
 ### Before Writing Any Code
 
 **Always use Code Research first:**

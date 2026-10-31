@@ -104,6 +104,34 @@ font package 5.3.0 and loaded its CSS/WOFF2 from the site's own assets directory
 Set the Vite plugin's `ai: 'disabled'` for this non-AI consumer so environment
 API keys do not activate optional AI integrations during preview.
 
+## Verify Python distribution
+
+With Node.js 24 and npm available, run from the ChunkHound checkout:
+
+```bash
+uv build --wheel --clear
+uv run python scripts/verify_autodoc_wheel_resources.py dist/*.whl
+uv build --sdist --out-dir dist
+```
+
+The verifier preserves its `wheels...` CLI. It reads packaged resources through
+the existing Python resource loader, checks the manifest-named archive, patch
+and license SHA-256 values, package name/version, generated CSS and export
+targets. A temporary npm consumer then installs the local archive and executes
+the `likec4`, `likec4/react` and `likec4/vite-plugin` exports. This explicit
+distribution integration check requires npm registry access for dependencies;
+it is not part of ordinary network-free AutoDoc unit tests. A missing archive,
+checksum mismatch or broken export fails verification, without an upstream
+fallback.
+
+Also unpack the sdist outside the checkout, build a wheel there with
+`uv build --wheel --out-dir <rebuilt-dist>`, and run the same verifier against
+that wheel. Install the original wheel into a fresh venv and generate/build a
+site outside the checkout with `PYTHONPATH` unset. Check actual imported module
+paths, lockfile local-archive resolution, native details, local fonts/CSS and
+browser navigation; file presence alone is not end-to-end evidence. This
+distribution check does not replace the native reconstruction/geometry gates.
+
 ## Replace or upgrade
 
 Pin the new upstream commit, rebase these native detail, neutral-boundary and
