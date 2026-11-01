@@ -2,7 +2,12 @@
 
 from dataclasses import replace
 
-from chunkhound.code_mapper.c4.assemble import AssemblyInput, assemble
+from chunkhound.code_mapper.c4.assemble import (
+    AssemblyInput,
+    UnlinkedCounts,
+    assemble,
+    assemble_with_unlinked,
+)
 from chunkhound.code_mapper.c4.classify import Classification
 from chunkhound.code_mapper.c4.documented import (
     DocElement,
@@ -244,3 +249,27 @@ def test_coverage_via_shared_cited_files():
     trial = compute_coverage(element_files=files, direct_files=direct, topics=None)
     assert trial["component:a"].status == "not_computed"
     assert trial["container:dashboard"].status == "none"
+
+
+def test_unlinked_documented_relations_are_counted_by_reason():
+    inp = assembly_input()
+    # Same term as the documented container: the endpoint becomes ambiguous.
+    inp.documented.elements.append(DocElement("person", "Dashboard", citation(line=4)))
+    inp.documented.relations = [
+        DocRelation("Unknown", "User", "uses", citation(line=5)),
+        DocRelation("User", "Dashboard", "uses", citation(line=6)),
+        DocRelation("A", "B", "feeds", citation(line=7)),
+    ]
+    elements, relations, evidence = assemble(inp)
+    *_, unlinked = assemble_with_unlinked(inp)
+
+    assert unlinked == UnlinkedCounts(no_match=1, ambiguous=1, not_allowed=1)
+    kept = [
+        c
+        for c in evidence.citations
+        if c.start_line in {5, 6, 7} and c.file == "README.md"
+    ]
+    assert len(kept) == 3
+    assert all(c.target is None and not c.verified for c in kept)
+    # Counting changes nothing about what is linked.
+    assert (elements, relations, evidence) == assemble(inp)

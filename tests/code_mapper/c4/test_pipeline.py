@@ -664,3 +664,75 @@ async def test_outside_scope_resolution_changes_transition(
     assert replay.model == changed.model
     assert replay.evidence == changed.evidence
     assert replay.lock == changed.lock
+
+
+def test_new_limit_fields_do_not_change_input_fingerprint(tmp_path):
+    """Upgrading must not reset lock history: request limits are cost settings."""
+    from chunkhound.code_mapper.c4.pipeline import _input_fingerprint
+    from chunkhound.core.config.config import Config
+    from chunkhound.core.config.llm_config import LLMConfig
+
+    (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
+    plain = Config(target_dir=tmp_path, llm=LLMConfig(provider="codex-cli"))
+    limited = Config(
+        target_dir=tmp_path,
+        llm=LLMConfig(
+            provider="codex-cli",
+            utility_max_input_chars=50_000,
+            utility_max_input_tokens=10_000,
+        ),
+    )
+    assert _input_fingerprint(tmp_path, ["app.py"], plain, tmp_path) == (
+        _input_fingerprint(tmp_path, ["app.py"], limited, tmp_path)
+    )
+
+
+async def test_fallback_fragment_without_lock_items_blocks_lock(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    """A first run whose only document keeps failing: no lock items to fall
+    back on, yet neither documentation nor a transition may be locked."""
+    citation = {"file": "README.md", "start_line": 3, "end_line": 3}
+    pipeline_answers.answers["documented"] = {
+        "elements": [
+            {
+                "kind": "person",
+                "term": "beheerder",
+                "citation": {**citation, "quote": "Verzonnen citaat"},
+            }
+        ],
+        "relations": [],
+    }
+
+    result = await build(fixture_repo, c4_llm_manager)
+
+    assert pipeline_answers.calls["documented"] == 2
+    assert result.model.run.kind == "full"
+    assert result.lock.documented is None
+    assert result.lock.transition is None
+    assert not any(
+        c.source == "documentation" and c.verified for c in result.evidence.citations
+    )
+
+
+async def test_old_cache_entries_are_pruned_only_after_non_trial_run(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    import os
+    import time
+
+    from chunkhound.code_mapper.c4.documented import EXTRACTION_CACHE
+
+    directory = fixture_repo / EXTRACTION_CACHE / "documented"
+    directory.mkdir(parents=True)
+    old = directory / ("0" * 64 + ".json")
+    old.write_text("{}", encoding="utf-8")
+    month_ago = time.time() - 31 * 86_400
+    os.utime(old, (month_ago, month_ago))
+
+    await build(fixture_repo, c4_llm_manager, trial=True)
+    assert old.exists()
+
+    await build(fixture_repo, c4_llm_manager)
+    assert not old.exists()
+    assert list(directory.glob("*.json"))  # this run's bundle stays

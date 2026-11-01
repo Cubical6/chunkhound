@@ -1,11 +1,13 @@
 """Documentation evidence must be literal, scoped and reusable without a model."""
 
 import hashlib
+import json
 from dataclasses import asdict
 
 import pytest
 
 from chunkhound.code_mapper.c4.documented import (
+    EXTRACTION_CACHE,
     DocumentedAnswer,
     TopicSources,
     check_documented_answer,
@@ -15,6 +17,8 @@ from chunkhound.code_mapper.c4.documented import (
 )
 from chunkhound.code_mapper.c4.llm import AnswerRejectedError, C4Llm, RetryQueue
 from chunkhound.code_mapper.c4.model import LockedDocumented
+from chunkhound.llm_manager import LLMManager
+from tests.code_mapper.c4.conftest import component_answer, write_sections
 
 QUOTE = "Een beheerder gebruikt de webwinkel via Stripe."
 
@@ -277,3 +281,132 @@ def test_documented_cannot_cite_unprovided_or_outside_files(tmp_path):
         )
         == []
     )
+
+
+# --- Bounded, resumable extraction over fragments (shared extraction layer) ---
+
+
+@pytest.fixture
+def limited_manager(monkeypatch, scripted):
+    """A low input limit forces several bundles for one document."""
+    monkeypatch.setattr(LLMManager, "_create_provider", lambda self, config: scripted)
+    config = {"provider": "fake", "model": "fake-gpt", "max_input_chars": 16_000}
+    return LLMManager(utility_config=config, synthesis_config=config)
+
+
+async def run_documented(repo, manager, files, *, locked=None, trial=False):
+    llm = C4Llm(manager, concurrency=1, trial=trial)
+    retries = RetryQueue()
+    outcome = await extract_documented(
+        project_root=repo, doc_files=files, locked=locked, llm=llm, retries=retries
+    )
+    fallbacks = await retries.drain()
+    return outcome, llm, fallbacks
+
+
+def cited_lines(repo, outcome):
+    lines = (repo / "docs/arch.md").read_text(encoding="utf-8").splitlines()
+    return {
+        element.term: (
+            element.citation.start_line,
+            lines[element.citation.start_line - 1],
+        )
+        for element in outcome.elements
+    }
+
+
+async def test_documented_covers_every_line_or_marks_fallback(
+    fixture_repo, limited_manager, scripted
+):
+    write_sections(fixture_repo / "docs/arch.md")
+    scripted.answers["documented"] = lambda prompt: component_answer(prompt, reject=3)
+
+    outcome, llm, fallbacks = await run_documented(
+        fixture_repo, limited_manager, ["docs/arch.md"]
+    )
+
+    assert llm.calls >= 4  # several bundles, then one recovery attempt
+    assert fallbacks == 1
+    assert {e.term for e in outcome.elements} == {
+        f"Component{n}" for n in range(12) if n != 3
+    }
+    [(path, start, end)] = outcome.fallback_fragments
+    lines = (fixture_repo / "docs/arch.md").read_text().splitlines()
+    assert path == "docs/arch.md"
+    assert any("Component3 " in line for line in lines[start - 1 : end])
+    assert outcome.fallback and not outcome.fallback_citations
+
+
+async def test_insert_at_top_reuses_and_shifts_citations(
+    fixture_repo, limited_manager, scripted
+):
+    doc = fixture_repo / "docs/arch.md"
+    write_sections(doc)
+    scripted.answers["documented"] = component_answer
+    first, first_llm, _ = await run_documented(
+        fixture_repo, limited_manager, ["docs/arch.md"]
+    )
+    before = cited_lines(fixture_repo, first)
+    lines = doc.read_text(encoding="utf-8").splitlines()
+    heading = lines.index("## Sectie 1")
+    lines.insert(heading + 1, "Een nieuwe zin bovenaan sectie 1.")
+    doc.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    second, second_llm, _ = await run_documented(
+        fixture_repo, limited_manager, ["docs/arch.md"]
+    )
+
+    after = cited_lines(fixture_repo, second)
+    assert first_llm.calls >= 3
+    assert 1 <= second_llm.calls < first_llm.calls
+    assert second.counts is not None and second.counts.reused >= 1
+    assert set(after) == set(before)
+    for term, (line, text) in after.items():
+        assert term in text  # every citation points at its own sentence
+        expected = before[term][0] + (1 if term != "Component0" else 0)
+        assert line == expected
+
+
+async def test_cached_outcome_with_stale_quote_is_not_reused(
+    fixture_repo, c4_llm_manager
+):
+    first, _, _ = await run_documented(fixture_repo, c4_llm_manager, ["README.md"])
+    [entry] = (fixture_repo / EXTRACTION_CACHE / "documented").glob("*.json")
+    data = json.loads(entry.read_text())
+    for part in data["parts"].values():
+        for item in [*part["elements"], *part["relations"]]:
+            item["citation"]["quote"] = "Verzonnen citaat"
+    entry.write_text(json.dumps(data), encoding="utf-8")
+
+    second, llm, _ = await run_documented(fixture_repo, c4_llm_manager, ["README.md"])
+
+    assert llm.calls == 1
+    assert second.elements == first.elements
+    assert second.relations == first.relations
+
+
+async def test_trial_makes_no_calls_and_no_cache_writes(fixture_repo, c4_llm_manager):
+    await run_documented(fixture_repo, c4_llm_manager, ["README.md"])
+    cache = fixture_repo / EXTRACTION_CACHE
+    before = {p: p.stat().st_mtime_ns for p in cache.rglob("*") if p.is_file()}
+    (fixture_repo / "README.md").write_text("# Changed\n", encoding="utf-8")
+
+    _, llm, fallbacks = await run_documented(
+        fixture_repo, c4_llm_manager, ["README.md"], trial=True
+    )
+
+    assert llm.calls == fallbacks == 0
+    after = {p: p.stat().st_mtime_ns for p in cache.rglob("*") if p.is_file()}
+    assert after == before
+
+
+async def test_duplicate_items_are_merged_once(fixture_repo, c4_llm_manager, scripted):
+    payload = answer()
+    payload["elements"] *= 2
+    payload["relations"] *= 2
+    scripted.answers["documented"] = payload
+
+    outcome, _, _ = await run_documented(fixture_repo, c4_llm_manager, ["README.md"])
+
+    assert [e.term for e in outcome.elements] == ["beheerder"]
+    assert [r.to_term for r in outcome.relations] == ["webwinkel"]

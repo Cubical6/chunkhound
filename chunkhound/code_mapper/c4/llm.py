@@ -11,6 +11,8 @@ from pydantic import BaseModel, ValidationError
 
 from chunkhound.code_mapper.service import _is_retryable_poi_error
 from chunkhound.llm_manager import LLMManager
+from chunkhound.services.extraction.budget import InputLimit, resolve_input_limit
+from chunkhound.services.extraction.store import ProviderIdentity
 
 T = TypeVar("T")
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
@@ -36,9 +38,19 @@ _REJECTION_RULES = frozenset(
         "unknown, duplicate or unsupported title pair",
         "every fingerprint must occur exactly once",
         "no proposed item has a literal quote",
+        "every fragment id must occur exactly once",
         "exactly one nonblank label per supplied key required",
     }
 )
+
+
+def public_rule(rule: str | None) -> str:
+    """Only application-owned rule names reach the report."""
+    return rule if rule in _REJECTION_RULES else "answer validation"
+
+
+def rejection_rule(exc: BaseException) -> str:
+    return public_rule(str(exc).partition(": ")[2])
 
 
 @dataclass
@@ -55,10 +67,7 @@ class StepReport:
         try:
             yield
         except AnswerRejectedError as exc:
-            rule = str(exc).partition(": ")[2]
-            if rule not in _REJECTION_RULES:
-                rule = "answer validation"
-            self.outcomes[index] = f"afgekeurd ({rule})"
+            self.outcomes[index] = f"afgekeurd ({rejection_rule(exc)})"
             raise
         except TransientStepError:
             self.outcomes[index] = "tijdelijke fout"
@@ -68,6 +77,10 @@ class StepReport:
             raise
         else:
             self.outcomes[index] = "geaccepteerd"
+
+    def record(self, outcome: str) -> None:
+        """Record one finished call whose outcome was decided elsewhere."""
+        self.outcomes.append(outcome)
 
     def mark_fallback(self) -> None:
         if self.outcomes and not self.outcomes[-1].endswith(", terugval"):
@@ -84,6 +97,7 @@ class C4Llm:
             raise ValueError("C4 concurrency must be at least one")
         self._manager = llm_manager
         self._trial = trial or llm_manager is None
+        self.concurrency = concurrency
         self._semaphore = asyncio.Semaphore(concurrency)
         self.calls = 0
         self._reports: dict[str, list[StepReport]] = {
@@ -113,6 +127,33 @@ class C4Llm:
     def trial(self) -> bool:
         return self._trial
 
+    def _role_config(self, role: Literal["utility", "synthesis"]) -> dict[str, object]:
+        return {} if self._manager is None else self._manager.role_config(role)
+
+    def provider_identity(
+        self, role: Literal["utility", "synthesis"]
+    ) -> ProviderIdentity:
+        config = self._role_config(role)
+
+        def text(key: str) -> str | None:
+            value = config.get(key)
+            return None if value is None else str(value)
+
+        return ProviderIdentity(
+            provider=text("provider") or "none",
+            model=text("model") or "",
+            reasoning_effort=text("reasoning_effort"),
+            base_url=text("base_url"),
+        )
+
+    def input_limit(self, role: Literal["utility", "synthesis"]) -> InputLimit:
+        return resolve_input_limit(self._role_config(role))
+
+    def estimate_tokens(self, text: str) -> int:
+        if self._manager is None:
+            return len(text) // 4
+        return self._manager.get_utility_provider().estimate_tokens(text)
+
     async def call(
         self,
         step: str,
@@ -120,6 +161,7 @@ class C4Llm:
         prompt: str,
         *,
         provider: Literal["utility", "synthesis"],
+        max_completion_tokens: int | None = None,
     ) -> ResponseT:
         if self.trial or self._manager is None:
             raise RuntimeError("C4 LLM call in trial mode")
@@ -132,8 +174,14 @@ class C4Llm:
         async with self._semaphore:
             self.calls += 1
             try:
+                if max_completion_tokens is None:
+                    return await selected.complete_structured_typed(
+                        prompt=prompt, response_model=response_model
+                    )
                 return await selected.complete_structured_typed(
-                    prompt=prompt, response_model=response_model
+                    prompt=prompt,
+                    response_model=response_model,
+                    max_completion_tokens=max_completion_tokens,
                 )
             except ValidationError as exc:
                 raise AnswerRejectedError(f"{step}: invalid answer schema") from exc

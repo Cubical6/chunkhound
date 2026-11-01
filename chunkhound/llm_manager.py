@@ -1,6 +1,6 @@
 """LLM Manager with factory pattern for ChunkHound deep research."""
 
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 
@@ -309,6 +309,11 @@ class LLMManager:
             f"{self._synthesis_config.get('provider')} "
             f"with model: {self._synthesis_provider.model}"
         )
+
+    def role_config(self, role: Literal["utility", "synthesis"]) -> dict[str, Any]:
+        """Return a copy of the resolved provider configuration for one role."""
+        source = self._utility_config if role == "utility" else self._synthesis_config
+        return dict(source)
 
     def get_utility_provider(self) -> LLMProvider:
         """Get the utility LLM provider (for fast operations).

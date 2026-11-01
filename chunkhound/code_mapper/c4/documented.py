@@ -2,12 +2,13 @@
 
 import hashlib
 import json
-from collections.abc import Sequence
-from dataclasses import dataclass
+import math
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from chunkhound.code_mapper.c4.llm import (
     AnswerRejectedError,
@@ -15,10 +16,42 @@ from chunkhound.code_mapper.c4.llm import (
     RetryQueue,
     TransientStepError,
     load_c4_prompt,
+    public_rule,
+    rejection_rule,
 )
 from chunkhound.code_mapper.c4.model import Citation, LockedDocumented
 from chunkhound.core.detection import detect_language
 from chunkhound.core.types.common import Language
+from chunkhound.services.extraction.budget import (
+    effective_target,
+    max_fragment_chars,
+)
+from chunkhound.services.extraction.errors import (
+    INPUT_REJECTED_MARKERS,
+    ProviderInputRefusedError,
+    TransientCallError,
+    UnreadableAnswerError,
+    has_marker,
+    is_unreadable,
+)
+from chunkhound.services.extraction.fragments import Fragment, fragment_document
+from chunkhound.services.extraction.runner import (
+    AttemptRecord,
+    ExtractionCounts,
+    Failed,
+    Rejected,
+    Valid,
+    run_extraction,
+)
+from chunkhound.services.extraction.sources import (
+    SourceError,
+    SourceVersion,
+    read_source,
+)
+from chunkhound.services.extraction.store import ExtractionStore
+
+EXTRACTION_CACHE = Path(".chunkhound/extraction")
+_VALIDATOR_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -42,18 +75,29 @@ class DocRelation:
     citation: Citation
 
 
+Span = tuple[str, int, int]
+
+
 @dataclass
 class DocumentedOutcome:
     """RetryQueue mutates this outcome; consume it after draining the queue.
 
     Citations have no target until identity/assembly assigns final C4 IDs. Their
     verified flag proves the quote, not a static reference between internal nodes.
+    Fallback markers live here, never in the locked items, so lock bytes are
+    unchanged: ``fallback_fragments`` lists fragments that still failed after
+    recovery, ``fallback_citations`` the spans of items taken from the lock.
     """
 
     elements: list[DocElement]
     relations: list[DocRelation]
     hashes: dict[str, str]
     fallback: bool
+    fallback_fragments: frozenset[Span] = frozenset()
+    fallback_citations: frozenset[Span] = frozenset()
+    counts: ExtractionCounts | None = field(default=None, compare=False)
+    fragment_total: int = field(default=0, compare=False)
+    fallback_bundles: int = field(default=0, compare=False)
 
 
 class _AnswerModel(BaseModel):
@@ -202,6 +246,281 @@ def _previous_outcome(
     )
 
 
+class _FragmentQuote(_AnswerModel):
+    start_line: int
+    end_line: int
+    quote: str
+
+
+class _FragmentElement(_AnswerModel):
+    kind: Literal["person", "external", "container", "component"]
+    term: str = Field(min_length=1)
+    citation: _FragmentQuote
+
+
+class _FragmentRelation(_AnswerModel):
+    from_term: str = Field(min_length=1)
+    to_term: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    citation: _FragmentQuote
+
+
+class DocumentedPart(_AnswerModel):
+    """One fragment's answer; lines are relative to the fragment."""
+
+    elements: list[_FragmentElement]
+    relations: list[_FragmentRelation]
+
+
+@dataclass(frozen=True)
+class _Checked:
+    """Validated items with absolute citations, plus quotes for storage."""
+
+    elements: tuple[tuple[DocElement, str], ...]
+    relations: tuple[tuple[DocRelation, str], ...]
+
+
+def _quote_in_lines(
+    lines: Sequence[str], start_line: int, end_line: int, quote: str
+) -> bool:
+    """Same rule as verify_quote, on lines already read for this run."""
+    if start_line < 1 or end_line < start_line or end_line > len(lines):
+        return False
+    normalized = " ".join(quote.split())
+    span = " ".join(" ".join(lines[start_line - 1 : end_line]).split())
+    return bool(normalized) and normalized in span
+
+
+class _DocumentedGoal:
+    name = "documented"
+    line_numbering: Literal["relative", "absolute"] = "relative"
+
+    def __init__(self) -> None:
+        self._instructions = load_c4_prompt("documented")
+        schema = json.dumps(DocumentedPart.model_json_schema(), sort_keys=True)
+        self.version = hashlib.sha256(
+            f"{self._instructions}\n{schema}\n{_VALIDATOR_VERSION}".encode()
+        ).hexdigest()
+
+    def instructions(self) -> str:
+        return self._instructions
+
+    def part_model(self) -> type[BaseModel]:
+        return DocumentedPart
+
+    def max_completion_tokens(self, bundle_chars: int) -> int:
+        return max(2_048, min(16_384, math.ceil(bundle_chars / 10)))
+
+    def validate(self, fragment: Fragment, part: Any) -> _Checked | Rejected:
+        offset = fragment.start_line - 1
+        size = fragment.end_line - fragment.start_line + 1
+        lines = fragment.source.lines
+
+        def cited(quote: _FragmentQuote) -> Citation | None:
+            if not 1 <= quote.start_line <= quote.end_line <= size:
+                return None
+            start, end = quote.start_line + offset, quote.end_line + offset
+            if not _quote_in_lines(lines, start, end, quote.quote):
+                return None
+            return Citation(
+                target=None,
+                file=fragment.source.path,
+                start_line=start,
+                end_line=end,
+                source="documentation",
+                verified=True,
+            )
+
+        elements = tuple(
+            (DocElement(item.kind, item.term, citation), item.citation.quote)
+            for item in part.elements
+            if (citation := cited(item.citation)) is not None
+            and _quote_in_lines(
+                lines, citation.start_line, citation.end_line, item.term
+            )
+        )
+        relations = tuple(
+            (
+                DocRelation(item.from_term, item.to_term, item.title, citation),
+                item.citation.quote,
+            )
+            for item in part.relations
+            if (citation := cited(item.citation)) is not None
+        )
+        if (part.elements or part.relations) and not (elements or relations):
+            return Rejected("no proposed item has a literal quote")
+        return _Checked(elements, relations)
+
+    def dump(self, fragment: Fragment, part: _Checked) -> dict[str, Any]:
+        offset = fragment.start_line - 1
+
+        def quote(citation: Citation, text: str) -> dict[str, Any]:
+            return {
+                "start_line": citation.start_line - offset,
+                "end_line": citation.end_line - offset,
+                "quote": text,
+            }
+
+        return {
+            "elements": [
+                {"kind": e.kind, "term": e.term, "citation": quote(e.citation, q)}
+                for e, q in part.elements
+            ],
+            "relations": [
+                {
+                    "from_term": r.from_term,
+                    "to_term": r.to_term,
+                    "title": r.title,
+                    "citation": quote(r.citation, q),
+                }
+                for r, q in part.relations
+            ],
+        }
+
+    def recheck(
+        self, fragment: Fragment, stored: dict[str, Any]
+    ) -> _Checked | Rejected:
+        try:
+            part = DocumentedPart.model_validate(stored)
+        except ValidationError:
+            return Rejected("invalid answer schema")
+        return self.validate(fragment, part)
+
+
+class _C4Call:
+    """Map C4 step failures onto the extraction layer's failure kinds."""
+
+    def __init__(self, llm: C4Llm) -> None:
+        self._llm = llm
+
+    async def __call__(
+        self, prompt: str, response_model: type[Any], max_completion_tokens: int
+    ) -> Any:
+        try:
+            return await self._llm.call(
+                "documented",
+                response_model,
+                prompt,
+                provider="utility",
+                max_completion_tokens=max_completion_tokens,
+            )
+        except Exception as exc:
+            if has_marker(exc, INPUT_REJECTED_MARKERS):
+                raise ProviderInputRefusedError(str(exc)) from exc
+            if isinstance(exc, AnswerRejectedError):
+                raise UnreadableAnswerError(rejection_rule(exc)) from exc
+            if is_unreadable(exc):
+                raise UnreadableAnswerError() from exc
+            if isinstance(exc, TransientStepError):
+                raise TransientCallError(str(exc)) from exc
+            raise
+
+    def estimate_tokens(self, text: str) -> int:
+        return self._llm.estimate_tokens(text)
+
+
+class _Collector:
+    """Merge items from first attempts, recovery and fallback without duplicates."""
+
+    def __init__(self, outcome: DocumentedOutcome) -> None:
+        self.outcome = outcome
+        self._elements: set[tuple[object, ...]] = set()
+        self._relations: set[tuple[object, ...]] = set()
+
+    def add(
+        self, elements: Sequence[DocElement], relations: Sequence[DocRelation]
+    ) -> None:
+        for element in elements:
+            c = element.citation
+            key = (element.kind, element.term, c.file, c.start_line, c.end_line)
+            if key not in self._elements:
+                self._elements.add(key)
+                self.outcome.elements.append(element)
+        for relation in relations:
+            c = relation.citation
+            relation_key = (
+                relation.from_term,
+                relation.to_term,
+                relation.title,
+                c.file,
+                c.start_line,
+                c.end_line,
+            )
+            if relation_key not in self._relations:
+                self._relations.add(relation_key)
+                self.outcome.relations.append(relation)
+
+        def position(citation: Citation) -> tuple[str, int, int]:
+            return (citation.file, citation.start_line, citation.end_line)
+
+        self.outcome.elements.sort(
+            key=lambda e: (*position(e.citation), e.kind, e.term)
+        )
+        self.outcome.relations.sort(
+            key=lambda r: (*position(r.citation), r.from_term, r.to_term, r.title)
+        )
+
+
+def _locked_items(
+    locked: LockedDocumented | None,
+) -> tuple[list[DocElement], list[DocRelation]]:
+    if locked is None:
+        return [], []
+    return (
+        TypeAdapter(list[DocElement]).validate_python(locked.elements),
+        TypeAdapter(list[DocRelation]).validate_python(locked.relations),
+    )
+
+
+def _fall_back(
+    fragments: Sequence[Fragment],
+    locked: LockedDocumented | None,
+    collector: _Collector,
+) -> None:
+    """Spec §8.6: lock items whose span lies wholly inside a failed fragment.
+
+    Elements still need their term inside the span; relations only the span,
+    because the lock keeps no quote text (weaker, as before).
+    """
+    outcome = collector.outcome
+    elements, relations = _locked_items(locked)
+    spans: set[Span] = set()
+    kept_elements: list[DocElement] = []
+    kept_relations: list[DocRelation] = []
+    for fragment in fragments:
+        path = fragment.source.path
+        outcome.fallback_fragments |= {(path, fragment.start_line, fragment.end_line)}
+
+        def inside(citation: Citation) -> bool:
+            return (
+                citation.file == path
+                and fragment.start_line <= citation.start_line
+                and citation.end_line <= fragment.end_line
+            )
+
+        for element in elements:
+            c = element.citation
+            if inside(c) and _quote_in_lines(
+                fragment.source.lines, c.start_line, c.end_line, element.term
+            ):
+                kept_elements.append(element)
+                spans.add((c.file, c.start_line, c.end_line))
+        for relation in relations:
+            c = relation.citation
+            if inside(c):
+                kept_relations.append(relation)
+                spans.add((c.file, c.start_line, c.end_line))
+    outcome.fallback_citations |= spans
+    outcome.fallback = True
+    collector.add(kept_elements, kept_relations)
+
+
+def documented_store(project_root: Path, *, read_only: bool) -> ExtractionStore:
+    return ExtractionStore(
+        project_root / EXTRACTION_CACHE, "documented", read_only=read_only
+    )
+
+
 async def extract_documented(
     *,
     project_root: Path,
@@ -209,46 +528,29 @@ async def extract_documented(
     locked: LockedDocumented | None,
     llm: C4Llm,
     retries: RetryQueue,
+    order_hint: Callable[[Fragment], float] | None = None,
 ) -> DocumentedOutcome:
-    """Call utility once for changed sources, with one delayed recovery attempt."""
-    documents: dict[str, bytes] = {}
+    """Bounded, resumable extraction over fragments of every selected document.
+
+    Unchanged sets reuse the lock without a call. Otherwise every fragment gets
+    a valid outcome (cached, new or recovered) or falls back per fragment.
+    """
+    sources: dict[str, SourceVersion] = {}
     for file in sorted(set(doc_files)):
-        path = _project_file(project_root, file)
-        if path is None:
-            raise ValueError(f"Documentation source is not a project file: {file}")
-        documents[file] = path.read_bytes()
-    hashes = {
-        file: hashlib.sha256(content).hexdigest() for file, content in documents.items()
-    }
+        try:
+            sources[file] = read_source(project_root, file, strict=True)
+        except SourceError as exc:
+            raise ValueError(
+                f"Documentation source is not a project file: {file}"
+            ) from exc
+    hashes = {file: source.sha256 for file, source in sources.items()}
     if locked is not None and locked.hashes == hashes:
         return _previous_outcome(locked, hashes, project_root, fallback=False)
-    if not documents:
+    if not sources:
         return DocumentedOutcome([], [], hashes, False)
     if llm.trial:
         return _previous_outcome(locked, hashes, project_root, fallback=False)
 
-    prompt = (
-        load_c4_prompt("documented")
-        + "\nInput:\n"
-        + json.dumps(
-            {
-                "documents": [
-                    {
-                        "file": file,
-                        "lines": [
-                            {"line": number, "text": line}
-                            for number, line in enumerate(
-                                content.decode("utf-8").splitlines(), 1
-                            )
-                        ],
-                    }
-                    for file, content in documents.items()
-                ]
-            },
-            ensure_ascii=False,
-        )
-    )
-    result = DocumentedOutcome([], [], hashes, False)
     if locked is None:
         reason = "geen opgeslagen uitkomst"
     else:
@@ -261,27 +563,114 @@ async def extract_documented(
         reason = f"documentatieset gewijzigd (+{added}/-{removed}/~{changed})"
     report = llm.report("documented", reason)
 
-    async def attempt() -> DocumentedOutcome:
-        with report.attempt():
-            answer = await llm.call(
-                "documented", DocumentedAnswer, prompt, provider="utility"
-            )
-            elements, relations = check_documented_answer(
-                answer, project_root, doc_files
-            )
-            return DocumentedOutcome(elements, relations, hashes, False)
+    limit = llm.input_limit("utility")
+    max_chars = max_fragment_chars(effective_target(limit))
+    fragments = [
+        fragment
+        for file, source in sources.items()
+        for fragment in fragment_document(
+            source,
+            max_chars=max_chars,
+            markdown=detect_language(Path(file)) == Language.MARKDOWN,
+        )
+    ]
+    goal = _DocumentedGoal()
+    store = documented_store(project_root, read_only=False)
+    call = _C4Call(llm)
+    provider = llm.provider_identity("utility")
 
-    def default() -> DocumentedOutcome:
-        return _previous_outcome(locked, hashes, project_root, fallback=True)
+    def on_attempt(record: AttemptRecord) -> None:
+        if record.outcome == "accepted":
+            report.record("geaccepteerd")
+        elif record.outcome == "transient":
+            report.record("tijdelijke fout")
+        else:
+            report.record(f"afgekeurd ({public_rule(record.rule)})")
 
-    def apply(value: DocumentedOutcome, fallback: bool) -> None:
-        result.elements = value.elements
-        result.relations = value.relations
-        result.hashes = value.hashes
-        result.fallback = fallback
+    async def extract(
+        subset: Sequence[Fragment],
+    ) -> dict[int, Valid[_Checked] | Failed]:
+        result = await run_extraction(
+            goal,
+            subset,
+            call=call,
+            provider=provider,
+            limit=limit,
+            store=store,
+            concurrency=llm.concurrency,
+            order_hint=order_hint,
+            on_attempt=on_attempt,
+        )
+        counts.reused += result.counts.reused
+        counts.new += result.counts.new
+        counts.split += result.counts.split
+        valid = [part.part for part in result.parts.values() if isinstance(part, Valid)]
+        collector.add(
+            [element for checked in valid for element, _ in checked.elements],
+            [relation for checked in valid for relation, _ in checked.relations],
+        )
+        failed_bundles.clear()
+        failed_bundles.update(result.failed_bundles)
+        return result.parts
 
-    try:
-        apply(await attempt(), False)
-    except TransientStepError:
-        retries.defer("documented", attempt, default, apply, report=report)
-    return result
+    counts = ExtractionCounts()
+    outcome = DocumentedOutcome(
+        [], [], hashes, False, counts=counts, fragment_total=len(fragments)
+    )
+    collector = _Collector(outcome)
+    failed_bundles: dict[str, tuple[int, ...]] = {}
+    await extract(fragments)
+
+    for origin, indices in list(failed_bundles.items()):
+        pending = [fragments[index] for index in indices]
+        remaining: list[Fragment] = list(pending)
+
+        async def recover(
+            pending: list[Fragment] = pending, remaining: list[Fragment] = remaining
+        ) -> list[Fragment]:
+            parts = await extract(pending)
+            still = [
+                pending[i]
+                for i, part in sorted(parts.items())
+                if isinstance(part, Failed)
+            ]
+            remaining[:] = still
+            if not still:
+                return []
+            rules = [
+                part.rule
+                for part in parts.values()
+                if isinstance(part, Failed) and part.kind == "rejected"
+            ]
+            if rules:
+                raise AnswerRejectedError(f"documented: {public_rule(rules[0])}")
+            raise TransientStepError("documented: fragments still failing")
+
+        def fallback(remaining: list[Fragment] = remaining) -> list[Fragment]:
+            return list(remaining)
+
+        def apply(value: list[Fragment], failed: bool) -> None:
+            if failed and value:
+                outcome.fallback_bundles += 1
+                _fall_back(value, locked, collector)
+
+        retries.defer(f"documented:{origin}", recover, fallback, apply, report=report)
+    return outcome
+
+
+def prune_documented_cache(project_root: Path) -> None:
+    """Drop long-unused entries; call only after a non-fatal, non-trial run."""
+    documented_store(project_root, read_only=False).prune()
+
+
+def report_lines(docs: DocumentedOutcome) -> list[str]:
+    """Bundle accounting for a run that extracted documentation."""
+    if docs.counts is None:
+        return []
+    failed = len(docs.fallback_fragments)
+    return [
+        f"C4 documented-bundels: {docs.counts.reused} hergebruikt, "
+        f"{docs.counts.new} nieuw, {docs.counts.split} gesplitst, "
+        f"{docs.fallback_bundles} teruggevallen; fragmenten "
+        f"{docs.fragment_total - failed} gedekt, {failed} teruggevallen"
+    ]

@@ -41,7 +41,58 @@ class ScriptedLLM(FakeLLMProvider):
         answer = self.answers[step]
         if isinstance(answer, Exception):
             raise answer
-        return answer(prompt) if callable(answer) else deepcopy(answer)
+        result = answer(prompt) if callable(answer) else deepcopy(answer)
+        if step == "documented" and set(result) == {"elements", "relations"}:
+            return documented_per_fragment(prompt, result)
+        return result
+
+
+_FRAGMENT_HEADER = re.compile(r"^=== (F\d+) · (.+?)(?: › .*)?$")
+_FRAGMENT_LINE = re.compile(r"^(\d+)\| ?(.*)$")
+
+
+def documented_fragments(prompt: str) -> dict[str, tuple[str, list[str]]]:
+    """Fragment id -> (path, lines) as shown in a documented prompt."""
+    fragments: dict[str, tuple[str, list[str]]] = {}
+    current: list[str] | None = None
+    for line in prompt.splitlines():
+        if header := _FRAGMENT_HEADER.match(line):
+            current = []
+            fragments[header.group(1)] = (header.group(2), current)
+        elif current is not None and (numbered := _FRAGMENT_LINE.match(line)):
+            current.append(numbered.group(2))
+    return fragments
+
+
+def documented_per_fragment(prompt: str, answer: dict[str, Any]) -> dict[str, Any]:
+    """Route a whole-document answer (with file citations) to fragment parts.
+
+    Fixture documents are single fragments starting at line 1, so absolute
+    and fragment-relative line numbers coincide.
+    """
+
+    def strip(item: dict[str, Any]) -> dict[str, Any]:
+        citation = {k: v for k, v in item["citation"].items() if k != "file"}
+        return {**item, "citation": citation}
+
+    def mine(item: dict[str, Any], path: str) -> bool:
+        citation = item.get("citation", {})
+        return citation.get("file", path) == path
+
+    return {
+        "fragments": [
+            {
+                "id": fid,
+                "part": {
+                    "elements": [strip(i) for i in answer["elements"] if mine(i, path)],
+                    "relations": [
+                        strip(i) for i in answer["relations"] if mine(i, path)
+                    ],
+                },
+            }
+            for fid, (path, _lines) in documented_fragments(prompt).items()
+        ]
+    }
 
 
 @pytest.fixture
@@ -139,3 +190,43 @@ def c4_llm_manager(
     monkeypatch.setattr(LLMManager, "_create_provider", lambda self, config: scripted)
     config = {"provider": "fake", "model": "fake-gpt"}
     return LLMManager(utility_config=config, synthesis_config=config)
+
+
+_COMPONENT = re.compile(r"Component(\d+)")
+
+
+def write_sections(path, sections=12, filler=6):
+    """A document whose sections each name one literal component."""
+    paragraph = "Deze sectie beschrijft gedrag en grenzen van de dienst. " * 4
+    lines = ["# Architectuur"]
+    for number in range(sections):
+        lines += [f"## Sectie {number}", f"Component{number} verwerkt verzoeken.", ""]
+        lines += [paragraph, ""] * filler
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def component_answer(prompt, *, reject=None):
+    """Cite each fragment's component sentence; optionally forge one quote."""
+    fragments = []
+    for fid, (_path, lines) in documented_fragments(prompt).items():
+        elements = []
+        for number, text in enumerate(lines, 1):
+            match = _COMPONENT.search(text)
+            if match:
+                quote = text
+                if reject is not None and match.group(1) == str(reject):
+                    quote = "Verzonnen citaat"
+                elements.append(
+                    {
+                        "kind": "component",
+                        "term": match.group(0),
+                        "citation": {
+                            "start_line": number,
+                            "end_line": number,
+                            "quote": quote,
+                        },
+                    }
+                )
+        fragments.append({"id": fid, "part": {"elements": elements, "relations": []}})
+    return {"fragments": fragments}

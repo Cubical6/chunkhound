@@ -263,6 +263,9 @@ async def test_call_report_names_step_and_reason(cli, capsys, response):
             if "term" in item:
                 item["term"] = "PRIVATE_RESPONSE_CONTENT"
             item["citation"]["quote"] = "PRIVATE_RESPONSE_CONTENT"
+            # Unchanged README fragments come from the extraction cache; only
+            # the newly selected document is sent, so the forgery targets it.
+            item["citation"].update(file=private_file, start_line=1, end_line=1)
         cli.provider.answers["documented"] = answer
     elif response == "schema_rejected":
         cli.provider.answers["documented"] = {"PRIVATE_RESPONSE_CONTENT": private_text}
@@ -314,6 +317,8 @@ async def test_call_report_counts_bundled_rounds_and_retry_outcome(
         line
         for line in capsys.readouterr().out.splitlines()
         if line.startswith("[INFO] C4 ")
+        and "C4 documented-bundels:" not in line
+        and "C4 documentatierelaties" not in line
     ]
     assert len(lines) == 5
     line = next(line for line in lines if "C4 classify:" in line)
@@ -427,3 +432,67 @@ async def test_transient_failure_reports_fallback_without_caching_it(cli, capsys
     )
     document = json.loads((cli.repo / LOCK_RELATIVE_PATH).read_text())
     assert document["scopes"]["/"]["components"] == {}
+
+
+async def test_resume_after_fatal_error_publishes_nothing(cli, scripted):
+    """Bundles validated before a fatal error survive; nothing is published."""
+    from chunkhound.code_mapper.c4.documented import EXTRACTION_CACHE
+    from chunkhound.llm_manager import LLMManager
+    from tests.code_mapper.c4.conftest import component_answer, write_sections
+
+    cli.monkeypatch.setattr(
+        LLMManager, "_create_provider", lambda self, config: scripted
+    )
+    config = {"provider": "fake", "model": "fake-gpt", "max_input_chars": 16_000}
+    limited = LLMManager(utility_config=config, synthesis_config=config)
+    cli.monkeypatch.setattr(
+        command, "_create_code_mapper_llm_manager", lambda *a: limited
+    )
+    write_sections(cli.repo / "docs/arch.md")
+    cli.result.poi_sections_indexed[0][2]["metadata"]["sources"]["files"].append(
+        "docs/arch.md"
+    )
+
+    def fatal_on_second(prompt):
+        if scripted.calls["documented"] == 2:
+            raise ValueError("invalid credentials")
+        return component_answer(prompt)
+
+    scripted.answers["documented"] = fatal_on_second
+    with pytest.raises(SystemExit) as exc:
+        await command.code_mapper_command(
+            parse(cli.repo, cli.out, "--jobs", "1"), cli.config
+        )
+    assert exc.value.code == 1
+    assert not cli.out.exists() or not list(cli.out.iterdir())
+    assert not (cli.repo / LOCK_RELATIVE_PATH).exists()
+    cache = cli.repo / EXTRACTION_CACHE / "documented"
+    assert len(list(cache.glob("*.json"))) == 1
+
+    scripted.calls.clear()
+    scripted.answers["documented"] = component_answer
+    await command.code_mapper_command(
+        parse(cli.repo, cli.out, "--jobs", "1"), cli.config
+    )
+    resumed_calls = scripted.calls["documented"]
+    assert resumed_calls >= 1
+    # Every bundle is stored once: the one from before the failure is reused.
+    assert len(list(cache.glob("*.json"))) == resumed_calls + 1
+    assert (cli.repo / LOCK_RELATIVE_PATH).exists()
+
+
+async def test_cli_reports_documented_bundles(cli, capsys):
+    await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
+    output = capsys.readouterr().out
+    assert (
+        "C4 documented-bundels: 0 hergebruikt, 1 nieuw, 0 gesplitst, "
+        "0 teruggevallen; fragmenten 1 gedekt, 0 teruggevallen"
+    ) in output
+    relations = [
+        line for line in output.splitlines() if "C4 documentatierelaties" in line
+    ]
+    assert len(relations) == 1
+    assert "geen treffer" in relations[0]
+    assert "meerdere treffers" in relations[0]
+    assert "niet toegestaan" in relations[0]
+    assert len([line for line in output.splitlines() if "C4 documented:" in line]) == 1

@@ -42,9 +42,19 @@ class AssemblyInput:
     overrides: Overrides
 
 
+@dataclass(frozen=True)
+class UnlinkedCounts:
+    """Documented relations kept only as unverified citations, by reason."""
+
+    no_match: int = 0
+    ambiguous: int = 0
+    not_allowed: int = 0
+
+
 class _Assembly:
     def __init__(self, inp: AssemblyInput) -> None:
         self.inp = inp
+        self.unlinked: Counter[str] = Counter()
         self.elements: dict[str, Element] = {}
         self.files: dict[str, list[str]] = {}
         self.owners: dict[str, str] = dict(inp.runtime.container_of)
@@ -272,6 +282,8 @@ class _Assembly:
         for item in self.inp.documented.relations:
             source_ids, target_ids = terms[item.from_term], terms[item.to_term]
             if len(source_ids) != 1 or len(target_ids) != 1:
+                reason = "no_match" if not source_ids or not target_ids else "ambiguous"
+                self.unlinked[reason] += 1
                 self.citations.append(
                     item.citation.model_copy(update={"target": None, "verified": False})
                 )
@@ -287,6 +299,7 @@ class _Assembly:
                 )
             )
             if not allowed:
+                self.unlinked["not_allowed"] += 1
                 self.citations.append(
                     item.citation.model_copy(update={"target": None, "verified": False})
                 )
@@ -307,6 +320,13 @@ class _Assembly:
 
 
 def assemble(inp: AssemblyInput) -> tuple[list[Element], list[Relation], C4Evidence]:
+    elements, relations, evidence, _ = assemble_with_unlinked(inp)
+    return elements, relations, evidence
+
+
+def assemble_with_unlinked(
+    inp: AssemblyInput,
+) -> tuple[list[Element], list[Relation], C4Evidence, UnlinkedCounts]:
     """Consume finalized retry outcomes; writer assigns the shared run ID later.
 
     element_files rolls component files up to their container/system; directly
@@ -353,4 +373,9 @@ def assemble(inp: AssemblyInput) -> tuple[list[Element], list[Relation], C4Evide
         [state.elements[id] for id in sorted(state.elements)],
         [state.relations[id] for id in sorted(state.relations)],
         evidence,
+        UnlinkedCounts(
+            no_match=state.unlinked["no_match"],
+            ambiguous=state.unlinked["ambiguous"],
+            not_allowed=state.unlinked["not_allowed"],
+        ),
     )

@@ -192,6 +192,8 @@ class _C4Run:
         logger.info(f"C4 LLM calls: {self.llm.calls}")
         for line in self.llm.report_lines():
             formatter.info(line)
+        for line in self.build.report_extra:
+            formatter.info(line)
 
 
 def _topic_sources(

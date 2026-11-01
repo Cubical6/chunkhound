@@ -294,6 +294,24 @@ class LLMConfig(BaseSettings):
         description="Model for final synthesis (large context analysis)",
     )
 
+    utility_max_input_chars: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Maximum request size in characters for utility extraction calls; "
+            "overrides the built-in provider limit"
+        ),
+    )
+
+    utility_max_input_tokens: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Maximum request size in tokens for utility extraction calls "
+            "(checked with the provider's token estimate)"
+        ),
+    )
+
     codex_reasoning_effort: ReasoningEffortLiteral | None = Field(
         default=None,
         description=(
@@ -967,6 +985,13 @@ class LLMConfig(BaseSettings):
                 self.supports_structured_outputs
             )
 
+        # Input limits bound utility extraction requests (shared extraction layer).
+        if role == "utility":
+            if self.utility_max_input_chars is not None:
+                role_config["max_input_chars"] = self.utility_max_input_chars
+            if self.utility_max_input_tokens is not None:
+                role_config["max_input_tokens"] = self.utility_max_input_tokens
+
         # Output-limit policy belongs exclusively to final research synthesis.
         # Utility and secondary roles must retain their explicit caller caps.
         if role == "synthesis":
@@ -1502,6 +1527,10 @@ class LLMConfig(BaseSettings):
             config["utility_model"] = utility_model
         if synthesis_model := os.getenv("CHUNKHOUND_LLM_SYNTHESIS_MODEL"):
             config["synthesis_model"] = synthesis_model
+        if max_chars := os.getenv("CHUNKHOUND_LLM_UTILITY_MAX_INPUT_CHARS"):
+            config["utility_max_input_chars"] = max_chars
+        if max_tokens := os.getenv("CHUNKHOUND_LLM_UTILITY_MAX_INPUT_TOKENS"):
+            config["utility_max_input_tokens"] = max_tokens
 
         output_limits_raw = os.getenv("CHUNKHOUND_LLM_OUTPUT_LIMITS_ENABLED")
         if output_limits_raw is not None:

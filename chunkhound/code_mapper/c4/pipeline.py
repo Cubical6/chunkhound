@@ -11,7 +11,11 @@ from typing import TypeVar
 
 from pydantic import TypeAdapter
 
-from chunkhound.code_mapper.c4.assemble import AssemblyInput, assemble
+from chunkhound.code_mapper.c4.assemble import (
+    AssemblyInput,
+    assemble,
+    assemble_with_unlinked,
+)
 from chunkhound.code_mapper.c4.classify import Classification, ClassifyItem, classify
 from chunkhound.code_mapper.c4.documented import (
     DocElement,
@@ -20,6 +24,10 @@ from chunkhound.code_mapper.c4.documented import (
     TopicSources,
     doc_files_for,
     extract_documented,
+    prune_documented_cache,
+)
+from chunkhound.code_mapper.c4.documented import (
+    report_lines as documented_report_lines,
 )
 from chunkhound.code_mapper.c4.files import list_scope_files
 from chunkhound.code_mapper.c4.grouping import GroupingResult, build_groups
@@ -124,6 +132,7 @@ class C4Build:
     evidence: C4Evidence
     lock: ScopeLock | None
     fallback_count: int
+    report_extra: list[str] = field(default_factory=list)
 
 
 def _classification_items(draft: C4Draft) -> list[ClassifyItem]:
@@ -240,6 +249,13 @@ async def _prepare(draft: C4Draft, llm: C4Llm, lock: ScopeLock | None) -> None:
     draft.prepared = True
 
 
+# Request-size limits change cost, not analysis results; keeping them out of the
+# fingerprint lets existing locks keep their history across the upgrade.
+_FINGERPRINT_EXCLUDE = {
+    "llm": {"utility_max_input_chars", "utility_max_input_tokens"},
+}
+
+
 def _input_fingerprint(
     project_root: Path, files: list[str], config: Config | None, scope_path: Path
 ) -> str:
@@ -254,7 +270,11 @@ def _input_fingerprint(
     payload = {
         "files": hashes,
         "scope": scope_path.relative_to(project_root).as_posix(),
-        "config": config.model_dump(mode="json") if config else None,
+        "config": (
+            config.model_dump(mode="json", exclude=_FINGERPRINT_EXCLUDE)
+            if config
+            else None
+        ),
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
@@ -577,12 +597,15 @@ async def finish_c4(
     kind: RunKind,
 ) -> C4Build:
     """Finalize dependent steps only after their deferred inputs are settled."""
+    topic_files = {file for topic in topics or () for file in topic.files}
     docs = await extract_documented(
         project_root=draft.project_root,
         doc_files=doc_files_for(draft.project_root, draft.scope_path, topics or ()),
         locked=lock.documented if lock else None,
         llm=llm,
         retries=draft.steps,
+        # Research only orders the calls; it never limits coverage.
+        order_hint=lambda fragment: float(fragment.source.path in topic_files),
     )
     await retries.drain()
     if not draft.prepared:
@@ -615,7 +638,9 @@ async def finish_c4(
             element.markers.append("undescribed")
             element.markers.sort()
         if docs.fallback and any(
-            c.target == element.id and c.source == "documentation"
+            c.target == element.id
+            and c.source == "documentation"
+            and (c.file, c.start_line, c.end_line) in docs.fallback_citations
             for c in evidence.citations
         ):
             if "fallback" not in element.markers:
@@ -651,4 +676,13 @@ async def finish_c4(
         if llm.trial
         else _build_lock(draft, model, evidence, inp, identity, fingerprint)
     )
-    return C4Build(model, evidence, updated, fallback_count)
+    if not llm.trial:
+        prune_documented_cache(draft.project_root)
+    unlinked = assemble_with_unlinked(inp)[3]
+    report_extra = [
+        *documented_report_lines(docs),
+        "C4 documentatierelaties niet gekoppeld: "
+        f"{unlinked.no_match} geen treffer, {unlinked.ambiguous} meerdere "
+        f"treffers, {unlinked.not_allowed} niet toegestaan",
+    ]
+    return C4Build(model, evidence, updated, fallback_count, report_extra)
