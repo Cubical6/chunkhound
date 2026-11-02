@@ -89,16 +89,13 @@ class ExtractionStore:
                 key = key_from_parts(key_parts)
                 if path.stem != key or data.get("key") != key:
                     raise ValueError("key does not match its parts")
-                members = tuple(
-                    FragmentIdentity(**member) for member in key_parts["members"]
-                )
-                parts = {
-                    int(position): dict(part)
-                    for position, part in data["parts"].items()
-                }
+                members = tuple(_identity(member) for member in key_parts["members"])
+                parts = {int(k): part for k, part in data["parts"].items()}
                 if any(not 0 <= position < len(members) for position in parts):
                     raise ValueError("part outside the bundle")
-            except (OSError, ValueError, KeyError, TypeError) as exc:
+                if not all(isinstance(part, dict) for part in parts.values()):
+                    raise ValueError("part is not an object")
+            except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
                 logger.warning(f"Skipping extraction cache entry {path.name}: {exc}")
                 continue
             yield StoredBundle(key, key_parts, members, parts)
@@ -137,6 +134,16 @@ class ExtractionStore:
                         path.unlink()
                 except OSError as exc:
                     logger.debug(f"Cannot prune extraction cache entry: {exc}")
+
+
+def _identity(member: dict[str, Any]) -> FragmentIdentity:
+    identity = FragmentIdentity(**member)
+    texts = (identity.path, identity.text_sha256, identity.context_sha256)
+    if not all(isinstance(text, str) for text in texts) or not isinstance(
+        identity.fragmentation_version, int
+    ):
+        raise TypeError("malformed fragment identity")
+    return identity
 
 
 def _write_json_durable(path: Path, value: dict[str, Any]) -> None:

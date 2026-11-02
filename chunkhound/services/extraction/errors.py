@@ -11,7 +11,9 @@ INPUT_REJECTED_MARKERS = ("input_too_large",)
 UNREADABLE_MARKERS = (
     "invalid json in structured output",
     "structured output truncated",
-    "llm response truncated",
+    "structured completion truncated",
+    "response truncated",
+    "incomplete - token limit",
 )
 DEFAULT_UNREADABLE_RULE = "invalid answer schema"
 
@@ -76,12 +78,14 @@ def translate_call_error(
 ) -> BaseException | None:
     """Map a provider failure to a layer kind; None means: re-raise as fatal.
 
-    Input refusal is checked first: wrappers may also look transient.
+    Unreadable comes first: parse and schema errors quote model output, which
+    can mention a refusal marker. Refusal precedes transient, because wrappers
+    may also look transient.
     """
-    if has_marker(exc, INPUT_REJECTED_MARKERS):
-        return ProviderInputRefusedError(str(exc))
     if is_unreadable(exc):
         return UnreadableAnswerError()
+    if has_marker(exc, INPUT_REJECTED_MARKERS):
+        return ProviderInputRefusedError(str(exc))
     if is_transient(exc):
         return TransientCallError(str(exc))
     return None

@@ -4,6 +4,7 @@ The fake sits at the provider boundary (`complete_structured`); errors use the
 texts real providers raise.
 """
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -23,7 +24,11 @@ from chunkhound.services.extraction.fragments import Fragment, fragment_document
 from chunkhound.services.extraction.provider_call import ProviderStructuredCall
 from chunkhound.services.extraction.runner import Rejected, Valid, run_extraction
 from chunkhound.services.extraction.sources import read_source
-from chunkhound.services.extraction.store import ExtractionStore, ProviderIdentity
+from chunkhound.services.extraction.store import (
+    ExtractionStore,
+    ProviderIdentity,
+    key_from_parts,
+)
 from tests.fixtures.scripted_structured import ScriptedStructuredLLM, prompt_fragments
 
 PROVIDER = ProviderIdentity(provider="fake", model="fake-gpt")
@@ -334,3 +339,191 @@ async def test_supplied_oversized_bundle_is_split_not_truncated(tmp_path):
             f"{number}| {line}" for number, line in enumerate(fragment.lines, 1)
         )
         assert any(body in prompt for prompt in llm.prompts)
+
+
+def _unreadable_first(then: Exception):
+    def handler(prompt: str, call: int) -> dict[str, Any]:
+        if call == 1:
+            raise RuntimeError(
+                "Invalid JSON in structured output: Expecting value: line 1 column 1"
+            )
+        raise then
+
+    return handler
+
+
+def _notes(tmp_path: Path) -> tuple[list[Fragment], InputLimit]:
+    for number in range(4):
+        (tmp_path / f"n{number}.md").write_text(f"# Notitie {number}\nTekst.\n")
+    limit = InputLimit(1_048_576)
+    return _fragments(tmp_path, [f"n{n}.md" for n in range(4)], limit), limit
+
+
+@pytest.mark.parametrize(
+    ("then", "expected"),
+    [
+        (ValueError("provider configuration broke"), ValueError),
+        (RuntimeError("error: input_too_large"), InputRejectedError),
+    ],
+)
+async def test_fatal_error_after_a_split_is_still_fatal(tmp_path, then, expected):
+    fragments, limit = _notes(tmp_path)
+    llm = ScriptedStructuredLLM(_unreadable_first(then))
+
+    with pytest.raises(expected):
+        await run_extraction(
+            LineCountGoal(),
+            fragments,
+            call=_call(llm),
+            provider=PROVIDER,
+            limit=limit,
+            store=None,
+            concurrency=1,
+        )
+
+    assert llm.calls == 2
+
+
+async def test_temporary_error_after_a_split_stays_temporary(tmp_path):
+    fragments, limit = _notes(tmp_path)
+    llm = ScriptedStructuredLLM(_unreadable_first(RuntimeError("rate limit 429")))
+
+    result = await run_extraction(
+        LineCountGoal(),
+        fragments,
+        call=_call(llm),
+        provider=PROVIDER,
+        limit=limit,
+        store=None,
+        concurrency=1,
+    )
+
+    # One split, then each half fails temporarily instead of splitting further.
+    assert llm.calls == 3
+    assert result.counts.split == 1
+    assert all(part.kind == "transient" for part in result.parts.values())  # type: ignore[union-attr]
+
+
+class _HangsThenFails(ScriptedStructuredLLM):
+    """The first call never returns; the second raises a fatal error."""
+
+    async def complete_structured(
+        self,
+        prompt: str,
+        json_schema: dict[str, Any],
+        system: str | None = None,
+        max_completion_tokens: int = 4096,
+    ) -> dict[str, Any]:
+        self.prompts.append(prompt)
+        if len(self.prompts) == 1:
+            await asyncio.Event().wait()
+        raise ValueError("provider configuration broke")
+
+
+async def test_fatal_error_stops_concurrent_bundles_and_stores_nothing(tmp_path):
+    fragments, limit = _nine_fragment_setup(tmp_path)
+    store = ExtractionStore(tmp_path / ".cache", "linecount", read_only=False)
+    llm = _HangsThenFails(honest)
+
+    with pytest.raises(ValueError):
+        await run_extraction(
+            LineCountGoal(),
+            fragments,
+            call=_call(llm),
+            provider=PROVIDER,
+            limit=limit,
+            store=store,
+            concurrency=2,
+        )
+
+    assert llm.calls == 2  # the third bundle never starts
+    assert list(store.candidates()) == []
+
+
+def _rekey(entry: Path, data: dict[str, Any]) -> None:
+    data["key"] = key_from_parts(data["key_parts"])
+    entry.unlink()
+    (entry.parent / f"{data['key']}.json").write_text(json.dumps(data))
+
+
+def _parts_not_an_object(data: dict[str, Any]) -> None:
+    data["parts"] = []
+
+
+def _part_not_an_object(data: dict[str, Any]) -> None:
+    data["parts"] = {position: [] for position in data["parts"]}
+
+
+def _member_path_not_text(data: dict[str, Any]) -> None:
+    data["key_parts"]["members"][0]["path"] = ["a"]
+
+
+def _other_notation(data: dict[str, Any]) -> None:
+    data["key_parts"]["notation"] = 999
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        _parts_not_an_object,
+        _part_not_an_object,
+        _member_path_not_text,
+        _other_notation,
+    ],
+)
+async def test_well_keyed_entry_of_the_wrong_shape_is_a_miss(tmp_path, damage):
+    fragments, limit = _nine_fragment_setup(tmp_path)
+    store = ExtractionStore(tmp_path / ".cache", "linecount", read_only=False)
+
+    async def run(llm: ScriptedStructuredLLM):
+        return await run_extraction(
+            LineCountGoal(),
+            fragments,
+            call=_call(llm),
+            provider=PROVIDER,
+            limit=limit,
+            store=store,
+            concurrency=1,
+        )
+
+    await run(ScriptedStructuredLLM(honest))
+    entry = sorted(store.directory.glob("*.json"))[0]
+    data = json.loads(entry.read_text())
+    damage(data)
+    _rekey(entry, data)
+
+    llm = ScriptedStructuredLLM(honest)
+    result = await run(llm)
+
+    assert llm.calls == 1  # only the damaged bundle is asked again
+    assert all(isinstance(part, Valid) for part in result.parts.values())
+
+
+async def test_identical_fragments_are_each_covered_by_reuse(tmp_path):
+    limit = InputLimit(20_000)
+    body = ("woord " * (max_fragment_chars(effective_target(limit)) // 8)).strip()
+    section = f"## Herhaald\n{body}\n"
+    (tmp_path / "doc.md").write_text(f"# Titel\n{section}{section}{section}")
+    fragments = _fragments(tmp_path, ["doc.md"], limit)
+    repeated = [f.identity() for f in fragments if f.heading_path == ("Titel",)]
+    assert len(repeated) == 3 and len(set(repeated)) == 1
+    store = ExtractionStore(tmp_path / ".cache", "linecount", read_only=False)
+
+    async def run(llm: ScriptedStructuredLLM):
+        return await run_extraction(
+            LineCountGoal(),
+            fragments,
+            call=_call(llm),
+            provider=PROVIDER,
+            limit=limit,
+            store=store,
+            concurrency=1,
+        )
+
+    await run(ScriptedStructuredLLM(honest))
+    llm = ScriptedStructuredLLM(honest)
+    result = await run(llm)
+
+    assert llm.calls == 0
+    assert all(part.from_cache for part in result.parts.values())  # type: ignore[union-attr]
+    assert set(result.parts) == set(range(len(fragments)))

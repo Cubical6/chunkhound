@@ -708,6 +708,7 @@ async def test_fallback_fragment_without_lock_items_blocks_lock(
 
     assert pipeline_answers.calls["documented"] == 2
     assert result.model.run.kind == "full"
+    assert result.model.run.fallback_fragments == 1
     assert result.lock.documented is None
     assert result.lock.transition is None
     assert not any(

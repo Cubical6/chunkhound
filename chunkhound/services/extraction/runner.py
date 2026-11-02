@@ -226,6 +226,7 @@ async def run_extraction(
         origin = origin or key
         if not fits(prompt, schema, limit, call.estimate_tokens):
             raise AssertionError(f"Bundle {key} exceeds the input limit after packing")
+        bisect = False
         try:
             async with semaphore:
                 if stopped.is_set():
@@ -240,16 +241,20 @@ async def run_extraction(
             if len(group) == 1:
                 fail(origin, group, Failed("rejected", exc.rule))
                 return
-            result.counts.split += 1
-            middle = len(group) // 2
-            await attempt(group[:middle], origin)
-            await attempt(group[middle:], origin)
-            return
+            bisect = True
         except TransientCallError:
             record(AttemptRecord(key, len(group), "transient"))
             fail(origin, group, Failed("transient"))
             return
 
+        if bisect:
+            # Outside the except block: otherwise every later provider error
+            # chains to this one and is classified as unreadable too.
+            result.counts.split += 1
+            middle = len(group) // 2
+            await attempt(group[:middle], origin)
+            await attempt(group[middle:], origin)
+            return
         if stopped.is_set():
             return
         result.counts.new += 1
@@ -310,16 +315,14 @@ def _identities(members: Sequence[Fragment]) -> tuple[Any, ...]:
 def _same_goal(
     bundle: StoredBundle, goal: ExtractionGoal[Any], provider: ProviderIdentity
 ) -> bool:
-    parts = bundle.key_parts
-    return (
-        parts.get("goal") == goal.name
-        and parts.get("goal_version") == goal.version
-        and parts.get("provider")
-        == bundle_key_parts(
-            goal=goal.name,
-            goal_version=goal.version,
-            provider=provider,
-            max_completion_tokens=0,
-            members=(),
-        )["provider"]
+    expected = bundle_key_parts(
+        goal=goal.name,
+        goal_version=goal.version,
+        provider=provider,
+        max_completion_tokens=0,
+        members=(),
+    )
+    return all(
+        bundle.key_parts.get(part) == expected[part]
+        for part in ("notation", "goal", "goal_version", "provider")
     )

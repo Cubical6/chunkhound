@@ -27,12 +27,8 @@ from chunkhound.services.extraction.budget import (
     max_fragment_chars,
 )
 from chunkhound.services.extraction.errors import (
-    INPUT_REJECTED_MARKERS,
-    ProviderInputRefusedError,
-    TransientCallError,
     UnreadableAnswerError,
-    has_marker,
-    is_unreadable,
+    translate_call_error,
 )
 from chunkhound.services.extraction.fragments import Fragment, fragment_document
 from chunkhound.services.extraction.runner import (
@@ -43,11 +39,7 @@ from chunkhound.services.extraction.runner import (
     Valid,
     run_extraction,
 )
-from chunkhound.services.extraction.sources import (
-    SourceError,
-    SourceVersion,
-    read_source,
-)
+from chunkhound.services.extraction.sources import SourceVersion, read_source
 from chunkhound.services.extraction.store import ExtractionStore
 
 EXTRACTION_CACHE = Path(".chunkhound/extraction")
@@ -104,31 +96,6 @@ class _AnswerModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class _Quote(_AnswerModel):
-    file: str
-    start_line: int
-    end_line: int
-    quote: str
-
-
-class _ElementAnswer(_AnswerModel):
-    kind: Literal["person", "external", "container", "component"]
-    term: str = Field(min_length=1)
-    citation: _Quote
-
-
-class _RelationAnswer(_AnswerModel):
-    from_term: str = Field(min_length=1)
-    to_term: str = Field(min_length=1)
-    title: str = Field(min_length=1)
-    citation: _Quote
-
-
-class DocumentedAnswer(_AnswerModel):
-    elements: list[_ElementAnswer]
-    relations: list[_RelationAnswer]
-
-
 def _project_file(project_root: Path, file: str) -> Path | None:
     if Path(file).is_absolute():
         return None
@@ -174,48 +141,6 @@ def verify_quote(
     normalized = " ".join(quote.split())
     span = " ".join(" ".join(lines[start_line - 1 : end_line]).split())
     return bool(normalized) and normalized in span
-
-
-def check_documented_answer(
-    answer: DocumentedAnswer, project_root: Path, doc_files: Sequence[str]
-) -> tuple[list[DocElement], list[DocRelation]]:
-    """Drop unverified items; rejecting every proposed item is retryable."""
-    allowed = set(doc_files)
-
-    def verified(quote: _Quote) -> Citation | None:
-        if quote.file not in allowed or not verify_quote(
-            project_root, quote.file, quote.start_line, quote.end_line, quote.quote
-        ):
-            return None
-        return Citation(
-            target=None,
-            file=quote.file,
-            start_line=quote.start_line,
-            end_line=quote.end_line,
-            source="documentation",
-            verified=True,
-        )
-
-    elements = [
-        DocElement(item.kind, item.term, citation)
-        for item in answer.elements
-        if (citation := verified(item.citation)) is not None
-        and verify_quote(
-            project_root,
-            citation.file,
-            citation.start_line,
-            citation.end_line,
-            item.term,
-        )
-    ]
-    relations = [
-        DocRelation(item.from_term, item.to_term, item.title, citation)
-        for item in answer.relations
-        if (citation := verified(item.citation)) is not None
-    ]
-    if (answer.elements or answer.relations) and not (elements or relations):
-        raise AnswerRejectedError("documented: no proposed item has a literal quote")
-    return elements, relations
 
 
 def _previous_outcome(
@@ -405,15 +330,14 @@ class _C4Call:
                 max_completion_tokens=max_completion_tokens,
             )
         except Exception as exc:
-            if has_marker(exc, INPUT_REJECTED_MARKERS):
-                raise ProviderInputRefusedError(str(exc)) from exc
             if isinstance(exc, AnswerRejectedError):
                 raise UnreadableAnswerError(rejection_rule(exc)) from exc
-            if is_unreadable(exc):
-                raise UnreadableAnswerError() from exc
-            if isinstance(exc, TransientStepError):
-                raise TransientCallError(str(exc)) from exc
-            raise
+            translated = translate_call_error(
+                exc, lambda error: isinstance(error, TransientStepError)
+            )
+            if translated is None:
+                raise
+            raise translated from exc
 
     def estimate_tokens(self, text: str) -> int:
         return self._llm.estimate_tokens(text)
@@ -535,14 +459,11 @@ async def extract_documented(
     Unchanged sets reuse the lock without a call. Otherwise every fragment gets
     a valid outcome (cached, new or recovered) or falls back per fragment.
     """
-    sources: dict[str, SourceVersion] = {}
-    for file in sorted(set(doc_files)):
-        try:
-            sources[file] = read_source(project_root, file, strict=True)
-        except SourceError as exc:
-            raise ValueError(
-                f"Documentation source is not a project file: {file}"
-            ) from exc
+    # A trial only hashes bytes, so it does not require decodable sources.
+    sources: dict[str, SourceVersion] = {
+        file: read_source(project_root, file, strict=not llm.trial)
+        for file in sorted(set(doc_files))
+    }
     hashes = {file: source.sha256 for file, source in sources.items()}
     if locked is not None and locked.hashes == hashes:
         return _previous_outcome(locked, hashes, project_root, fallback=False)

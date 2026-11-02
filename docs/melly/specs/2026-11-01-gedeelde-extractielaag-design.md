@@ -151,7 +151,7 @@ async def run_extraction(
 
 **Andere geselecteerde bestanden** (bijvoorbeeld `README.rst` of `README.txt` via `documented.py:105`): dezelfde regels, maar zonder kopjesherkenning, dus alleen stap 3. De context is alleen het documentpad.
 
-**Gevolg.** Een wijziging maakt het kleinste blok dat haar bevat en nog als één fragment past opnieuw nodig. In een document onder de maximale fragmentgrootte is dat het hele document. Binnen een gesplitste sectie kan een wijziging de grenzen van de volgende alineafragmenten in **dezelfde** sectie verschuiven, maar nooit daarbuiten.
+**Gevolg.** Een wijziging maakt het kleinste blok dat haar bevat en nog als één fragment past opnieuw nodig. In een document onder de maximale fragmentgrootte is dat het hele document. Binnen een gesplitste sectie kan een wijziging de grenzen van de volgende alineafragmenten in **dezelfde** sectie verschuiven. Daarbuiten kan dat in één zeldzaam geval: de maximale grootte rekent met de breedste regelnummernotatie van het document. Gaat het document door een ingevoegde regel van bijvoorbeeld 99 naar 100 regels, dan kan een sectie die precies op de grens zit een extra fragment worden. Dat kost alleen een extra aanroep; de uitkomst blijft geldig.
 
 **Aangeleverde bereiken** (research): de toepassing levert per bronversie regelbereiken die elkaar niet overlappen. Overlap is een programmeerfout van de toepassing; research voegt overlappende bereiken eerst samen (§9). Een te groot bereik wordt gesplitst volgens stap 3. Er is geen dekkingseis.
 
@@ -218,12 +218,12 @@ Halveren binnen de uitgestelde herstelpoging hoort bij die ene poging; er komen 
 
 `StructuredCall` is een adapter rond `C4Llm.call` of rond de researchprovider. De adapter onderzoekt de hele exception-keten en deelt fouten in, in deze volgorde:
 
-1. **Invoer geweigerd → fatale configuratiefout**, met de gemeten grootte en de opgegeven grens. Herkend aan bekende markers, voor Codex `input_too_large`; de volledige lijst komt in het plan.
-2. **Onleesbaar of afgekapt → halveren.** Herkend aan:
+1. **Onleesbaar of afgekapt → halveren.** Dit komt eerst, omdat parse- en schemafouten modeluitvoer citeren. Daarin kan de marker van punt 2 voorkomen zonder dat de provider iets geweigerd heeft (herziening na de codereview van 2026-11-03). Herkend aan:
    - `json.JSONDecodeError` of `"Invalid JSON in structured output"` (`base_cli_provider.py:451–454`);
    - `"Structured output truncated"` (`anthropic_llm_provider.py:942–945`);
-   - `"LLM response truncated"`;
+   - `"LLM response truncated"`, `"Gemini response truncated"`, `"structured completion truncated"` van Gemini en OpenAI-compatibele providers, en `"incomplete - token limit"` van de OpenAI Responses API;
    - een pydantic- of schema-validatiefout in de keten, ook als die verpakt is in `"LLM structured completion failed"` (`base_cli_provider.py:462–465`).
+2. **Invoer geweigerd → fatale configuratiefout**, met de gemeten grootte en de opgegeven grens. Herkend aan bekende markers, voor Codex `input_too_large`.
 3. **Tijdelijk** volgens `_is_retryable_poi_error` (`service.py:95–119`) → `Failed(transient)`.
 4. **Overige fouten → fataal**, net als nu (`llm.py:141–143`).
 
@@ -266,6 +266,7 @@ Doorstroom in `extract_documented`:
 6. **Terugval per fragment.** `DocumentedOutcome` krijgt `fallback_fragments`: de verzameling (pad, start, eind) van fragmenten die na de drain nog mislukt zijn. Elk item krijgt een eigen terugvalmarkering.
    - `any_fallback = bool(fallback_fragments)`. Deze waarde vervangt `docs.fallback` in `pipeline.py:550` en `_transition` (`pipeline.py:491`), ook als het fragment geen lock-items heeft.
    - Daarnaast voegt C4 de sleutel `documented` toe aan `LlmSteps.fallbacks`, zodat een gedeeltelijk geslaagde herstelpoging de overgang toch tegenhoudt.
+   - Het aantal teruggevallen fragmenten staat in het model als `run.fallback_fragments`, en de CLI waarschuwt erover. Zo blijft een fragment zonder lock-items te onderscheiden van een document zonder feiten (invariant 3).
    - **Terugvalitems** uit `locked.documented`. Het lockbestand bewaart geen citaattekst (`documented.py:190`), daarom:
      - een **element** wordt overgenomen als zijn span helemaal binnen de huidige regels van het fragment ligt en `verify_quote` met de term slaagt;
      - een **relatie** wordt overgenomen als alleen haar span helemaal binnen het fragment ligt. Dat is een zwakkere garantie, gelijk aan het huidige gedrag (`documented.py:199`).

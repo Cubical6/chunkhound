@@ -189,6 +189,11 @@ class _C4Run:
                 f"C4: {self.build.fallback_count} elementen via terugval "
                 "(niet opgeslagen)"
             )
+        if self.build.model.run.fallback_fragments:
+            formatter.warning(
+                f"C4: {self.build.model.run.fallback_fragments} "
+                "documentatiefragmenten niet onderzocht"
+            )
         logger.info(f"C4 LLM calls: {self.llm.calls}")
         for line in self.llm.report_lines():
             formatter.info(line)

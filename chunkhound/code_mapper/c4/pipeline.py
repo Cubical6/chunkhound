@@ -664,6 +664,7 @@ async def finish_c4(
             head_sha=head_sha,
             scope=draft.scope_label,
             fallback_count=fallback_count,
+            fallback_fragments=len(docs.fallback_fragments),
             renames=renames,
         ),
         elements=elements,

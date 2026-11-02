@@ -40,6 +40,8 @@ class RunInfo(_C4BaseModel):
     head_sha: str
     scope: str
     fallback_count: int
+    # Documentation fragments that were not examined; 0 in files from older runs.
+    fallback_fragments: int = 0
     renames: bool
 
 

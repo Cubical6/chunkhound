@@ -434,6 +434,17 @@ async def test_transient_failure_reports_fallback_without_caching_it(cli, capsys
     assert document["scopes"]["/"]["components"] == {}
 
 
+async def test_failed_documentation_fragment_warns_the_user(cli, capsys):
+    cli.provider.answers["documented"] = TimeoutError("temporarily unavailable")
+    await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
+    model, _ = pair(cli.out)
+    count = model.run.fallback_fragments
+    assert count > 0
+    assert f"C4: {count} documentatiefragmenten niet onderzocht" in (
+        capsys.readouterr().out
+    )
+
+
 async def test_resume_after_fatal_error_publishes_nothing(cli, scripted):
     """Bundles validated before a fatal error survive; nothing is published."""
     from chunkhound.code_mapper.c4.documented import EXTRACTION_CACHE

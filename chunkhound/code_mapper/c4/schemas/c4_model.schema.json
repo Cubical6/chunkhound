@@ -284,6 +284,11 @@
           "title": "Fallback Count",
           "type": "integer"
         },
+        "fallback_fragments": {
+          "default": 0,
+          "title": "Fallback Fragments",
+          "type": "integer"
+        },
         "head_sha": {
           "title": "Head Sha",
           "type": "string"

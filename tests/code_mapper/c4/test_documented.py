@@ -4,21 +4,28 @@ import hashlib
 import json
 from dataclasses import asdict
 
+import jsonschema
 import pytest
 
 from chunkhound.code_mapper.c4.documented import (
     EXTRACTION_CACHE,
-    DocumentedAnswer,
+    DocElement,
+    DocRelation,
     TopicSources,
-    check_documented_answer,
     doc_files_for,
     extract_documented,
+    report_lines,
     verify_quote,
 )
-from chunkhound.code_mapper.c4.llm import AnswerRejectedError, C4Llm, RetryQueue
-from chunkhound.code_mapper.c4.model import LockedDocumented
+from chunkhound.code_mapper.c4.llm import C4Llm, RetryQueue
+from chunkhound.code_mapper.c4.model import Citation, LockedDocumented
 from chunkhound.llm_manager import LLMManager
-from tests.code_mapper.c4.conftest import component_answer, write_sections
+from chunkhound.services.extraction.errors import InputRejectedError
+from tests.code_mapper.c4.conftest import (
+    component_answer,
+    documented_fragments,
+    write_sections,
+)
 
 QUOTE = "Een beheerder gebruikt de webwinkel via Stripe."
 
@@ -41,25 +48,37 @@ def answer(quote=QUOTE):
     }
 
 
-def test_documented_quote_must_exist(fixture_repo):
-    with pytest.raises(AnswerRejectedError):
-        check_documented_answer(
-            DocumentedAnswer.model_validate(answer("Webdashboard")),
-            fixture_repo,
-            ["README.md"],
-        )
-    elements, relations = check_documented_answer(
-        DocumentedAnswer.model_validate(answer()), fixture_repo, ["README.md"]
+def verified_citation():
+    return Citation(
+        target=None,
+        file="README.md",
+        start_line=3,
+        end_line=3,
+        source="documentation",
+        verified=True,
     )
-    assert [(item.kind, item.term) for item in elements] == [("person", "beheerder")]
-    assert elements[0].citation.verified
-    assert elements[0].citation.source == "documentation"
-    assert elements[0].citation.target is None  # Identity is assigned after extraction.
-    assert [(item.from_term, item.to_term, item.title) for item in relations] == [
-        ("beheerder", "webwinkel", "gebruikt")
+
+
+async def test_documented_citations_are_verified_documentation_evidence(
+    fixture_repo, c4_llm_manager, scripted
+):
+    scripted.answers["documented"] = answer()
+    llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
+    outcome = await extract_documented(
+        project_root=fixture_repo,
+        doc_files=["README.md"],
+        locked=None,
+        llm=llm,
+        retries=RetryQueue(),
+    )
+    assert outcome.elements == [
+        DocElement("person", "beheerder", verified_citation())
     ]
-    assert relations[0].citation.verified
-    assert relations[0].citation.source == "documentation"
+    assert outcome.relations == [
+        DocRelation("beheerder", "webwinkel", "gebruikt", verified_citation())
+    ]
+    # Identity is assigned after extraction.
+    assert outcome.elements[0].citation.target is None
 
 
 async def test_documented_discards_invalid_items(
@@ -153,9 +172,8 @@ async def test_documented_reuses_on_same_hashes(fixture_repo, c4_llm_manager, sc
 async def test_documented_fallback_after_retry(
     fixture_repo, c4_llm_manager, scripted, has_lock
 ):
-    elements, relations = check_documented_answer(
-        DocumentedAnswer.model_validate(answer()), fixture_repo, ["README.md"]
-    )
+    elements = [DocElement("person", "beheerder", verified_citation())]
+    relations = [DocRelation("beheerder", "webwinkel", "gebruikt", verified_citation())]
     locked = (
         LockedDocumented(
             hashes={"README.md": "previous-hash"},
@@ -258,23 +276,13 @@ def test_verify_quote_normalizes_whitespace_but_respects_lines(tmp_path):
     assert not verify_quote(tmp_path, "missing.md", 1, 1, "Heading")
 
 
-def test_documented_cannot_cite_unprovided_or_outside_files(tmp_path):
+def test_documented_sources_stay_inside_the_project(tmp_path):
     root = tmp_path / "project"
     root.mkdir()
     (tmp_path / "outside.md").write_text(QUOTE, encoding="utf-8")
-    (root / "unprovided.md").write_text(QUOTE, encoding="utf-8")
     (root / "linked.md").symlink_to(tmp_path / "outside.md")
     for file in ("../outside.md", "linked.md", str(tmp_path / "outside.md")):
         assert not verify_quote(root, file, 1, 1, QUOTE)
-    payload = answer()
-    payload["elements"][0]["citation"] = citation(
-        file="unprovided.md", start_line=1, end_line=1
-    )
-    payload["relations"] = []
-    with pytest.raises(AnswerRejectedError):
-        check_documented_answer(
-            DocumentedAnswer.model_validate(payload), root, ["README.md"]
-        )
     assert (
         doc_files_for(
             root, root, [TopicSources("Escapes", ("../outside.md", "linked.md"))]
@@ -410,3 +418,250 @@ async def test_duplicate_items_are_merged_once(fixture_repo, c4_llm_manager, scr
 
     assert [e.term for e in outcome.elements] == ["beheerder"]
     assert [r.to_term for r in outcome.relations] == ["webwinkel"]
+
+
+def invalid_json_error():
+    try:
+        json.loads("geen json")
+    except json.JSONDecodeError as exc:
+        return RuntimeError(f"Invalid JSON in structured output: {exc}")
+    raise AssertionError("unreachable")
+
+
+def fails_first_with(error, then=component_answer):
+    """The first call raises `error`; later calls answer through `then`."""
+    state = {"calls": 0}
+
+    def handler(prompt):
+        state["calls"] += 1
+        if state["calls"] == 1:
+            raise error
+        return then(prompt)
+
+    return handler
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        invalid_json_error(),
+        RuntimeError("Structured output truncated - increase max_completion_tokens"),
+        RuntimeError("LLM response truncated - token limit exceeded"),
+        RuntimeError("LLM structured completion truncated - token limit exceeded"),
+        RuntimeError("Gemini response truncated - token limit exceeded"),
+        RuntimeError("Gemini structured completion truncated - token limit exceeded"),
+        RuntimeError("LLM response incomplete - token limit exceeded"),
+    ],
+)
+async def test_unreadable_answer_halves_and_reports_the_split(
+    fixture_repo, limited_manager, scripted, error
+):
+    write_sections(fixture_repo / "docs/arch.md")
+    scripted.answers["documented"] = fails_first_with(error)
+
+    outcome, _, fallbacks = await run_documented(
+        fixture_repo, limited_manager, ["docs/arch.md"]
+    )
+
+    assert fallbacks == 0 and not outcome.fallback
+    assert {e.term for e in outcome.elements} == {f"Component{n}" for n in range(12)}
+    assert "1 gesplitst" in report_lines(outcome)[0]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "codex exec failed (exit 1): error: input_too_large max_chars: 1048576",
+        "LLM structured completion failed: input_too_large",
+    ],
+)
+async def test_input_refusal_stops_with_size_and_limit(
+    fixture_repo, c4_llm_manager, scripted, text
+):
+    scripted.answers["documented"] = RuntimeError(text)
+
+    with pytest.raises(InputRejectedError, match="opgegeven grens"):
+        await run_documented(fixture_repo, c4_llm_manager, ["README.md"])
+
+    assert scripted.calls["documented"] == 1
+
+
+async def test_fatal_error_after_a_split_stops_the_run(
+    fixture_repo, limited_manager, scripted
+):
+    write_sections(fixture_repo / "docs/arch.md")
+    state = {"calls": 0}
+
+    def handler(prompt):
+        state["calls"] += 1
+        if state["calls"] == 1:
+            raise invalid_json_error()
+        raise RuntimeError("codex exec failed (exit 1): 401 unauthorized")
+
+    scripted.answers["documented"] = handler
+
+    with pytest.raises(RuntimeError, match="401"):
+        await run_documented(fixture_repo, limited_manager, ["docs/arch.md"])
+
+    assert state["calls"] == 2
+
+
+async def test_input_refusal_after_a_split_stays_a_refusal(
+    fixture_repo, limited_manager, scripted
+):
+    write_sections(fixture_repo / "docs/arch.md")
+    state = {"calls": 0}
+
+    def handler(prompt):
+        state["calls"] += 1
+        if state["calls"] == 1:
+            raise invalid_json_error()
+        raise RuntimeError("codex exec failed (exit 1): error: input_too_large")
+
+    scripted.answers["documented"] = handler
+
+    with pytest.raises(InputRejectedError):
+        await run_documented(fixture_repo, limited_manager, ["docs/arch.md"])
+
+
+async def test_temporary_error_after_a_split_is_reported_as_temporary(
+    fixture_repo, limited_manager, scripted
+):
+    write_sections(fixture_repo / "docs/arch.md")
+    state = {"calls": 0}
+
+    def handler(prompt):
+        state["calls"] += 1
+        if state["calls"] == 1:
+            raise invalid_json_error()
+        if state["calls"] == 2:
+            raise RuntimeError("rate limit 429")
+        return component_answer(prompt)
+
+    scripted.answers["documented"] = handler
+
+    outcome, llm, fallbacks = await run_documented(
+        fixture_repo, limited_manager, ["docs/arch.md"]
+    )
+
+    report = next(line for line in llm.report_lines() if "C4 documented" in line)
+    assert "#2 tijdelijke fout" in report
+    assert fallbacks == 0 and not outcome.fallback
+
+
+def schema_failure_quoting_document(prompt):
+    """The real text of a CLI provider's schema failure, which quotes the answer."""
+    try:
+        jsonschema.validate(
+            {"quote": "Codex geeft input_too_large bij te grote aanvragen."},
+            {"type": "object", "required": ["end_line"]},
+        )
+    except jsonschema.ValidationError as exc:
+        raise RuntimeError(f"LLM structured completion failed: {exc}") from exc
+    raise AssertionError("unreachable")
+
+
+def pydantic_failure_quoting_document(prompt):
+    return {
+        "fragments": [
+            {
+                "id": "F1",
+                "part": {
+                    "elements": [
+                        {
+                            "kind": "input_too_large",
+                            "term": "x",
+                            "citation": {
+                                "start_line": 1,
+                                "end_line": 1,
+                                "quote": "input_too_large",
+                            },
+                        }
+                    ],
+                    "relations": [],
+                },
+            }
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    "handler", [schema_failure_quoting_document, pydantic_failure_quoting_document]
+)
+async def test_marker_in_model_output_is_no_input_refusal(
+    fixture_repo, c4_llm_manager, scripted, handler
+):
+    (fixture_repo / "docs").mkdir(exist_ok=True)
+    (fixture_repo / "docs/limit.md").write_text(
+        "# Limiet\n\nCodex geeft input_too_large bij te grote aanvragen.\n",
+        encoding="utf-8",
+    )
+    scripted.answers["documented"] = handler
+
+    outcome, _, fallbacks = await run_documented(
+        fixture_repo, c4_llm_manager, ["docs/limit.md"]
+    )
+
+    assert fallbacks == 1 and outcome.fallback
+    assert scripted.calls["documented"] == 2
+
+
+async def test_citation_must_lie_inside_its_own_fragment(
+    fixture_repo, limited_manager, scripted
+):
+    """A quote that exists elsewhere in the document does not count."""
+    write_sections(fixture_repo / "docs/arch.md")
+    neighbour = "Component1 verwerkt verzoeken."
+
+    def handler(prompt):
+        fragments = []
+        for fid, (_path, lines) in documented_fragments(prompt).items():
+            forged = any("Component0 " in line for line in lines)
+            elements = [
+                {
+                    "kind": "component",
+                    "term": "Component1",
+                    "citation": {
+                        "start_line": 1,
+                        "end_line": len(lines),
+                        "quote": neighbour,
+                    },
+                }
+            ]
+            fragments.append(
+                {
+                    "id": fid,
+                    "part": {
+                        "elements": elements if forged else [],
+                        "relations": [],
+                    },
+                }
+            )
+        return {"fragments": fragments}
+
+    scripted.answers["documented"] = handler
+
+    outcome, _, fallbacks = await run_documented(
+        fixture_repo, limited_manager, ["docs/arch.md"]
+    )
+
+    assert outcome.elements == []
+    assert fallbacks == 1
+    [(_, start, end)] = outcome.fallback_fragments
+    lines = (fixture_repo / "docs/arch.md").read_text().splitlines()
+    assert any("Component0 " in line for line in lines[start - 1 : end])
+
+
+async def test_non_utf8_source_passes_trial_and_fails_clearly_in_a_real_run(
+    fixture_repo, c4_llm_manager
+):
+    (fixture_repo / "README.rst").write_bytes(b"caf\xe9\n")
+
+    outcome, llm, _ = await run_documented(
+        fixture_repo, c4_llm_manager, ["README.rst"], trial=True
+    )
+    assert llm.calls == 0
+    assert outcome.hashes == {"README.rst": hashlib.sha256(b"caf\xe9\n").hexdigest()}
+
+    with pytest.raises(ValueError, match="not valid UTF-8: README.rst"):
+        await run_documented(fixture_repo, c4_llm_manager, ["README.rst"])
