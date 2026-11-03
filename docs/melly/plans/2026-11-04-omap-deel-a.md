@@ -76,14 +76,14 @@ uv run scripts/generate_c4_schemas.py                                           
 
 **Files:** `c4/runtime.py`, `c4/assemble.py`; tests in `test_runtime.py`, `test_assemble.py`.
 
-- [ ] **Step 1: Rode tests.**
+- [x] **Step 1: Rode tests.**
   - `test_system_name_prefers_selected_root_container`, met `Cargo.toml` en `pyproject.toml` in de wortel.
   - De twee terugvalstappen: eerste manifest, daarna de mapnaam.
   - `test_cdylib_beside_another_manifest_is_no_candidate`: geen `uncertain`, ook niet bij `accepted[Cargo.toml]`. Afhankelijkheden blijven meetellen.
   - `test_documented_relation_with_shared_name_links_to_container`.
-- [ ] **Step 2:** In `scan_runtime` de naam bepalen ná `selected`. `_manifest` leest `crate-type`; een `cdylib` in een map met nog een manifest gaat niet in `selected` of `uncertain`.
-- [ ] **Step 3:** In `documented_relations`: bevat een term precies het systeem en één container, kies de container.
-- [ ] **Step 4:** Tests, ruff en mypy.
+- [x] **Step 2:** In `scan_runtime` de naam bepalen ná `selected`. `_manifest` leest `crate-type`; een `cdylib` in een map met nog een manifest gaat niet in `selected` of `uncertain`.
+- [x] **Step 3:** In `documented_relations`: bevat een term precies het systeem en één container, kies de container.
+- [x] **Step 4:** Tests, ruff en mypy.
 
 ### Task 3: Bouwsteen per map en lockversie 4 (spec §4.1, §6)
 

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from chunkhound.code_mapper.c4.runtime import scan_runtime
+from chunkhound.code_mapper.c4.runtime import RuntimeScan, scan_runtime
 
 
 def test_container_boundaries(fixture_repo: Path) -> None:
@@ -179,3 +179,77 @@ def test_explicit_startpoints_classification_and_storage_types(tmp_path: Path) -
         ("httpx", "lib/pyproject.toml", 3),
         ("serde", "bin/Cargo.toml", 4),
     }
+
+
+def _scan_sources(
+    root: Path, sources: dict[str, str], accepted: dict[str, bool] | None = None
+) -> RuntimeScan:
+    for name, text in sources.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return scan_runtime(
+        project_root=root,
+        scope_path=root,
+        files=list(sources),
+        locked_containers={},
+        tombstones={},
+        accepted=accepted or {},
+    )
+
+
+_PYTHON_APP = '[project]\nname = "chunkhound"\n[project.scripts]\nch = "app:main"\n'
+_PYTHON_LIB = '[project]\nname = "chunkhound"\n'
+_RUST_LIB = '[package]\nname = "native"\n'
+_CDYLIB = (
+    '[package]\nname = "native"\n[lib]\ncrate-type = ["cdylib"]\n'
+    '[dependencies]\npyo3 = "0.22"\n'
+)
+
+
+def test_system_name_prefers_selected_root_container(tmp_path: Path) -> None:
+    scan = _scan_sources(
+        tmp_path, {"Cargo.toml": _RUST_LIB, "pyproject.toml": _PYTHON_APP}
+    )
+    assert (scan.system_id, scan.system_name) == ("systeem:chunkhound", "chunkhound")
+    assert [c.name for c in scan.containers] == ["chunkhound"]
+
+
+def test_system_name_falls_back_to_first_root_manifest(tmp_path: Path) -> None:
+    scan = _scan_sources(
+        tmp_path,
+        {
+            "Cargo.toml": _RUST_LIB,
+            "pyproject.toml": _PYTHON_LIB,
+            "tool/package.json": '{"name":"tool","bin":"run.js"}',
+        },
+    )
+    assert scan.system_name == "native"
+    assert [c.name for c in scan.containers] == ["tool"]
+
+
+def test_system_name_falls_back_to_directory_name(tmp_path: Path) -> None:
+    root = tmp_path / "Plain App"
+    scan = _scan_sources(root, {"tool/package.json": '{"name":"tool","bin":"run.js"}'})
+    assert scan.system_name == "Plain App"
+
+
+def test_cdylib_beside_another_manifest_is_no_candidate(tmp_path: Path) -> None:
+    sources = {"Cargo.toml": _CDYLIB, "pyproject.toml": _PYTHON_LIB}
+    for accepted in ({}, {"Cargo.toml": True}):
+        scan = _scan_sources(tmp_path, sources, accepted)
+        assert scan.system_name == "chunkhound"
+        assert "Cargo.toml" not in {c.manifest for c in scan.uncertain}
+        assert "Cargo.toml" not in {c.manifest for c in scan.containers}
+        assert ("pyo3", "Cargo.toml", 6) in {
+            (d.name, d.manifest, d.line) for d in scan.dependencies
+        }
+
+
+def test_cdylib_alone_in_its_directory_stays_a_candidate(tmp_path: Path) -> None:
+    sources = {"Cargo.toml": _CDYLIB, "web/package.json": '{"name":"web"}'}
+    scan = _scan_sources(tmp_path, sources)
+    assert "Cargo.toml" in {c.manifest for c in scan.uncertain}
+    assert scan.system_name == "native"
+    accepted = _scan_sources(tmp_path, sources, {"Cargo.toml": True})
+    assert "Cargo.toml" in {c.manifest for c in accepted.containers}

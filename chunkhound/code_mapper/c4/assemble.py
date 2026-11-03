@@ -273,6 +273,13 @@ class _Assembly:
         for element in self.elements.values():
             element.status = "found" if element.id in found else "documented"
 
+    def _relation_endpoint(self, ids: set[str]) -> set[str]:
+        """A name shared by the system and one container means that container."""
+        kinds = {id: self.elements[id].kind for id in ids}
+        if sorted(kinds.values()) == ["container", "system"]:
+            return {id for id, kind in kinds.items() if kind == "container"}
+        return ids
+
     def documented_relations(self) -> None:
         terms: dict[str, set[str]] = defaultdict(set)
         for element in self.elements.values():
@@ -280,7 +287,8 @@ class _Assembly:
             terms[element.name].add(element.id)
         terms.update(self.doc_terms)
         for item in self.inp.documented.relations:
-            source_ids, target_ids = terms[item.from_term], terms[item.to_term]
+            source_ids = self._relation_endpoint(terms[item.from_term])
+            target_ids = self._relation_endpoint(terms[item.to_term])
             if len(source_ids) != 1 or len(target_ids) != 1:
                 reason = "no_match" if not source_ids or not target_ids else "ambiguous"
                 self.unlinked[reason] += 1

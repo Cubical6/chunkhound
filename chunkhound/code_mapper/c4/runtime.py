@@ -128,6 +128,7 @@ class _Manifest:
     name: str
     line: int
     starts: bool
+    cdylib: bool = False
 
 
 def _manifest(
@@ -161,11 +162,14 @@ def _manifest(
     name = package.get("name")
     if not isinstance(name, str):
         return None, []
+    cdylib = filename == "Cargo.toml" and data.get("lib", {}).get("crate-type") == [
+        "cdylib"
+    ]
     dependencies = [
         DependencyDecl(name=dep, manifest=path, line=_dependency_line(text, dep))
         for dep in dependency_names
     ]
-    return _Manifest(path, name, _key_line(text, "name"), starts), dependencies
+    return _Manifest(path, name, _key_line(text, "name"), starts, cdylib), dependencies
 
 
 def _dependency_line(text: str, name: str) -> int:
@@ -356,6 +360,16 @@ def _bind_files(files: set[str], containers: list[RuntimeUnit]) -> dict[str, str
     return container_of
 
 
+def _without_hosted_cdylibs(manifests: list[_Manifest]) -> list[_Manifest]:
+    """A cdylib runs in the process of the manifest beside it: not a unit itself."""
+    per_directory = Counter(PurePosixPath(m.path).parent for m in manifests)
+    return [
+        m
+        for m in manifests
+        if not (m.cdylib and per_directory[PurePosixPath(m.path).parent] > 1)
+    ]
+
+
 def scan_runtime(
     *,
     project_root: Path,
@@ -368,15 +382,8 @@ def scan_runtime(
     """Scan the supplied scope file list; never consult git or traverse beyond it."""
     file_set = set(files)
     manifests, dependencies, storage, dockerfiles = _discover(project_root, file_set)
+    manifests = _without_hosted_cdylibs(manifests)
     scope_root = scope_path.resolve().relative_to(project_root.resolve()).as_posix()
-    system_name = next(
-        (
-            m.name
-            for m in manifests
-            if PurePosixPath(m.path).parent.as_posix() == scope_root
-        ),
-        scope_path.name,
-    )
     roots_with_docker = {PurePosixPath(f).parent.as_posix() for f in dockerfiles}
     selected = [
         m
@@ -390,6 +397,14 @@ def scan_runtime(
         for m in manifests
         if m not in selected and m.path not in accepted
     ]
+    system_name = next(
+        (
+            m.name
+            for m in (*selected, *manifests)
+            if PurePosixPath(m.path).parent.as_posix() == scope_root
+        ),
+        scope_path.name,
+    )
     # A Dockerfile in a named package is evidence for that package, not a second unit.
     manifest_roots = {PurePosixPath(m.path).parent.as_posix() for m in selected}
     for dockerfile in dockerfiles:

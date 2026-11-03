@@ -185,7 +185,8 @@ def test_documentation_relation_rules():
 
 def test_ambiguous_untyped_documentation_endpoint_stays_off_map():
     inp = assembly_input()
-    inp.documented.relations = [DocRelation("User", "App", "uses", citation())]
+    inp.documented.elements.append(DocElement("person", "Dashboard", citation()))
+    inp.documented.relations = [DocRelation("User", "Dashboard", "uses", citation())]
     _, relations, evidence = assemble(inp)
     assert not any(r.from_id == "persoon:user" for r in relations)
     assert citation().model_copy(update={"verified": False}) in evidence.citations
@@ -273,3 +274,49 @@ def test_unlinked_documented_relations_are_counted_by_reason():
     assert all(c.target is None and not c.verified for c in kept)
     # Counting changes nothing about what is linked.
     assert (elements, relations, evidence) == assemble(inp)
+
+
+def test_documented_relation_with_shared_name_links_to_container():
+    # The fixture's system and its only container are both called "App".
+    inp = assembly_input()
+    inp.documented.relations = [
+        DocRelation("User", "App", "uses", citation(line=5)),
+        DocRelation("App", "User", "notifies", citation(line=6)),
+    ]
+    _, relations, evidence, unlinked = assemble_with_unlinked(inp)
+
+    assert unlinked == UnlinkedCounts()
+    assert {"persoon:user->container:app", "container:app->persoon:user"} <= {
+        r.id for r in relations
+    }
+    assert {c.target for c in evidence.citations if c.start_line in {5, 6}} >= {
+        "persoon:user->container:app",
+        "container:app->persoon:user",
+    }
+
+
+def test_other_shared_names_stay_ambiguous():
+    def ambiguous_count(*extra_units: RuntimeUnit) -> int:
+        inp = assembly_input()
+        inp.runtime = replace(
+            inp.runtime, containers=[*inp.runtime.containers, *extra_units]
+        )
+        inp.documented.relations = [DocRelation("User", "App", "uses", citation())]
+        return assemble_with_unlinked(inp)[3].ambiguous
+
+    second_container = RuntimeUnit(
+        "container:app-2", "App", "web/package.json", "web", False, (), ()
+    )
+    storage = RuntimeUnit("storage:app", "App", "", ".", True, (), ())
+    assert ambiguous_count() == 0
+    assert ambiguous_count(second_container) == 1
+    assert ambiguous_count(storage) == 1
+
+    system_and_component = assembly_input()
+    system_and_component.runtime = replace(
+        system_and_component.runtime, system_name="B"
+    )
+    system_and_component.documented.relations = [
+        DocRelation("User", "B", "uses", citation())
+    ]
+    assert assemble_with_unlinked(system_and_component)[3].ambiguous == 1
