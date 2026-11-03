@@ -246,6 +246,21 @@ def test_cdylib_beside_another_manifest_is_no_candidate(tmp_path: Path) -> None:
         }
 
 
+def test_mixed_crate_types_still_count_as_cdylib(tmp_path: Path) -> None:
+    crate = '[package]\nname = "native"\n[lib]\ncrate-type = ["cdylib", "rlib"]\n'
+    scan = _scan_sources(tmp_path, {"Cargo.toml": crate, "pyproject.toml": _PYTHON_LIB})
+    assert "Cargo.toml" not in {c.manifest for c in scan.uncertain}
+
+
+def test_cdylib_with_a_binary_stays_its_own_container(tmp_path: Path) -> None:
+    crate = (
+        '[package]\nname = "native"\n[lib]\ncrate-type = ["cdylib"]\n'
+        '[[bin]]\nname = "native-cli"\npath = "src/cli.rs"\n'
+    )
+    scan = _scan_sources(tmp_path, {"Cargo.toml": crate, "pyproject.toml": _PYTHON_LIB})
+    assert "Cargo.toml" in {c.manifest for c in scan.containers}
+
+
 def test_cdylib_alone_in_its_directory_stays_a_candidate(tmp_path: Path) -> None:
     sources = {"Cargo.toml": _CDYLIB, "web/package.json": '{"name":"web"}'}
     scan = _scan_sources(tmp_path, sources)

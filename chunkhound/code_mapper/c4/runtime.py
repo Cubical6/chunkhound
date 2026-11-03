@@ -162,9 +162,12 @@ def _manifest(
     name = package.get("name")
     if not isinstance(name, str):
         return None, []
-    cdylib = filename == "Cargo.toml" and data.get("lib", {}).get("crate-type") == [
-        "cdylib"
-    ]
+    # A crate that also has a binary runs as its own process.
+    cdylib = (
+        filename == "Cargo.toml"
+        and not starts
+        and "cdylib" in data.get("lib", {}).get("crate-type", ())
+    )
     dependencies = [
         DependencyDecl(name=dep, manifest=path, line=_dependency_line(text, dep))
         for dep in dependency_names
