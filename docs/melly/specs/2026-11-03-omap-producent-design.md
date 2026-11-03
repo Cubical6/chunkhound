@@ -1,7 +1,7 @@
 # Spec deel A: `map` levert een C4-kaart voor AutoDoc (O-MAP)
 
 - Datum: 2026-11-04 · Branch: `c4/shared-extraction-layer` (HEAD bij start `cfb59235`)
-- **Status:** goedgekeurd op 2026-11-04, inclusief de punten uit §12; plan en implementatie volgen met aparte goedkeuring; geen providerrun goedgekeurd
+- **Status:** goedgekeurd op 2026-11-04, inclusief de punten uit §12 en de wijzigingen in §3.1 en §16 na de planreview; plan goedgekeurd; geen providerrun goedgekeurd
 - Besluitenlog: [2026-10-27-map-structuuranalyse.md](../decisions/2026-10-27-map-structuuranalyse.md), de rijen "O-MAP", "Bronselectie", "Groepsindeling", "C4-toets" en "Bouwstenen en reikwijdte" (hieronder "besluit: …")
 - Consument: [AutoDoc-spec](2026-10-29-autodoc-c4-map-design.md) en `chunkhound/autodoc/architecture/`
 - Vervolg: [deel B, containers per proces](2026-11-04-c4-processen-design.md)
@@ -53,7 +53,7 @@ Standaard vervalt:
 - elk bestand in een map met de naam `tests`, `test`, `__tests__`, `fixtures`, `__fixtures__` of `testdata`;
 - elk bestand met de naam `test_*`, `*_test.*`, `*.test.*`, `*.spec.*` of `conftest.py`;
 - elk pad dat past op `c4.exclude` (§3.3);
-- de eigen uitvoer van `map`: bestanden direct in de uitvoermap die beginnen met `<safe_scope_label>_`, als die map in het project ligt. De gedocumenteerde aanroep is `chunkhound map … --out docs/` (`cli-reference.md:333`). Zonder deze regel ziet de volgende run zijn eigen uitvoer als broncode, en worden die niet-gevolgde bestanden ook bronnen.
+- de eigen uitvoer van `map`: bestanden direct in de uitvoermap die beginnen met `<safe_scope_label>_`, of die heten `hyde_plan_{arch,ops}_<safe_scope_label>.md` of `hyde_scope_prompt_{arch,ops}_<safe_scope_label>.md` (`code_mapper/pipeline.py:349–391`), als die map in het project ligt. De gedocumenteerde aanroep is `chunkhound map … --out docs/` (`cli-reference.md:333`). Zonder deze regel ziet de volgende run zijn eigen uitvoer als broncode, en worden die niet-gevolgde bestanden ook bronnen.
 
 De test-regels kijken alleen naar paddelen onder de scope: een scope binnen `tests/` blijft dus werken. Patronen worden op relatieve paden toegepast.
 
@@ -486,7 +486,7 @@ Verplicht volgens `AGENTS.md`: smoke tests, ruff en mypy, en de volledige suite 
 - **Kaart nog niet volledig C4.** Op containerniveau blijft de afwijking tot deel B staan.
 - **Geen koppeling tussen contract en index.** Het contract heeft geen run-id, dus een oud contract naast een nieuwe index valt niet op. Dat kan na een crash tussen paar en contract, na `--no-markdown` of `--no-c4` in een bestaande uitvoermap, en tijdens een run.
 - **Uitvoer groeit met de grootte.** De invoer is voor deze repository ongeveer 105.000 tekens. Bij grote projecten vervallen `symbols`, en het resultaat is dan zwakker.
-- **Remote-config.** De invloed van `Config.c4` op de terminal delta gate van `config.py` is niet onderzocht. Dat is de eerste controle in het plan.
+- **Remote-config.** `Config.c4` raakt de terminal delta gate niet; de planreview bevestigde dit met een proefklasse. Een geldige `c4` is wel op afstand instelbaar, omdat `REFUSED_PATHS` (`remote/pipeline.py:54`) een verbodslijst is. Een externe configuratie kan dus bronnen uit de kaart houden, zoals die ook andere instellingen kan zetten.
 - **Remote-informatie is lokaal.** `origin/*` kan verouderd zijn, en een commit die later verwijderd is, geeft een dode link.
 - **`run_git` negeert de globale Git-configuratie** (`git_safe.py:25–36`). In een container met een andere gebruiker kan dat "dubious ownership" geven, dus `NO_GIT_HEAD`.
 - **Task6** blijft open, en AutoDoc is op deze branch niet definitief geaccepteerd. Een kaart die rendert, sluit dat niet af.
