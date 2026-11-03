@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from chunkhound.utils.logging_guard import log_if_not_mcp
 
 from .analytics_config import AnalyticsConfig
+from .c4_config import C4Config
 from .database_config import DatabaseConfig
 from .embedding_config import EmbeddingConfig
 from .fetchurl_config import FetchUrlConfig
@@ -137,6 +138,7 @@ class Config(BaseModel):
     indexing: IndexingConfig = Field(default_factory=IndexingConfig)
     research: ResearchConfig = Field(default_factory=ResearchConfig)
     fetchurl: FetchUrlConfig = Field(default_factory=FetchUrlConfig)
+    c4: C4Config = Field(default_factory=C4Config)
     remote_config: RemoteConfig | None = Field(default=None)
     analytics: AnalyticsConfig = Field(default_factory=AnalyticsConfig)
     debug: bool = Field(default=False)

@@ -15,7 +15,7 @@
 
 **Spec:** [docs/melly/specs/2026-11-03-omap-producent-design.md](../specs/2026-11-03-omap-producent-design.md) · Besluitenlog: [2026-10-27-map-structuuranalyse.md](../decisions/2026-10-27-map-structuuranalyse.md)
 
-**Nulmeting (planreview, 2026-11-04):** `tests/code_mapper/c4` + `tests/services/extraction`: 459 passed. Smoke: 14 passed. `tests/autodoc/test_architecture_generation.py:245` (`test_missing_model_is_warning_not_cli_failure`) faalt al zonder wijziging met "No ChunkHound project found". De rest van `tests/autodoc` wordt in Taak 0 gemeten.
+**Nulmeting (planreview, 2026-11-04):** `tests/code_mapper/c4` + `tests/services/extraction`: 459 passed. Smoke: 14 passed. `tests/autodoc/test_architecture_generation.py:245` (`test_missing_model_is_warning_not_cli_failure`) faalt al zonder wijziging met "No ChunkHound project found". Taak 0 (2026-11-04): `tests/autodoc` 116 passed en die ene fout; `tests/code_mapper tests/services/extraction tests/config`: 587 passed, 1 skipped.
 
 ## Project Commands
 
@@ -59,18 +59,18 @@ uv run scripts/generate_c4_schemas.py                                           
 
 **Files:** nieuw `chunkhound/core/config/c4_config.py` (patroon: `mcp_config.py:35`); `core/config/config.py`, `c4/files.py`, `c4/documented.py`, `c4/pipeline.py`, `api/cli/commands/code_mapper.py`; tests in `tests/code_mapper/c4/test_cli_contract.py` en `test_documented.py`.
 
-- [ ] **Step 1: Rode tests.**
+- [x] **Step 1: Rode tests.**
   - `test_test_code_is_not_a_c4_source`: bestanden in testmappen en met testnamen ontbreken in het model, ook hun manifesten. `exclude_test_code: false` zet ze terug.
   - `test_c4_exclude_applies_to_code_and_documentation`.
   - `test_scope_inside_tests_keeps_its_files`.
   - `test_map_does_not_read_its_own_output`: maak in de uitvoermap `<scope>_…`, `hyde_plan_arch_<scope>.md` en `hyde_scope_prompt_ops_<scope>.md`; alle drie vallen weg.
   - `test_hyde_still_sees_excluded_files`: `collect_scope_files` geeft ze nog steeds.
   - `test_changelog_and_hidden_directories_are_no_documentation_source`.
-- [ ] **Step 2:** `C4Config(BaseModel)` met `exclude: list[str] = []` en `exclude_test_code: bool = True`, als veld `Config.c4` met standaardwaarde. Geen omgevingsvariabelen of CLI-opties.
-- [ ] **Step 3:** Nieuwe functie `select_scope_files(...) -> ScopeSelection` met `files` en de tellingen voor het rapport. `list_scope_files` blijft bestaan met `own_output: tuple[Path, str] | None = None` en geeft `.files` terug, zodat `test_references.py:114` en `test_pipeline.py:79` werken. Filtervolgorde: testregels op paddelen onder de scope, `c4.exclude` op het relatieve pad met `compile_pattern` uit `utils/file_patterns.py`, eigen uitvoer.
-- [ ] **Step 4:** `analyze_c4` (`c4/pipeline.py:282`) krijgt `own_output`. De opdracht kent de uitvoermap al: ontbrekende `--out` stopt bij `commands/code_mapper.py:266–270`, en `_C4Run.out_dir` staat op `:283`, vóór de analyse.
-- [ ] **Step 5:** `doc_files_for(project_root, scope_path, topics, config)` met de regels uit §3.2. `finish_c4` krijgt `config: Config | None = None` (`test_pipeline.py:95` roept het zonder aan); `None` betekent de standaard-`C4Config`.
-- [ ] **Step 6:** Tests, ruff en mypy.
+- [x] **Step 2:** `C4Config(BaseModel)` met `exclude: list[str] = []` en `exclude_test_code: bool = True`, als veld `Config.c4` met standaardwaarde. Geen omgevingsvariabelen of CLI-opties.
+- [x] **Step 3:** Nieuwe functie `select_scope_files(...) -> ScopeSelection` met `files` en de tellingen voor het rapport. `list_scope_files` blijft bestaan met `own_output: tuple[Path, str] | None = None` en geeft `.files` terug, zodat `test_references.py:114` en `test_pipeline.py:79` werken. Filtervolgorde: testregels op paddelen onder de scope, `c4.exclude` op het relatieve pad met `compile_pattern` uit `utils/file_patterns.py`, eigen uitvoer.
+- [x] **Step 4:** `analyze_c4` (`c4/pipeline.py:282`) krijgt `own_output`. De opdracht kent de uitvoermap al: ontbrekende `--out` stopt bij `commands/code_mapper.py:266–270`, en `_C4Run.out_dir` staat op `:283`, vóór de analyse.
+- [x] **Step 5:** `doc_files_for(project_root, scope_path, topics, config)` met de regels uit §3.2. `finish_c4` krijgt `config: Config | None = None` (`test_pipeline.py:95` roept het zonder aan); `None` betekent de standaard-`C4Config`.
+- [x] **Step 6:** Tests, ruff en mypy.
 
 ### Task 2: Systeemnaam, `cdylib` en dezelfde naam (spec §3.4)
 

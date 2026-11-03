@@ -19,6 +19,8 @@ from chunkhound.code_mapper.c4.documented import (
 )
 from chunkhound.code_mapper.c4.llm import C4Llm, RetryQueue
 from chunkhound.code_mapper.c4.model import Citation, LockedDocumented
+from chunkhound.core.config.c4_config import C4Config
+from chunkhound.core.config.config import Config
 from chunkhound.llm_manager import LLMManager
 from chunkhound.services.extraction.errors import InputRejectedError
 from tests.code_mapper.c4.conftest import (
@@ -252,11 +254,39 @@ def test_doc_files_for_uses_scope_readmes_and_topic_markdown(tmp_path):
         TopicSources("Usage", ("scope/docs/guide.md", "scope/code.py", "missing.md")),
         TopicSources("Repeated", ("scope/docs/guide.md",)),
     ]
-    assert doc_files_for(tmp_path, tmp_path / "scope", topics) == [
+    assert doc_files_for(tmp_path, tmp_path / "scope", topics, None) == [
         "scope/README",
         "scope/README.md",
         "scope/docs/guide.md",
     ]
+
+
+def test_changelog_and_hidden_directories_are_no_documentation_source(tmp_path):
+    kept = ["docs/guide.md", "docs/news-site/Overview.md"]
+    history = [
+        "CHANGELOG.md",
+        "docs/Changes.md",
+        "docs/history.md",
+        "docs/NEWS.md",
+        "docs/release_notes_4.md",
+        "docs/releases.md",
+        "docs/migration-guide.md",
+        "docs/Upgrading.md",
+    ]
+    hidden = [".superpowers/design.md", "docs/.drafts/idea.md"]
+    test_docs = ["tests/guide.md", "docs/fixtures/guide.md"]
+    files = [*kept, *history, *hidden, *test_docs]
+    for file in files:
+        path = tmp_path / file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("content", encoding="utf-8")
+    topics = [TopicSources("All", tuple(files))]
+    assert doc_files_for(tmp_path, tmp_path, topics, None) == sorted(kept)
+    # Only the test rules have a switch.
+    config = Config.model_construct(c4=C4Config(exclude_test_code=False))
+    assert doc_files_for(tmp_path, tmp_path, topics, config) == sorted(
+        [*kept, *test_docs]
+    )
 
 
 def test_verify_quote_normalizes_whitespace_but_respects_lines(tmp_path):
@@ -285,7 +315,10 @@ def test_documented_sources_stay_inside_the_project(tmp_path):
         assert not verify_quote(root, file, 1, 1, QUOTE)
     assert (
         doc_files_for(
-            root, root, [TopicSources("Escapes", ("../outside.md", "linked.md"))]
+            root,
+            root,
+            [TopicSources("Escapes", ("../outside.md", "linked.md"))],
+            None,
         )
         == []
     )

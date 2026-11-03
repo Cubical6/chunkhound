@@ -154,6 +154,7 @@ class _C4Run:
             llm=self.llm,
             lock=self.lock,
             retries=self.retries,
+            own_output=(self.out_dir, self.scope.scope_label),
         )
 
     async def finish(
@@ -170,6 +171,7 @@ class _C4Run:
             retries=self.retries,
             head_sha=_get_head_sha(self.scope.target_dir),
             kind="trial" if self.llm.trial else "full",
+            config=self.config,
         )
 
     def write(self, out_dir: Path, formatter: RichOutputFormatter) -> None:

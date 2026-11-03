@@ -288,10 +288,14 @@ async def analyze_c4(
     llm: C4Llm,
     lock: ScopeLock | None,
     retries: RetryQueue,
+    own_output: tuple[Path, str] | None = None,
 ) -> C4Draft:
     """Read disk once; retain mutable step outcomes until delayed recovery."""
     files = list_scope_files(
-        scope_path=scope_path, project_root=project_root, config=config
+        scope_path=scope_path,
+        project_root=project_root,
+        config=config,
+        own_output=own_output,
     )
     references = await scan_references(project_root=project_root, files=files)
     runtime = scan_runtime(
@@ -595,12 +599,15 @@ async def finish_c4(
     retries: RetryQueue,
     head_sha: str,
     kind: RunKind,
+    config: Config | None = None,
 ) -> C4Build:
     """Finalize dependent steps only after their deferred inputs are settled."""
     topic_files = {file for topic in topics or () for file in topic.files}
     docs = await extract_documented(
         project_root=draft.project_root,
-        doc_files=doc_files_for(draft.project_root, draft.scope_path, topics or ()),
+        doc_files=doc_files_for(
+            draft.project_root, draft.scope_path, topics or (), config
+        ),
         locked=lock.documented if lock else None,
         llm=llm,
         retries=draft.steps,

@@ -5,11 +5,17 @@ import json
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
+from chunkhound.code_mapper.c4.files import (
+    c4_settings,
+    compile_excludes,
+    in_test_directory,
+    matches_exclude,
+)
 from chunkhound.code_mapper.c4.llm import (
     AnswerRejectedError,
     C4Llm,
@@ -20,6 +26,7 @@ from chunkhound.code_mapper.c4.llm import (
     rejection_rule,
 )
 from chunkhound.code_mapper.c4.model import Citation, LockedDocumented
+from chunkhound.core.config.config import Config
 from chunkhound.core.detection import detect_language
 from chunkhound.core.types.common import Language
 from chunkhound.services.extraction.budget import (
@@ -44,6 +51,17 @@ from chunkhound.services.extraction.store import ExtractionStore
 
 EXTRACTION_CACHE = Path(".chunkhound/extraction")
 _VALIDATOR_VERSION = 1
+# History, not architecture: compared with the start of the lowercase file name.
+_HISTORY_DOCUMENTS = (
+    "changelog",
+    "changes",
+    "history",
+    "news",
+    "release_notes",
+    "releases",
+    "migration",
+    "upgrading",
+)
 
 
 @dataclass(frozen=True)
@@ -105,9 +123,16 @@ def _project_file(project_root: Path, file: str) -> Path | None:
 
 
 def doc_files_for(
-    project_root: Path, scope_path: Path, topics: Sequence[TopicSources]
+    project_root: Path,
+    scope_path: Path,
+    topics: Sequence[TopicSources],
+    config: Config | None,
 ) -> list[str]:
-    """Select only scope-root READMEs and existing Markdown cited by topics."""
+    """Select scope-root READMEs and Markdown cited by topics, minus non-sources.
+
+    Topic sources do not come from ``list_scope_files``, so its rules do not
+    apply to them by themselves.
+    """
     root = project_root.resolve()
     scope = scope_path if scope_path.is_absolute() else root / scope_path
     scope = scope.resolve()
@@ -120,8 +145,25 @@ def doc_files_for(
         for file in topic.files
         if detect_language(Path(file)) == Language.MARKDOWN
     )
+    settings = c4_settings(config)
+    excludes = compile_excludes(settings)
+    relative_scope = PurePosixPath(scope.relative_to(root).as_posix())
+
+    def is_source(file: str) -> bool:
+        path = PurePosixPath(file)
+        return not (
+            any(part.startswith(".") for part in path.parent.parts)
+            or path.name.lower().startswith(_HISTORY_DOCUMENTS)
+            or (settings.exclude_test_code and in_test_directory(file, relative_scope))
+            or matches_exclude(file, excludes)
+        )
+
     return sorted(
-        {file for file in candidates if _project_file(root, file) is not None}
+        {
+            file
+            for file in candidates
+            if is_source(file) and _project_file(root, file) is not None
+        }
     )
 
 

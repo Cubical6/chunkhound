@@ -18,14 +18,21 @@ from chunkhound.autodoc.index_loader import (
     parse_index_file,
 )
 from chunkhound.code_mapper.c4 import pipeline as c4_pipeline
+from chunkhound.code_mapper.c4.files import select_scope_files
 from chunkhound.code_mapper.c4.llm import AnswerRejectedError
 from chunkhound.code_mapper.c4.lockfile import LOCK_RELATIVE_PATH
 from chunkhound.code_mapper.c4.model import load_c4_pair
-from chunkhound.code_mapper.models import CodeMapperPOI
+from chunkhound.code_mapper.models import CodeMapperPOI, HydeConfig
 from chunkhound.code_mapper.render import build_topic_artifacts
+from chunkhound.code_mapper.scope import collect_scope_files
 from chunkhound.code_mapper.service import CodeMapperPipelineResult
 from chunkhound.code_mapper.writer import write_code_mapper_outputs
+from chunkhound.core.config.c4_config import C4Config
 from chunkhound.core.config.config import Config
+from tests.code_mapper.c4.conftest import (
+    documented_fragments,
+    documented_per_fragment,
+)
 
 
 def parse(repo, out, *flags):
@@ -507,3 +514,166 @@ async def test_cli_reports_documented_bundles(cli, capsys):
     assert "meerdere treffers" in relations[0]
     assert "niet toegestaan" in relations[0]
     assert len([line for line in output.splitlines() if "C4 documented:" in line]) == 1
+
+
+def write_files(repo, files, content="# content\n"):
+    for file in files:
+        path = repo / file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+
+def modeled_files(out, label="_"):
+    model, evidence = load_c4_pair(
+        out / f"{label}_c4_model.json", out / f"{label}_c4_evidence.json"
+    )
+    return {file for files in evidence.element_files.values() for file in files}, {
+        element.name for element in model.elements
+    }
+
+
+def record_documented(cli):
+    """Collect the documents that reach the provider."""
+    seen = set()
+    answer = cli.provider.answers["documented"]
+
+    def respond(prompt):
+        seen.update(path for path, _ in documented_fragments(prompt).values())
+        return documented_per_fragment(prompt, answer)
+
+    cli.provider.answers["documented"] = respond
+    return seen
+
+
+TEST_MANIFEST = "tests/e2e/package.json"
+TEST_CODE = (
+    "tests/test_orders.py",
+    "shop/test/helper.py",
+    "web/src/__tests__/checkout.ts",
+    "shop/fixtures/orders.py",
+    "web/src/__fixtures__/cart.ts",
+    "shop/testdata/rows.py",
+    "shop/test_cart.py",
+    "shop/cart_test.py",
+    "web/src/cart.test.ts",
+    "web/src/cart.spec.ts",
+    "shop/conftest.py",
+)
+
+
+async def test_test_code_is_not_a_c4_source(cli):
+    write_files(cli.repo, TEST_CODE)
+    (cli.repo / TEST_MANIFEST).parent.mkdir(parents=True)
+    (cli.repo / TEST_MANIFEST).write_text(
+        json.dumps({"name": "e2e-app", "bin": {"e2e-app": "index.js"}})
+    )
+    await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
+    files, names = modeled_files(cli.out)
+    assert not files & {*TEST_CODE, TEST_MANIFEST}
+    assert "shop/orders.py" in files
+    assert "e2e-app" not in names
+
+    config = cli.config.model_copy(update={"c4": C4Config(exclude_test_code=False)})
+    restored = cli.out.parent / "with-tests"
+    await command.code_mapper_command(parse(cli.repo, restored), config)
+    files, names = modeled_files(restored)
+    assert set(TEST_CODE) <= files
+    assert "e2e-app" in names
+
+
+async def test_c4_exclude_applies_to_code_and_documentation(cli):
+    excluded_doc = "docs/melly/deep/plan.md"
+    write_files(cli.repo, ["docs/guide.md", "docs/melly/plan.md", excluded_doc])
+    (cli.repo / ".chunkhound.json").write_text(
+        json.dumps({"c4": {"exclude": ["docs/melly/**", "shop/payments.py"]}})
+    )
+    config = Config(
+        target_dir=cli.repo,
+        embedding={"provider": "openai", "api_key": "test"},
+        llm={"provider": "openai", "api_key": "test"},
+    )
+    cli.result.poi_sections_indexed[0][2]["metadata"]["sources"]["files"] += [
+        "docs/guide.md",
+        "docs/melly/plan.md",
+        excluded_doc,
+    ]
+    documents = record_documented(cli)
+    await command.code_mapper_command(parse(cli.repo, cli.out), config)
+    files, _ = modeled_files(cli.out)
+    assert not files & {"docs/melly/plan.md", excluded_doc, "shop/payments.py"}
+    assert {"docs/guide.md", "shop/orders.py"} <= files
+    assert documents == {"README.md", "docs/guide.md"}
+
+
+async def test_scope_inside_tests_keeps_its_files(cli):
+    write_files(
+        cli.repo,
+        [
+            "tests/e2e/app.py",
+            "tests/e2e/README.md",
+            "tests/e2e/test_app.py",
+            "tests/e2e/fixtures/data.py",
+            "tests/e2e/fixtures/guide.md",
+        ],
+    )
+    documents = record_documented(cli)
+    cli.result.poi_sections_indexed[0][2]["metadata"]["sources"]["files"].append(
+        "tests/e2e/fixtures/guide.md"
+    )
+    await command.code_mapper_command(
+        parse(cli.repo / "tests/e2e", cli.out), cli.config
+    )
+    files, _ = modeled_files(cli.out, "tests_e2e")
+    assert {"tests/e2e/app.py", "tests/e2e/README.md"} <= files
+    assert not files & {"tests/e2e/test_app.py", "tests/e2e/fixtures/data.py"}
+    assert documents == {"README.md", "tests/e2e/README.md"}
+
+
+@pytest.mark.parametrize(
+    ("scope", "label"), [("", "_"), ("web/src", "web_src")], ids=["root", "nested"]
+)
+async def test_map_does_not_read_its_own_output(cli, scope, label):
+    out = cli.repo / scope / "generated"
+    own = [
+        f"{label}_code_mapper_index.md",
+        f"hyde_plan_arch_{label}.md",
+        f"hyde_scope_prompt_ops_{label}.md",
+    ]
+    relative = Path(scope) / "generated"
+    write_files(
+        cli.repo,
+        [(relative / name).as_posix() for name in own]
+        + [(relative / "notes.md").as_posix()]
+        + [(relative / "deep" / own[0]).as_posix()],
+    )
+    await command.code_mapper_command(parse(cli.repo / scope, out), cli.config)
+    files, _ = modeled_files(out, label)
+    assert not files & {(relative / name).as_posix() for name in own}
+    assert {
+        (relative / "notes.md").as_posix(),
+        (relative / "deep" / own[0]).as_posix(),
+    } <= files
+
+
+def test_hyde_still_sees_excluded_files(cli):
+    write_files(cli.repo, ["tests/test_orders.py", "shop/skip.py"])
+    config = cli.config.model_copy(update={"c4": C4Config(exclude=["shop/skip.py"])})
+    selection = select_scope_files(
+        scope_path=cli.repo, project_root=cli.repo, config=config
+    )
+    assert not {"tests/test_orders.py", "shop/skip.py"} & set(selection.files)
+    assert selection.excluded_as_test_code == 1
+    assert selection.excluded_by_pattern == 1
+    assert {"tests/test_orders.py", "shop/skip.py"} <= set(
+        collect_scope_files(
+            scope_path=cli.repo,
+            project_root=cli.repo,
+            hyde_cfg=HydeConfig(
+                max_scope_files=0,
+                max_snippet_files=0,
+                max_snippet_chars=0,
+                max_completion_tokens=1,
+                max_snippet_tokens=1,
+            ),
+        )
+    )
