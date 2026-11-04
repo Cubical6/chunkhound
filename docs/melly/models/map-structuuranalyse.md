@@ -261,7 +261,7 @@ sequenceDiagram
     CLI->>C4: references, runtime, grouping (replay)
     C4->>LLM: classify / merge / titles (alleen nieuw; niet bij --plan)
   end
-  CLI->>LLM: documented (citerende docs bekend; alleen bij gewijzigde hash)
+  CLI->>LLM: documented (alle documenten in de scope; alleen bij gewijzigde hash of stapversie)
   CLI->>C4: identity, topic_coverage, summaries
   C4->>C4: vergelijk invoervingerafdruk; hergebruik laatste succesvolle history/renames indien gelijk
   C4->>LLM: summaries (alleen nieuwe labels)

@@ -150,6 +150,11 @@
           },
           "title": "Relations",
           "type": "array"
+        },
+        "version": {
+          "default": "",
+          "title": "Version",
+          "type": "string"
         }
       },
       "required": [

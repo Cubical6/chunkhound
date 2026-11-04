@@ -656,6 +656,7 @@ def _build_lock(
         documented=None
         if docs.fallback
         else LockedDocumented(
+            version=docs.version,
             hashes=docs.hashes,
             elements=TypeAdapter(list[DocElement]).dump_python(
                 docs.elements, mode="json"
@@ -755,8 +756,9 @@ async def finish_c4(
     docs = await extract_documented(
         project_root=draft.project_root,
         doc_files=doc_files_for(
-            draft.project_root, draft.scope_path, topics or (), config, own_output
+            draft.project_root, draft.scope_path, draft.files, config, own_output
         ),
+        system_name=draft.runtime.system_name,
         locked=lock.documented if lock else None,
         llm=llm,
         retries=draft.steps,

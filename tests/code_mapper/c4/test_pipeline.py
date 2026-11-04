@@ -162,12 +162,22 @@ async def test_documented_terms_require_their_own_literal_span(
         "quote": "Een beheerder gebruikt de\twebwinkel via Stripe.",
     }
     valid = [
-        {"kind": "person", "term": "beheerder", "citation": citation},
-        {"kind": "external", "term": "de webwinkel", "citation": citation},
+        {
+            "kind": "person",
+            "term": "beheerder",
+            "description": "",
+            "citation": citation,
+        },
+        {
+            "kind": "external",
+            "term": "de webwinkel",
+            "description": "",
+            "citation": citation,
+        },
     ]
     # Absent entirely, present only outside the span, and a nonliteral case variant.
     unsupported = [
-        {"kind": "external", "term": term, "citation": citation}
+        {"kind": "external", "term": term, "description": "", "citation": citation}
         for term in ("Invented Payment Authority", "Shop", "Beheerder")
     ]
     pipeline_answers.answers["documented"] = {"elements": valid, "relations": []}
@@ -1214,6 +1224,22 @@ async def test_changed_titles_prompt_asks_new_titles_and_same_prompt_does_not(
     assert "merge" not in pipeline_answers.calls
 
 
+async def test_other_topics_keep_the_documents_and_ask_no_documented_call(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    first = await build(fixture_repo, c4_llm_manager)
+    assert pipeline_answers.calls["documented"]
+    pipeline_answers.calls.clear()
+    second = await build(
+        fixture_repo,
+        c4_llm_manager,
+        lock=first.lock,
+        topics=[TopicSources("other", ("README.md", "shop/orders.py"))],
+    )
+    assert "documented" not in pipeline_answers.calls
+    assert second.lock.documented == first.lock.documented
+
+
 def test_input_fingerprint_is_the_same_in_every_process(tmp_path):
     """Lock history is only reusable if another process computes the same hash."""
     (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
@@ -1250,6 +1276,7 @@ async def test_fallback_fragment_without_lock_items_blocks_lock(
             {
                 "kind": "person",
                 "term": "beheerder",
+                "description": "",
                 "citation": {**citation, "quote": "Verzonnen citaat"},
             }
         ],

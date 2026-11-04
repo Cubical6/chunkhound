@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from chunkhound.code_mapper.c4.classify import Classification
-from chunkhound.code_mapper.c4.documented import DocumentedOutcome
+from chunkhound.code_mapper.c4.documented import DocElement, DocumentedOutcome
 from chunkhound.code_mapper.c4.grouping import Group
 from chunkhound.code_mapper.c4.identity import element_id
 from chunkhound.code_mapper.c4.merge import (
@@ -107,6 +107,7 @@ class _Assembly:
         self.packages: dict[str, str] = {}
         self.relations: dict[str, Relation] = {}
         self.doc_terms: dict[str, set[str]] = defaultdict(set)
+        self.named: set[str] = set()
 
     def element(
         self,
@@ -352,8 +353,18 @@ class _Assembly:
                 else None
             )
             self.element(id, item.kind, item.term, parent)
+            self.documented_details(id, item)
             self.citations.append(item.citation.model_copy(update={"target": id}))
             self.doc_terms[item.term].add(id)
+
+    def documented_details(self, id: str, item: DocElement) -> None:
+        """Document terms come in citation order, so the first one stays."""
+        element = self.elements[id]
+        if element.kind in {"person", "external"} and not element.description:
+            element.description = item.description or None
+        if id in self.packages.values() and id not in self.named:
+            self.named.add(id)
+            element.name = item.term
 
     def statuses(self) -> None:
         found = {

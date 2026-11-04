@@ -1,7 +1,7 @@
 # Spec deel A: `map` levert een C4-kaart voor AutoDoc (O-MAP)
 
 - Datum: 2026-11-04 · Branch: `c4/shared-extraction-layer` (HEAD bij start `cfb59235`)
-- **Status:** goedgekeurd op 2026-11-04, inclusief de punten uit §12 en de wijzigingen in §3.1 en §16 na de planreview; plan goedgekeurd; geen providerrun goedgekeurd. §17 goedgekeurd op 2026-11-04, inclusief één providerrun en de eenmalige ingreep in het lockbestand
+- **Status:** goedgekeurd op 2026-11-04, inclusief de punten uit §12 en de wijzigingen in §3.1 en §16 na de planreview; plan goedgekeurd; geen providerrun goedgekeurd. §17 goedgekeurd op 2026-11-04, inclusief één providerrun en de eenmalige ingreep in het lockbestand. §18 goedgekeurd op 2026-11-04, inclusief één providerrun
 - Besluitenlog: [2026-10-27-map-structuuranalyse.md](../decisions/2026-10-27-map-structuuranalyse.md), de rijen "O-MAP", "Bronselectie", "Groepsindeling", "C4-toets" en "Bouwstenen en reikwijdte" (hieronder "besluit: …")
 - Consument: [AutoDoc-spec](2026-10-29-autodoc-c4-map-design.md) en `chunkhound/autodoc/architecture/`
 - Vervolg: [deel B, containers per proces](2026-11-04-c4-processen-design.md)
@@ -60,6 +60,8 @@ De test-regels kijken alleen naar paddelen onder de scope: een scope binnen `tes
 Uitsluiten gebeurt vóór verwijzingen, manifesten en bouwstenen. Zo ontstaan geen fixturecontainers, en tellen imports uit tests niet mee voor afhankelijkheden. Verwijzingen naar uitgesloten paden vallen al weg (`assemble.py:208–213`). Op deze repository vallen buiten `tests/` alleen `scripts/test_*` (10 bestanden) en de twee projectmappen weg.
 
 ### 3.2 Documentatie als architectuurbron
+
+> Vervangen door §18.1: de kandidaten volgen niet meer uit topics. De uitsluitingen hieronder blijven gelden.
 
 `doc_files_for` krijgt de configuratie en verwijdert uit de kandidaten (`README*` en topicbronnen):
 - elk pad met een map die met `.` begint;
@@ -594,3 +596,80 @@ Contracttests volgens `AGENTS.md`, op de bestaande routes:
 - **Weergavenaam:** een extern systeem uit een pakket heet `openai`, niet `OpenAI`.
 - **`c4_documented.md` herschrijven:** dat maakt alle documentuitkomsten ongeldig en voegt onzekerheid toe. Personen die de documenten niet noemen, zoals een MCP-client, blijven dus ontbreken.
 - **Protocollen op relaties tussen containers:** §12, punt 7. De telling daarvan daalt in deze run naar 0, terwijl dit niet is opgelost. Deel B pakt dit op.
+
+## 18. Herziening van de documentstap
+
+**Aanleiding.** Na §17 bevat het contract nog 17 externe systemen, waarvan ruim de helft geen systeem is, en geen enkele persoon. Twee metingen verklaren dat:
+
+- **De bronnen wisselen per run.** Tussen de twee runs veranderde de set, omdat ze volgt uit wat de topics citeren. Daardoor draait de stap opnieuw en verandert de kaart, zonder dat de documenten veranderden. Tot de set behoorden ook `c4_merge.md`, `hyde_scope_prompt*.md` en `src/AGENTS.md`; uit de eerste kwam de relatie "Components → container".
+- **De prompt definieert de soorten niet.** Van de 88 elementen zijn er 70 `external`, zoals `CLI flags`, `MIT`, `.gitignore` en `` `asyncio.gather` ``. Er is 1 `person`. Gemini en Grok staan alleen in een tabel en krijgen daardoor geen relatie, zodat §17.2 ze laat vallen.
+
+Dit vervangt de keuze "citerende documenten" (besluit rij 23) en §3.2, en haalt de documentstap uit §17.8.
+
+### 18.1 Vaste bronnen
+
+`doc_files_for` hangt niet meer af van topics. De kandidaten zijn `README*` in de scope-wortel en alle Markdown uit de bestandslijst van de run (§3.1). Daarmee gelden de testregels, `c4.exclude` en de eigen uitvoer al. Daarna vallen weg:
+
+- zoals nu (§3.2): paden met een map die met `.` begint, en historiedocumenten;
+- **nieuw, geen documentatie over het systeem:** bestanden die beginnen met `agents` of `claude`, of waarvan de naam `license` bevat, en paden met een map `prompts` of `vendor`, zonder hoofdlettergevoeligheid.
+
+Topics bepalen alleen nog de volgorde van de aanroepen (`order_hint`). Op deze repository blijven 13 documenten over, tegen 14 in de vorige run.
+
+**Gevolg:** zolang documenten niet veranderen, is de uitkomst gelijk en is er geen aanroep (`documented.py:515`). De kaart hangt dan niet meer van de research af.
+
+### 18.2 Prompt `c4_documented.md`
+
+De prompt krijgt de systeemnaam en de C4-definities, en vraagt alleen nog `person` en `external`:
+
+- **`person`:** een menselijke rol of groep die het systeem gebruikt en die het document noemt.
+- **`external`:** een softwaresysteem buiten deze repository, met eigen beheer of eigen proces, dat het systeem aanroept of dat het systeem aanroept. Voorbeelden: een gehoste API, een modelprovider, of een AI-assistent die via MCP aanroept.
+- **Niet als element:** bestandsformaten, protocollen, configuratiemiddelen, bibliotheken en frameworks, build-, test- en publicatiegereedschap, licenties, communitykanalen, taalconstructies en onderdelen van het systeem zelf.
+- **Term:** de kale naam (`Astro`, niet `Astro 7`), één naam per element, nooit "A of B". De term moet letterlijk in het citaat staan, zoals nu.
+- **Omschrijving:** één korte zin in het Nederlands, op basis van het citaat. C4 vraagt die voor elk element; zonder bruikbare tekst blijft ze leeg.
+- **Relaties:** alleen met minstens één persoon of extern systeem als eindpunt. Voor een onderdeel van het systeem gebruikt de relatie de systeemnaam. Een tabel of lijst van ondersteunde diensten geldt als uitspraak: elke rij geeft een relatie, met de rij als citaat. De richting volgt wie wie aanroept of gebruikt.
+
+Het geldige antwoord (`_FragmentElement.kind`) wordt `person` of `external`. `DocElement` blijft breder, zodat bestaande uitkomsten leesbaar blijven. De regel "geen eigen afleiding uit voorkennis" blijft staan.
+
+**Gevolg:** elementen uit documenten van soort `container` en `component` ontstaan niet meer. Een interne relatie uit alleen documentatie verdwijnt dus. De `component`-elementen haalden het contract al niet, en een container die alleen in documentatie staat komt niet meer op de kaart.
+
+### 18.3 Cache
+
+`LockedDocumented` krijgt `version: str = ""`, met de bestaande versie van het doel (`_DocumentedGoal.version`: prompt, schema, validatie). Het lockbestand wordt alleen hergebruikt als documenten én versie gelijk zijn. Een oude vermelding heeft een lege versie en wordt dus opnieuw bepaald, zonder lockversie omhoog en zonder handmatige ingreep. Dit neemt voor deze stap het risico op schijnsucces weg dat §17.4 ook voor titels oploste.
+
+### 18.4 Samenstellen
+
+- Een omschrijving uit een document komt op het element, behalve als een override die vervangt.
+- Een extern systeem uit een pakket krijgt de documentterm als weergavenaam (`OpenAI`, niet `openai`), als beide dezelfde id geven. De eerste term op citaatpositie wint, zodat de naam stabiel is. Een override gaat voor.
+
+§17.1 en §17.2 blijven gelden. §17.2 blijft de vangnetregel: een element zonder relatie haalt de kaart niet.
+
+### 18.5 Run en acceptatie
+
+Eén volledige run plus `chunkhound autodoc` en `npm run build`. Classificatie, merge en titels blijven in de cache, dus de C4-kosten zijn alleen de documentstap: naar schatting 3 tot 6 aanroepen. HyDE en de researches draaien wel (ongeveer 30 minuten), AutoDoc ongeveer 15 minuten.
+
+**Controles:**
+
+1. geen prompts, `AGENTS.md`, licenties of `vendor` in de bronnen;
+2. geen formaten, configuratiemiddelen, build- of publicatiegereedschap als extern systeem in het contract;
+3. echte providers op de kaart, met relaties, ook die uit de tabel;
+4. minstens één persoon met een relatie;
+5. externe systemen en personen hebben een omschrijving, op een enkele na;
+6. `ModelLoader` en de LikeC4-build zonder waarschuwing.
+
+**Onzeker:** de scheiding hangt van het model af, dus er kan ruis blijven of een echt systeem wegvallen. Ik voeg daarvoor geen lijst met namen toe, omdat die niet voor andere repository's geldt; `overrides` blijft de uitweg. Een tweede run om stabiliteit te bewijzen doe ik niet; dat toetst test 1 hieronder zonder provider.
+
+### 18.6 Testen
+
+Contracttests op de bestaande routes:
+
+1. Dezelfde bestanden met andere topics geven dezelfde documentset, en de tweede run doet geen documentaanroep.
+2. Prompts, `AGENTS.md`, licenties en `vendor` vallen af; andere Markdown en `README*` in de scope-wortel blijven; `c4.exclude` en de testregels gelden.
+3. Een gewijzigde promptversie bepaalt de uitkomst opnieuw; gelijke versie en documenten doen geen aanroep; een lockvermelding zonder versie wordt opnieuw bepaald.
+4. Een antwoord met soort `component` of `container` wordt niet aanvaard; oude uitkomsten met die soorten blijven leesbaar.
+5. Omschrijving en weergavenaam komen op het element, en een override gaat voor.
+
+### 18.7 Bewust niet
+
+- **Componentnamen en -indeling:** de misleidende titels uit de steekproef blijven bestaan (§17.8). Dat is de volgende stap na deze.
+- **Providers zonder pakket of documentrelatie:** die blijven weg; dat is §17.2.
+- **Protocollen, processen en deel B:** ongewijzigd.

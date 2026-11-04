@@ -509,13 +509,10 @@ async def test_failed_cleanup_does_not_fail_a_published_run(cli, capsys):
 async def test_call_report_names_step_and_reason(cli, capsys, response):
     private_file = "private-context.md"
     private_text = "PRIVATE_PROMPT_CONTENT"
-    (cli.repo / private_file).write_text(private_text)
     await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
     capsys.readouterr()
     cli.provider.calls.clear()
-    cli.result.poi_sections_indexed[0][2]["metadata"]["sources"]["files"].append(
-        private_file
-    )
+    (cli.repo / private_file).write_text(private_text)
     if response == "quote_rejected":
         answer = deepcopy(cli.provider.answers["documented"])
         for item in [*answer["elements"], *answer["relations"]]:
@@ -991,16 +988,13 @@ async def test_scope_inside_tests_keeps_its_files(cli):
         ],
     )
     documents = record_documented(cli)
-    cli.result.poi_sections_indexed[0][2]["metadata"]["sources"]["files"].append(
-        "tests/e2e/fixtures/guide.md"
-    )
     await command.code_mapper_command(
         parse(cli.repo / "tests/e2e", cli.out), cli.config
     )
     files, _ = modeled_files(cli.out, "tests_e2e")
     assert {"tests/e2e/app.py", "tests/e2e/README.md"} <= files
     assert not files & {"tests/e2e/test_app.py", "tests/e2e/fixtures/data.py"}
-    assert documents == {"README.md", "tests/e2e/README.md"}
+    assert documents == {"tests/e2e/README.md"}
 
 
 @pytest.mark.parametrize(

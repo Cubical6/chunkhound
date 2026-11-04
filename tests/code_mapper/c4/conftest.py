@@ -150,11 +150,13 @@ def default_answers() -> dict[str, Answer]:
                 {
                     "kind": "person",
                     "term": "beheerder",
+                    "description": "",
                     "citation": deepcopy(citation),
                 },
                 {
                     "kind": "external",
                     "term": "Stripe",
+                    "description": "",
                     "citation": deepcopy(citation),
                 },
             ],
@@ -219,8 +221,9 @@ def component_answer(prompt, *, reject=None):
                     quote = "Verzonnen citaat"
                 elements.append(
                     {
-                        "kind": "component",
+                        "kind": "external",
                         "term": match.group(0),
+                        "description": "",
                         "citation": {
                             "start_line": number,
                             "end_line": number,

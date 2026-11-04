@@ -2,16 +2,17 @@
 
 import hashlib
 import json
+import shutil
 from dataclasses import asdict
 
 import jsonschema
 import pytest
 
+from chunkhound.code_mapper.c4 import documented as documented_module
 from chunkhound.code_mapper.c4.documented import (
     EXTRACTION_CACHE,
     DocElement,
     DocRelation,
-    TopicSources,
     doc_files_for,
     extract_documented,
     report_lines,
@@ -38,7 +39,12 @@ def citation(quote=QUOTE, file="README.md", start_line=3, end_line=3):
 
 def answer(quote=QUOTE):
     return {
-        "elements": [dict(kind="person", term="beheerder", citation=citation(quote))],
+        "elements": [dict(
+                kind="person",
+                term="beheerder",
+                description="",
+                citation=citation(quote),
+            )],
         "relations": [
             dict(
                 from_term="beheerder",
@@ -61,6 +67,75 @@ def verified_citation():
     )
 
 
+async def test_changed_step_or_old_entry_extracts_again_and_equal_one_does_not(
+    fixture_repo, c4_llm_manager, scripted, monkeypatch
+):
+    scripted.answers["documented"] = answer()
+
+    async def run(locked):
+        llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
+        retries = RetryQueue()
+        outcome = await extract_documented(
+            project_root=fixture_repo,
+            system_name="shop",
+            doc_files=["README.md"],
+            locked=locked,
+            llm=llm,
+            retries=retries,
+        )
+        await retries.drain()
+        return outcome, llm.calls
+
+    first, calls = await run(None)
+    assert calls and first.version
+    locked = LockedDocumented.model_validate(
+        {
+            "version": first.version,
+            "hashes": first.hashes,
+            "elements": [asdict(item) for item in first.elements],
+            "relations": [asdict(item) for item in first.relations],
+        }
+    )
+    assert (await run(locked))[1] == 0
+
+    # The extraction cache is keyed on the version too, so an old entry is new work.
+    old_entry = locked.model_copy(update={"version": ""})
+    shutil.rmtree(fixture_repo / EXTRACTION_CACHE)
+    assert (await run(old_entry))[1]
+
+    shutil.rmtree(fixture_repo / EXTRACTION_CACHE)
+    original = documented_module.load_c4_prompt
+    monkeypatch.setattr(
+        documented_module, "load_c4_prompt", lambda step: original(step) + "\nMore."
+    )
+    changed, calls = await run(locked)
+    assert calls and changed.version != first.version
+
+
+async def test_answer_with_an_internal_kind_is_not_accepted(
+    fixture_repo, c4_llm_manager, scripted
+):
+    for kind in ("component", "container"):
+        rejected = answer()
+        rejected["elements"][0]["kind"] = kind
+        scripted.answers["documented"] = rejected
+        retries = RetryQueue()
+        outcome = await extract_documented(
+            project_root=fixture_repo,
+            system_name="shop",
+            doc_files=["README.md"],
+            locked=None,
+            llm=C4Llm(c4_llm_manager, concurrency=1, trial=False),
+            retries=retries,
+        )
+        await retries.drain()
+        assert outcome.fallback
+        assert outcome.elements == []
+    # Outcomes stored earlier stay readable.
+    stored = asdict(DocElement("component", "Oud", verified_citation()))
+    assert DocElement(**{**stored, "citation": verified_citation()}).kind == "component"
+
+
 async def test_documented_citations_are_verified_documentation_evidence(
     fixture_repo, c4_llm_manager, scripted
 ):
@@ -68,6 +143,7 @@ async def test_documented_citations_are_verified_documentation_evidence(
     llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
     outcome = await extract_documented(
         project_root=fixture_repo,
+        system_name="shop",
         doc_files=["README.md"],
         locked=None,
         llm=llm,
@@ -88,7 +164,12 @@ async def test_documented_discards_invalid_items(
 ):
     payload = answer()
     payload["elements"].append(
-        dict(kind="external", term="Webdashboard", citation=citation("Webdashboard"))
+        dict(
+            kind="external",
+            term="Webdashboard",
+            description="",
+            citation=citation("Webdashboard"),
+        )
     )
     payload["relations"].append(
         dict(
@@ -103,6 +184,7 @@ async def test_documented_discards_invalid_items(
     retries = RetryQueue()
     result = await extract_documented(
         project_root=fixture_repo,
+        system_name="shop",
         doc_files=["README.md"],
         locked=None,
         llm=llm,
@@ -119,6 +201,7 @@ async def test_documented_reuses_on_same_hashes(fixture_repo, c4_llm_manager, sc
     llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
     first = await extract_documented(
         project_root=fixture_repo,
+        system_name="shop",
         doc_files=["README.md"],
         locked=None,
         llm=llm,
@@ -140,6 +223,7 @@ async def test_documented_reuses_on_same_hashes(fixture_repo, c4_llm_manager, sc
     llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
     cached = await extract_documented(
         project_root=fixture_repo,
+        system_name="shop",
         doc_files=["README.md"],
         locked=locked,
         llm=llm,
@@ -151,6 +235,7 @@ async def test_documented_reuses_on_same_hashes(fixture_repo, c4_llm_manager, sc
     scripted.answers["documented"] = {"elements": [], "relations": []}
     changed = await extract_documented(
         project_root=fixture_repo,
+        system_name="shop",
         doc_files=["README.md"],
         locked=locked,
         llm=llm,
@@ -161,6 +246,7 @@ async def test_documented_reuses_on_same_hashes(fixture_repo, c4_llm_manager, sc
     assert changed.hashes != first.hashes
     removed = await extract_documented(
         project_root=fixture_repo,
+        system_name="shop",
         doc_files=[],
         locked=locked,
         llm=llm,
@@ -190,6 +276,7 @@ async def test_documented_fallback_after_retry(
     retries = RetryQueue()
     result = await extract_documented(
         project_root=fixture_repo,
+        system_name="shop",
         doc_files=["README.md"],
         locked=locked,
         llm=llm,
@@ -209,6 +296,7 @@ async def test_documented_retry_can_recover(fixture_repo, c4_llm_manager, script
     retries = RetryQueue()
     result = await extract_documented(
         project_root=fixture_repo,
+        system_name="shop",
         doc_files=["README.md"],
         locked=None,
         llm=llm,
@@ -227,6 +315,7 @@ async def test_documented_trial_and_no_documents_make_no_calls(fixture_repo):
     for files in (["README.md"], []):
         result = await extract_documented(
             project_root=fixture_repo,
+            system_name="shop",
             doc_files=files,
             locked=None,
             llm=llm,
@@ -236,29 +325,44 @@ async def test_documented_trial_and_no_documents_make_no_calls(fixture_repo):
     assert llm.calls == await retries.drain() == 0
 
 
-def test_doc_files_for_uses_scope_readmes_and_topic_markdown(tmp_path):
+def test_doc_files_for_uses_scope_readmes_and_the_runs_markdown(tmp_path):
     for file in (
         "README.md",
         "scope/README",
         "scope/README.md",
         "scope/docs/guide.md",
-        "scope/docs/unrelated.md",
+        "scope/docs/not-in-this-run.md",
         "scope/code.py",
-        "scope/docs/README.md",
     ):
         path = tmp_path / file
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("content", encoding="utf-8")
     (tmp_path / "scope/README-directory").mkdir()
-    topics = [
-        TopicSources("Usage", ("scope/docs/guide.md", "scope/code.py", "missing.md")),
-        TopicSources("Repeated", ("scope/docs/guide.md",)),
-    ]
-    assert doc_files_for(tmp_path, tmp_path / "scope", topics, None) == [
+    files = ["scope/docs/guide.md", "scope/code.py", "scope/README.md", "missing.md"]
+    assert doc_files_for(tmp_path, tmp_path / "scope", files, None) == [
         "scope/README",
         "scope/README.md",
         "scope/docs/guide.md",
     ]
+
+
+def test_files_written_for_tools_or_copied_are_no_documentation_source(tmp_path):
+    kept = ["README.md", "docs/guide.md", "docs/prompts-guide.md", "src/README.md"]
+    other = [
+        "AGENTS.md",
+        "src/agents.md",
+        "CLAUDE.md",
+        "assets/SourceSans3-LICENSE.md",
+        "LICENSE.md",
+        "app/prompts/step.md",
+        "app/Vendor/lib/README.md",
+    ]
+    files = [*kept, *other]
+    for file in files:
+        path = tmp_path / file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("content", encoding="utf-8")
+    assert doc_files_for(tmp_path, tmp_path, files, None) == sorted(kept)
 
 
 def test_changelog_and_hidden_directories_are_no_documentation_source(tmp_path):
@@ -280,11 +384,10 @@ def test_changelog_and_hidden_directories_are_no_documentation_source(tmp_path):
         path = tmp_path / file
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("content", encoding="utf-8")
-    topics = [TopicSources("All", tuple(files))]
-    assert doc_files_for(tmp_path, tmp_path, topics, None) == sorted(kept)
+    assert doc_files_for(tmp_path, tmp_path, files, None) == sorted(kept)
     # Only the test rules have a switch.
     config = Config.model_construct(c4=C4Config(exclude_test_code=False))
-    assert doc_files_for(tmp_path, tmp_path, topics, config) == sorted(
+    assert doc_files_for(tmp_path, tmp_path, files, config) == sorted(
         [*kept, *test_docs]
     )
 
@@ -317,7 +420,7 @@ def test_documented_sources_stay_inside_the_project(tmp_path):
         doc_files_for(
             root,
             root,
-            [TopicSources("Escapes", ("../outside.md", "linked.md"))],
+            ["../outside.md", "linked.md"],
             None,
         )
         == []
@@ -339,7 +442,12 @@ async def run_documented(repo, manager, files, *, locked=None, trial=False):
     llm = C4Llm(manager, concurrency=1, trial=trial)
     retries = RetryQueue()
     outcome = await extract_documented(
-        project_root=repo, doc_files=files, locked=locked, llm=llm, retries=retries
+        project_root=repo,
+        system_name="shop",
+        doc_files=files,
+        locked=locked,
+        llm=llm,
+        retries=retries,
     )
     fallbacks = await retries.drain()
     return outcome, llm, fallbacks
@@ -652,8 +760,9 @@ async def test_citation_must_lie_inside_its_own_fragment(
             forged = any("Component0 " in line for line in lines)
             elements = [
                 {
-                    "kind": "component",
+                    "kind": "external",
                     "term": "Component1",
+                    "description": "",
                     "citation": {
                         "start_line": 1,
                         "end_line": len(lines),

@@ -323,6 +323,29 @@ def test_documented_own_name_joins_that_element_and_links_its_relations():
     assert citation(line=9, target="opslag:duckdb") in evidence.citations
 
 
+def test_document_gives_a_description_and_a_package_its_display_name():
+    inp = assembly_input()
+    inp.references.external_sites["openai"] = [("a.py", 1)]
+    inp.classifications["openai"] = Classification("external_system", (), (), False)
+    inp.documented.elements = [
+        DocElement("external", "OpenAI", citation(line=7), "Levert taalmodellen."),
+        DocElement("external", "OPENAI", citation(line=8), "Andere zin."),
+        DocElement("person", "Beheerder", citation(line=9), "Beheert de app."),
+    ]
+    elements = {element.id: element for element in assemble(inp)[0]}
+    assert elements["extern:openai"].name == "OpenAI"
+    assert elements["extern:openai"].description == "Levert taalmodellen."
+    assert elements["persoon:beheerder"].description == "Beheert de app."
+
+    inp.overrides = Overrides(
+        names={"extern:openai": "Eigen naam"},
+        descriptions={"extern:openai": "Eigen zin."},
+    )
+    elements = {element.id: element for element in assemble(inp)[0]}
+    assert elements["extern:openai"].name == "Eigen naam"
+    assert elements["extern:openai"].description == "Eigen zin."
+
+
 def test_other_shared_names_stay_ambiguous():
     def ambiguous_count(*extra_units: RuntimeUnit) -> int:
         inp = assembly_input()

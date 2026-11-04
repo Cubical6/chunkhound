@@ -143,6 +143,8 @@ class LockedClassification(_C4BaseModel):
 
 
 class LockedDocumented(_C4BaseModel):
+    # Prompt, schema and validator of the step; empty in older entries.
+    version: str = ""
     hashes: dict[str, str]
     elements: list[dict[str, Any]]
     relations: list[dict[str, Any]]

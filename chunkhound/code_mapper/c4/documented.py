@@ -63,6 +63,11 @@ _HISTORY_DOCUMENTS = (
     "migration",
     "upgrading",
 )
+# Written for tools or copied from others, not about the system: file names start
+# with the first, contain the second, and the third are directory names.
+_INSTRUCTION_DOCUMENTS = ("agents", "claude")
+_LICENSE_DOCUMENT = "license"
+_NON_DOCUMENTATION_DIRECTORIES = frozenset({"prompts", "vendor"})
 
 
 @dataclass(frozen=True)
@@ -76,6 +81,7 @@ class DocElement:
     kind: Literal["person", "external", "container", "component"]
     term: str
     citation: Citation
+    description: str = ""
 
 
 @dataclass(frozen=True)
@@ -109,6 +115,7 @@ class DocumentedOutcome:
     counts: ExtractionCounts | None = field(default=None, compare=False)
     fragment_total: int = field(default=0, compare=False)
     fallback_bundles: int = field(default=0, compare=False)
+    version: str = field(default="", compare=False)
 
 
 class _AnswerModel(BaseModel):
@@ -126,15 +133,14 @@ def _project_file(project_root: Path, file: str) -> Path | None:
 def doc_files_for(
     project_root: Path,
     scope_path: Path,
-    topics: Sequence[TopicSources],
+    files: Sequence[str],
     config: Config | None,
     own_output: tuple[Path, str] | None = None,
 ) -> list[str]:
-    """Select scope-root READMEs and Markdown cited by topics, minus non-sources.
+    """Select scope-root READMEs and the run's Markdown, minus non-sources.
 
-    Topic sources do not come from ``list_scope_files``, so its rules do not
-    apply to them by themselves. A topic can cite earlier output of this map once
-    that output is indexed, which ``own_output`` rules out.
+    The selection follows the repository only, never the research of this run:
+    equal documents then give an equal outcome without a call.
     """
     root = project_root.resolve()
     scope = scope_path if scope_path.is_absolute() else root / scope_path
@@ -143,10 +149,7 @@ def doc_files_for(
         raise ValueError("Documentation scope must be inside the project")
     candidates = [path.relative_to(root).as_posix() for path in scope.glob("README*")]
     candidates.extend(
-        file
-        for topic in topics
-        for file in topic.files
-        if detect_language(Path(file)) == Language.MARKDOWN
+        file for file in files if detect_language(Path(file)) == Language.MARKDOWN
     )
     settings = c4_settings(config)
     excludes = compile_excludes(settings)
@@ -155,9 +158,13 @@ def doc_files_for(
 
     def is_source(file: str) -> bool:
         path = PurePosixPath(file)
+        name = path.name.lower()
+        directories = [part.lower() for part in path.parent.parts]
         return not (
-            any(part.startswith(".") for part in path.parent.parts)
-            or path.name.lower().startswith(_HISTORY_DOCUMENTS)
+            any(part.startswith(".") for part in directories)
+            or name.startswith((*_HISTORY_DOCUMENTS, *_INSTRUCTION_DOCUMENTS))
+            or _LICENSE_DOCUMENT in name
+            or not _NON_DOCUMENTATION_DIRECTORIES.isdisjoint(directories)
             or (settings.exclude_test_code and in_test_directory(file, relative_scope))
             or matches_exclude(file, excludes)
             or is_own_output(file)
@@ -215,6 +222,7 @@ def _previous_outcome(
         TypeAdapter(list[DocRelation]).validate_python(locked.relations),
         dict(locked.hashes),
         fallback,
+        version=locked.version,
     )
 
 
@@ -225,8 +233,9 @@ class _FragmentQuote(_AnswerModel):
 
 
 class _FragmentElement(_AnswerModel):
-    kind: Literal["person", "external", "container", "component"]
+    kind: Literal["person", "external"]
     term: str = Field(min_length=1)
+    description: str
     citation: _FragmentQuote
 
 
@@ -267,8 +276,10 @@ class _DocumentedGoal:
     name = "documented"
     line_numbering: Literal["relative", "absolute"] = "relative"
 
-    def __init__(self) -> None:
-        self._instructions = load_c4_prompt("documented")
+    def __init__(self, system_name: str) -> None:
+        self._instructions = load_c4_prompt("documented").replace(
+            "{system}", system_name
+        )
         schema = json.dumps(DocumentedPart.model_json_schema(), sort_keys=True)
         self.version = hashlib.sha256(
             f"{self._instructions}\n{schema}\n{_VALIDATOR_VERSION}".encode()
@@ -304,7 +315,10 @@ class _DocumentedGoal:
             )
 
         elements = tuple(
-            (DocElement(item.kind, item.term, citation), item.citation.quote)
+            (
+                DocElement(item.kind, item.term, citation, item.description),
+                item.citation.quote,
+            )
             for item in part.elements
             if (citation := cited(item.citation)) is not None
             and _quote_in_lines(
@@ -335,7 +349,12 @@ class _DocumentedGoal:
 
         return {
             "elements": [
-                {"kind": e.kind, "term": e.term, "citation": quote(e.citation, q)}
+                {
+                    "kind": e.kind,
+                    "term": e.term,
+                    "description": e.description,
+                    "citation": quote(e.citation, q),
+                }
                 for e, q in part.elements
             ],
             "relations": [
@@ -496,6 +515,7 @@ async def extract_documented(
     *,
     project_root: Path,
     doc_files: Sequence[str],
+    system_name: str,
     locked: LockedDocumented | None,
     llm: C4Llm,
     retries: RetryQueue,
@@ -504,7 +524,8 @@ async def extract_documented(
     """Bounded, resumable extraction over fragments of every selected document.
 
     Unchanged sets reuse the lock without a call. Otherwise every fragment gets
-    a valid outcome (cached, new or recovered) or falls back per fragment.
+    a valid outcome (cached, new or recovered) or falls back per fragment. Another
+    prompt, schema or validator also counts as changed.
     """
     # A trial only hashes bytes, so it does not require decodable sources.
     sources: dict[str, SourceVersion] = {
@@ -512,15 +533,19 @@ async def extract_documented(
         for file in sorted(set(doc_files))
     }
     hashes = {file: source.sha256 for file, source in sources.items()}
+    goal = _DocumentedGoal(system_name)
     if locked is not None and locked.hashes == hashes:
-        return _previous_outcome(locked, hashes, project_root, fallback=False)
+        if locked.version == goal.version or llm.trial:
+            return _previous_outcome(locked, hashes, project_root, fallback=False)
     if not sources:
-        return DocumentedOutcome([], [], hashes, False)
+        return DocumentedOutcome([], [], hashes, False, version=goal.version)
     if llm.trial:
         return _previous_outcome(locked, hashes, project_root, fallback=False)
 
     if locked is None:
         reason = "geen opgeslagen uitkomst"
+    elif locked.hashes == hashes:
+        reason = "documentatiestap gewijzigd"
     else:
         added = len(hashes.keys() - locked.hashes.keys())
         removed = len(locked.hashes.keys() - hashes.keys())
@@ -542,7 +567,6 @@ async def extract_documented(
             markdown=detect_language(Path(file)) == Language.MARKDOWN,
         )
     ]
-    goal = _DocumentedGoal()
     store = documented_store(project_root, read_only=False)
     call = _C4Call(llm)
     provider = llm.provider_identity("utility")
@@ -583,7 +607,13 @@ async def extract_documented(
 
     counts = ExtractionCounts()
     outcome = DocumentedOutcome(
-        [], [], hashes, False, counts=counts, fragment_total=len(fragments)
+        [],
+        [],
+        hashes,
+        False,
+        counts=counts,
+        fragment_total=len(fragments),
+        version=goal.version,
     )
     collector = _Collector(outcome)
     failed_bundles: dict[str, tuple[int, ...]] = {}
