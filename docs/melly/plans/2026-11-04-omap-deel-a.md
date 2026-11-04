@@ -230,8 +230,10 @@ Komt vóór de nieuwe invoer, omdat de tests dan op de bestaande prompt kunnen d
 
 - [x] **Step 1:** `docs/melly/specs/2026-10-27-map-structuuranalyse-design.md` r. 26, 50, 61, 83, 97, 120, 146–147, 153; `docs/melly/models/map-structuuranalyse.md` r. 269; AutoDoc-spec r. 23, 25 en een nieuwe rij in het AutoDoc-besluitenlog; `site/src/pages/docs/cli-reference.md:356–358`; `site/src/pages/docs/changelog.md:25`; `CHANGELOG.md`.
 - [x] **Step 2:** Lokaal `.chunkhound.json` met de sectie `c4`, niet gevolgd door Git. Controleer met `select_scope_files` zonder provider dat `docs/melly/**` en `.superpowers/**` wegvallen.
-- [ ] **Step 3:** Ruff op de gewijzigde bestanden, mypy, smoke tests, en de volledige suite met de `TMPDIR`-regel. Vergelijk fouten met de nulmeting en draai elke nieuwe fout los.
-- [ ] **Step 4:** Rapporteer aan de gebruiker. De acceptatie met provider uit spec §15 vraagt aparte goedkeuring en een verwijderd lockbestand. Niet zelf uitvoeren.
+- [x] **Step 3:** Ruff op de gewijzigde bestanden, mypy, smoke tests, en de volledige suite met de `TMPDIR`-regel. Vergelijk fouten met de nulmeting en draai elke nieuwe fout los.
+- [x] **Step 4:** Rapporteer aan de gebruiker. De acceptatie met provider uit spec §15 vraagt aparte goedkeuring en een verwijderd lockbestand. Niet zelf uitvoeren.
+
+**Eindmeting (2026-11-04):** volledige suite met `TMPDIR` op schijf: 5.837 geslaagd, 108 overgeslagen, 6 gefaald, 60 errors. Los gedraaid: `tests/site` 68 geslaagd, en 4 van de 6 fouten slagen (MCP-opstarttests). Blijven: `test_native_self_relative_rpath` en `test_missing_model_is_warning_not_cli_failure`, die eerder ook zonder wijzigingen faalden. Geen bestand in `chunkhound/mcp_server`, `chunkhound/daemon` of `src` is gewijzigd.
 
 ## Model coverage
 
