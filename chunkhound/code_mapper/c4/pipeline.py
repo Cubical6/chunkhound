@@ -36,7 +36,7 @@ from chunkhound.code_mapper.c4.documented import (
 from chunkhound.code_mapper.c4.documented import (
     report_lines as documented_report_lines,
 )
-from chunkhound.code_mapper.c4.files import list_scope_files
+from chunkhound.code_mapper.c4.files import select_scope_files
 from chunkhound.code_mapper.c4.grouping import Group, build_groups
 from chunkhound.code_mapper.c4.identity import (
     IdentityResult,
@@ -130,6 +130,8 @@ class C4Draft:
     merges: dict[str, MergeResult] = field(default_factory=dict)
     unknown_overrides: list[str] = field(default_factory=list)
     prepared: bool = False
+    excluded_as_test_code: int = 0
+    excluded_by_pattern: int = 0
 
 
 @dataclass
@@ -305,12 +307,13 @@ async def analyze_c4(
     own_output: tuple[Path, str] | None = None,
 ) -> C4Draft:
     """Read disk once; retain mutable step outcomes until delayed recovery."""
-    files = list_scope_files(
+    selection = select_scope_files(
         scope_path=scope_path,
         project_root=project_root,
         config=config,
         own_output=own_output,
     )
+    files = selection.files
     references = await scan_references(project_root=project_root, files=files)
     runtime = scan_runtime(
         project_root=project_root,
@@ -329,6 +332,8 @@ async def analyze_c4(
         {},
         LlmSteps(retries),
         _input_fingerprint(project_root, files, config, scope_path),
+        excluded_as_test_code=selection.excluded_as_test_code,
+        excluded_by_pattern=selection.excluded_by_pattern,
     )
     items = _classification_items(draft)
     draft.classifications = await classify(
@@ -646,6 +651,60 @@ def _build_lock(
     )
 
 
+def _source_line(draft: C4Draft) -> str:
+    return (
+        f"C4-bron: {len(draft.files)} bestanden geanalyseerd, "
+        f"{draft.excluded_as_test_code} uitgesloten als testcode, "
+        f"{draft.excluded_by_pattern} door c4.exclude"
+    )
+
+
+def _merge_lines(draft: C4Draft, trial: bool) -> list[str]:
+    """Only groups a call was about; a trial makes no call, whatever it proposes."""
+    lines = []
+    for container, merge in sorted(draft.merges.items()):
+        pending = len(merge.pending_groups)
+        if trial or not (merge.placed_groups or pending):
+            continue
+        unplaced = (
+            f"{pending} niet geplaatst ({merge.failure_reason}), " if pending else ""
+        )
+        lines.append(
+            f"C4-merge {container}: {merge.placed_groups + pending} bouwstenen, "
+            f"{merge.placed_groups} geplaatst, {unplaced}"
+            f"{merge.removed_placements} plaatsingen verwijderd"
+        )
+    lines.extend(
+        f"C4-merge: override voor onbekende groep genegeerd: {group}"
+        for group in draft.unknown_overrides
+    )
+    return lines
+
+
+def _contract_lines(
+    contract: Contract, counts: ContractCounts, repository_reasons: dict[str, str]
+) -> list[str]:
+    return [
+        f"C4-contract: {len(contract.elements)} elementen, "
+        f"{len(contract.relations)} relaties, {len(contract.sources)} bronnen, "
+        f"{len(contract.merged_labels)} labels, {len(contract.topics)} topics",
+        f"C4-contract weggelaten: {counts.components_without_container} componenten "
+        f"zonder container, {counts.elements_without_source} elementen zonder bron, "
+        f"{counts.components_without_valid_container} componenten zonder geldige "
+        f"container, {counts.relations_without_endpoint} relaties zonder eindpunt, "
+        f"{counts.relations_without_source} relaties zonder bron, "
+        f"{counts.labels} labels",
+        f"C4-contract onvolledig: {counts.without_technology} zonder technologie, "
+        f"{counts.without_description} zonder omschrijving, "
+        f"{counts.container_relations_without_protocol} relaties tussen containers "
+        "zonder protocol",
+        *(
+            f"C4-contract repository {id}: geen bronlinks ({reason})"
+            for id, reason in sorted(repository_reasons.items())
+        ),
+    ]
+
+
 async def finish_c4(
     *,
     draft: C4Draft,
@@ -656,13 +715,14 @@ async def finish_c4(
     head_sha: str,
     kind: RunKind,
     config: Config | None = None,
+    own_output: tuple[Path, str] | None = None,
 ) -> C4Build:
     """Finalize dependent steps only after their deferred inputs are settled."""
     topic_files = {file for topic in topics or () for file in topic.files}
     docs = await extract_documented(
         project_root=draft.project_root,
         doc_files=doc_files_for(
-            draft.project_root, draft.scope_path, topics or (), config
+            draft.project_root, draft.scope_path, topics or (), config, own_output
         ),
         locked=lock.documented if lock else None,
         llm=llm,
@@ -752,6 +812,8 @@ async def finish_c4(
         "C4 documentatierelaties niet gekoppeld: "
         f"{unlinked.no_match} geen treffer, {unlinked.ambiguous} meerdere "
         f"treffers, {unlinked.not_allowed} niet toegestaan",
+        _source_line(draft),
+        *_merge_lines(draft, llm.trial),
     ]
     contract: Contract | None = None
     contract_counts: ContractCounts | None = None
@@ -763,6 +825,9 @@ async def finish_c4(
         contract, repository_reasons = with_git_data(
             contract, draft.project_root, head_sha
         )
+        report_extra += _contract_lines(contract, contract_counts, repository_reasons)
+    else:
+        report_extra.append("C4-contract: niet geschreven (proefrun)")
     return C4Build(
         model,
         evidence,

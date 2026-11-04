@@ -65,7 +65,8 @@ Uitsluiten gebeurt vóór verwijzingen, manifesten en bouwstenen. Zo ontstaan ge
 - elk pad met een map die met `.` begint;
 - de testmappen uit §3.1;
 - bestandsnamen die, zonder hoofdletters, beginnen met `changelog`, `changes`, `history`, `news`, `release_notes`, `releases`, `migration` of `upgrading`;
-- `c4.exclude`.
+- `c4.exclude`;
+- de eigen uitvoer uit §3.1, want een topic kan eerdere uitvoer citeren als die geïndexeerd is.
 
 De topicbronnen komen niet uit `list_scope_files`. Dit filter is dus nodig naast dat van §3.1.
 

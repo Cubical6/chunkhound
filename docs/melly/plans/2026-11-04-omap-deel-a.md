@@ -210,12 +210,12 @@ Komt vóór de nieuwe invoer, omdat de tests dan op de bestaande prompt kunnen d
 
 **Files:** `c4/pipeline.py`, `api/cli/commands/code_mapper.py`; tests in `test_cli_contract.py`.
 
-- [ ] **Step 1: Rode tests.**
+- [x] **Step 1: Rode tests.**
   - `test_second_run_makes_no_merge_call_and_identical_contract`, met `--out` buiten en binnen de repository. De test maakt ook de `hyde_*`-bestanden aan, omdat de testnep geen echte research doet (`test_cli_contract.py:88`).
   - `test_report_lines`: de regels uit §10, inclusief de override voor een onbekende groep.
   - `test_end_to_end_contract_links_topics_to_pages`: fixture-run gevolgd door de AutoDoc-invoer.
-- [ ] **Step 2:** Rapportregels in `C4Build.report_extra`, zonder wijziging van exitcodes, met de tellingen uit Taak 1, 6 en 8.
-- [ ] **Step 3:** Tests, ruff en mypy.
+- [x] **Step 2:** Rapportregels in `C4Build.report_extra`, zonder wijziging van exitcodes, met de tellingen uit Taak 1, 6 en 8.
+- [x] **Step 3:** Tests, ruff en mypy.
 
 ### Task 12: AutoDoc-naamfix (spec §11)
 

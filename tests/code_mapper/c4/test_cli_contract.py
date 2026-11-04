@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import os
+import subprocess
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,13 +14,16 @@ import pytest
 
 import chunkhound.api.cli.commands.code_mapper as command
 from chunkhound.api.cli.parsers.code_mapper_parser import add_map_subparser
+from chunkhound.autodoc.architecture.coverage import CoverageIndex
 from chunkhound.autodoc.architecture.loader import ModelLoader
 from chunkhound.autodoc.index_loader import (
     find_index_file,
     load_topics,
     parse_index_file,
 )
+from chunkhound.autodoc.models import DocsitePage
 from chunkhound.code_mapper.c4 import pipeline as c4_pipeline
+from chunkhound.code_mapper.c4.contract import ContractCounts
 from chunkhound.code_mapper.c4.files import select_scope_files
 from chunkhound.code_mapper.c4.llm import AnswerRejectedError
 from chunkhound.code_mapper.c4.lockfile import LOCK_RELATIVE_PATH
@@ -274,6 +278,219 @@ async def test_rerun_unchanged_zero_calls_stable_output(cli):
         name: data for name, data in snapshot(cli.out).items() if name.endswith(".json")
     } == first
     assert lock_path.read_bytes() == lock
+
+
+def publish_to_origin(repo):
+    """Make every commit count as pushed, so source links depend on the worktree."""
+    for args in (
+        ["remote", "add", "origin", "https://example.invalid/shop.git"],
+        ["update-ref", "refs/remotes/origin/main", "HEAD"],
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+@pytest.mark.parametrize("inside", [False, True], ids=["outside", "inside"])
+async def test_second_run_makes_no_merge_call_and_identical_contract(cli, inside):
+    """Invariant 5. The out directory stays untracked, and nothing is committed."""
+    publish_to_origin(cli.repo)
+    out = cli.repo / "docs" if inside else cli.out
+    await command.code_mapper_command(parse(cli.repo, out), cli.config)
+    assert pair(out)[0].run.fallback_count == 0
+    contract = (out / CONTRACT).read_bytes()
+    assert json.loads(contract)["repositories"][0]["remote_url"]
+    lock_path = cli.repo / LOCK_RELATIVE_PATH
+    lock = lock_path.read_bytes()
+    if inside:
+        # The test double does no research, so it left no HyDE files behind.
+        write_files(
+            cli.repo,
+            ["docs/hyde_plan_arch__.md", "docs/hyde_scope_prompt_ops__.md"],
+        )
+        # Without the own-output rule this run would read all of them as sources.
+        unfiltered = select_scope_files(
+            scope_path=cli.repo, project_root=cli.repo, config=cli.config
+        ).files
+        assert {
+            f"docs/{CONTRACT}",
+            "docs/hyde_plan_arch__.md",
+            "docs/hyde_scope_prompt_ops__.md",
+        } <= set(unfiltered)
+    cli.provider.calls.clear()
+    await command.code_mapper_command(parse(cli.repo, out), cli.config)
+    assert cli.provider.calls["merge"] == 0
+    assert (out / CONTRACT).read_bytes() == contract
+    assert lock_path.read_bytes() == lock
+
+
+def c4_report(output):
+    return [
+        line.removeprefix("[INFO] ")
+        for line in output.splitlines()
+        if line.startswith(("[INFO] C4-bron", "[INFO] C4-merge", "[INFO] C4-contract"))
+    ]
+
+
+async def test_report_lines(cli, capsys):
+    write_files(cli.repo, ["shop/test_cart.py", "shop/skip.py"])
+    config = cli.config.model_copy(update={"c4": C4Config(exclude=["shop/skip.py"])})
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://example.invalid/shop.git"],
+        cwd=cli.repo,
+        check=True,
+    )
+    await command.code_mapper_command(parse(cli.repo, cli.out), config)
+    head = pair(cli.out)[0].run.head_sha
+    source = (
+        "C4-bron: 14 bestanden geanalyseerd, 1 uitgesloten als testcode, "
+        "1 door c4.exclude"
+    )
+    contract = [
+        "C4-contract: 14 elementen, 1 relaties, 22 bronnen, 0 labels, 2 topics",
+        "C4-contract weggelaten: 0 componenten zonder container, 0 elementen zonder "
+        "bron, 0 componenten zonder geldige container, 0 relaties zonder eindpunt, "
+        "0 relaties zonder bron, 0 labels",
+        "C4-contract onvolledig: 1 zonder technologie, 8 zonder omschrijving, "
+        "0 relaties tussen containers zonder protocol",
+        f"C4-contract repository .: geen bronlinks (commit {head} staat niet op "
+        "origin)",
+    ]
+    assert c4_report(capsys.readouterr().out) == [
+        source,
+        "C4-merge container:acme-admin: 2 bouwstenen, 2 geplaatst, "
+        "0 plaatsingen verwijderd",
+        "C4-merge container:shop: 3 bouwstenen, 3 geplaatst, 0 plaatsingen verwijderd",
+        "C4-merge container:web: 2 bouwstenen, 2 geplaatst, 0 plaatsingen verwijderd",
+        *contract,
+    ]
+
+    # Nothing is pending any more: no merge line, but the override is reported.
+    lock_path = cli.repo / LOCK_RELATIVE_PATH
+    document = json.loads(lock_path.read_text())
+    document["scopes"]["/"]["overrides"]["placements"]["container:shop/gone"] = (
+        "component:shop"
+    )
+    lock_path.write_text(json.dumps(document))
+    await command.code_mapper_command(parse(cli.repo, cli.out), config)
+    assert c4_report(capsys.readouterr().out) == [
+        source,
+        "C4-merge: override voor onbekende groep genegeerd: container:shop/gone",
+        *contract,
+    ]
+
+
+async def test_report_states_each_contract_count_under_its_own_label(cli, capsys):
+    build = c4_pipeline.build_contract
+
+    def counted(*args):
+        return build(*args)[0], ContractCounts(1, 2, 3, 4, 5, 6, 7, 8, 9)
+
+    cli.monkeypatch.setattr(c4_pipeline, "build_contract", counted)
+    await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
+    report = c4_report(capsys.readouterr().out)
+    assert (
+        "C4-contract weggelaten: 1 componenten zonder container, 2 elementen zonder "
+        "bron, 3 componenten zonder geldige container, 4 relaties zonder eindpunt, "
+        "5 relaties zonder bron, 6 labels"
+    ) in report
+    assert (
+        "C4-contract onvolledig: 7 zonder technologie, 8 zonder omschrijving, "
+        "9 relaties tussen containers zonder protocol"
+    ) in report
+
+
+async def test_report_names_why_groups_stay_unplaced(cli, capsys):
+    """Repaired, then the narrow retry fails: only the placed part stays placed."""
+
+    def respond(prompt):
+        data = json.loads(prompt.split("\nInput:\n", 1)[1])
+        if data["existing"]:
+            raise TimeoutError("temporarily unavailable")
+        first = data["groups"][0]["id"]
+        return {
+            "components": [
+                {"name": "Eerste", "description": "x", "groups": [first, "G99"]}
+            ],
+            "direct": [],
+            "titles": [],
+        }
+
+    cli.provider.answers["merge"] = respond
+    await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
+    lines = [
+        line
+        for line in c4_report(capsys.readouterr().out)
+        if line.startswith("C4-merge")
+    ]
+    assert lines == [
+        f"C4-merge container:{name}: {total} bouwstenen, 1 geplaatst, "
+        f"{total - 1} niet geplaatst (tijdelijke fout), 1 plaatsingen verwijderd"
+        for name, total in (("acme-admin", 2), ("shop", 3), ("web", 2))
+    ]
+
+
+async def test_report_says_a_trial_writes_no_contract(cli, capsys):
+    await command.code_mapper_command(
+        parse(cli.repo, cli.out, "--plan", "--no-markdown"), cli.config
+    )
+    report = c4_report(capsys.readouterr().out)
+    assert report[0].startswith("C4-bron: ")
+    # The trial makes no call, so a merge line would contradict "0 pogingen".
+    assert report[1:] == ["C4-contract: niet geschreven (proefrun)"]
+
+
+async def test_end_to_end_contract_links_topics_to_pages(cli):
+    """A topic in the contract binds to the page AutoDoc builds from the same run."""
+    await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
+    index_path = find_index_file(cli.out)
+    warnings = []
+    model = ModelLoader.load(index_path=index_path, log_warning=warnings.append)
+    assert model is not None
+    topics, missing = load_topics(cli.out, parse_index_file(index_path))
+    assert not missing
+    pages = [
+        DocsitePage(
+            order=topic.order,
+            title=topic.title,
+            slug=f"topic-{topic.order}",
+            description="",
+            body_markdown=topic.body_markdown,
+            source_path=str(topic.source_path),
+        )
+        for topic in topics
+    ]
+    coverage = CoverageIndex(model, pages, cli.out, warnings.append)
+    assert warnings == []
+
+    # A failed topic still gets a page, but the contract only has successful ones.
+    assert {topic.file for topic in model.topics} == {
+        Path(page.source_path).name
+        for page in pages
+        if "missing" not in page.source_path
+    }
+    owner = next(e for e in model.elements if "shop/orders.py" in e.files)
+    assert owner.kind == "component"
+    orders = next(page for page in pages if page.title == "Orders")
+    assert coverage.direct_elements_for(orders) == [owner.id]
+    assert [(page.slug, files) for page, files in coverage.topics_for(owner.id)] == [
+        (orders.slug, frozenset({"shop/orders.py"})),
+        *[
+            (page.slug, frozenset({"shop/cli.py"}))
+            for page in pages
+            if page.title == "Run shop"
+        ],
+    ]
+
+
+async def test_failed_cleanup_does_not_fail_a_published_run(cli, capsys):
+    cli.out.mkdir()
+    # A directory under the old name: removing it raises an OSError on any platform.
+    (cli.out / OLD_EVIDENCE).mkdir()
+    await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
+    assert load_contract_quietly(cli.out).elements
+    assert (cli.repo / LOCK_RELATIVE_PATH).exists()
+    output = " ".join(capsys.readouterr().out.split())
+    assert "[WARN] C4: oude uitvoer niet verwijderd" in output
+    assert OLD_EVIDENCE in output
 
 
 @pytest.mark.parametrize(
@@ -793,6 +1010,12 @@ async def test_map_does_not_read_its_own_output(cli, scope, label):
         + [(relative / "notes.md").as_posix()]
         + [(relative / "deep" / own[0]).as_posix()],
     )
+    # Once earlier output is indexed, a topic can cite it as documentation too.
+    documents = record_documented(cli)
+    cli.result.poi_sections_indexed[0][2]["metadata"]["sources"]["files"] += [
+        (relative / "notes.md").as_posix(),
+        *((relative / name).as_posix() for name in own),
+    ]
     await command.code_mapper_command(parse(cli.repo / scope, out), cli.config)
     files, _ = modeled_files(out, label)
     assert not files & {(relative / name).as_posix() for name in own}
@@ -800,6 +1023,8 @@ async def test_map_does_not_read_its_own_output(cli, scope, label):
         (relative / "notes.md").as_posix(),
         (relative / "deep" / own[0]).as_posix(),
     } <= files
+    assert (relative / "notes.md").as_posix() in documents
+    assert not documents & {(relative / name).as_posix() for name in own}
 
 
 def test_hyde_still_sees_excluded_files(cli):

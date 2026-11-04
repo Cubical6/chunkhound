@@ -54,7 +54,7 @@ def _is_test_code(file: str, scope: PurePosixPath) -> bool:
     )
 
 
-def _own_output_matcher(
+def own_output_matcher(
     project_root: Path, own_output: tuple[Path, str] | None
 ) -> Callable[[str], bool]:
     """Match files directly in the output directory, named as this scope's output."""
@@ -110,7 +110,7 @@ def select_scope_files(
     settings = c4_settings(config)
     scope = PurePosixPath(scope_path.relative_to(project_root).as_posix())
     excludes = compile_excludes(settings)
-    is_own_output = _own_output_matcher(project_root, own_output)
+    is_own_output = own_output_matcher(project_root, own_output)
 
     files: list[str] = []
     test_code = pattern = 0

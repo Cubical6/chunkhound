@@ -176,6 +176,7 @@ class _C4Run:
             head_sha=_get_head_sha(self.scope.target_dir),
             kind="trial" if self.llm.trial else "full",
             config=self.config,
+            own_output=(self.out_dir, self.scope.scope_label),
         )
 
     def write(self, out_dir: Path, formatter: RichOutputFormatter) -> None:
@@ -197,7 +198,13 @@ class _C4Run:
                 write_scope_lock(
                     self.scope.target_dir, self.scope.scope_label, self.build.lock
                 )
-            remove_old_c4_output(out_dir=out_dir, scope_label=self.scope.scope_label)
+            # Everything is published by now; leftovers must not fail the run.
+            try:
+                remove_old_c4_output(
+                    out_dir=out_dir, scope_label=self.scope.scope_label
+                )
+            except OSError as exc:
+                formatter.warning(f"C4: oude uitvoer niet verwijderd: {exc}")
         if self.build.fallback_count:
             formatter.warning(
                 f"C4: {self.build.fallback_count} elementen via terugval "

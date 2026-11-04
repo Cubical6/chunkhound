@@ -15,6 +15,7 @@ from chunkhound.code_mapper.c4.files import (
     compile_excludes,
     in_test_directory,
     matches_exclude,
+    own_output_matcher,
 )
 from chunkhound.code_mapper.c4.llm import (
     AnswerRejectedError,
@@ -127,11 +128,13 @@ def doc_files_for(
     scope_path: Path,
     topics: Sequence[TopicSources],
     config: Config | None,
+    own_output: tuple[Path, str] | None = None,
 ) -> list[str]:
     """Select scope-root READMEs and Markdown cited by topics, minus non-sources.
 
     Topic sources do not come from ``list_scope_files``, so its rules do not
-    apply to them by themselves.
+    apply to them by themselves. A topic can cite earlier output of this map once
+    that output is indexed, which ``own_output`` rules out.
     """
     root = project_root.resolve()
     scope = scope_path if scope_path.is_absolute() else root / scope_path
@@ -148,6 +151,7 @@ def doc_files_for(
     settings = c4_settings(config)
     excludes = compile_excludes(settings)
     relative_scope = PurePosixPath(scope.relative_to(root).as_posix())
+    is_own_output = own_output_matcher(root, own_output)
 
     def is_source(file: str) -> bool:
         path = PurePosixPath(file)
@@ -156,6 +160,7 @@ def doc_files_for(
             or path.name.lower().startswith(_HISTORY_DOCUMENTS)
             or (settings.exclude_test_code and in_test_directory(file, relative_scope))
             or matches_exclude(file, excludes)
+            or is_own_output(file)
         )
 
     return sorted(
