@@ -167,17 +167,17 @@ Komt vóór de nieuwe invoer, omdat de tests dan op de bestaande prompt kunnen d
 
 **Files:** nieuw `c4/contract.py`; `c4/pipeline.py`; nieuwe test `tests/code_mapper/c4/test_contract.py`; `tests/autodoc` alleen lezen.
 
-- [ ] **Step 1: Rode tests.**
+- [x] **Step 1: Rode tests.**
   - `test_contract_loads_without_warnings`: op de fixture-uitvoer door de echte `ModelLoader`.
   - Vertaling: soorten, status, ouders, technologie, omschrijvingen, stabiele en unieke bron-id's over twee keer bouwen.
   - Weglaten: component zonder container, relatie naar weggelaten element, element zonder bron ontbreken en worden geteld; het paar behoudt ze.
   - Directe bestanden: een container bevat de bestanden van zijn component niet; een topic dat alleen componentbestanden citeert, dekt de container niet direct.
   - Labels: twee titels geven een label, één niet; te lang of weggelaten onderliggend geeft geen label.
-- [ ] **Step 2:** Pure functie `build_contract(model, evidence, topics, repository_of) -> tuple[Contract, ContractCounts]`, met een eigen getypeerde vorm en geen import uit `chunkhound/autodoc`, behalve in de test. `TopicSources.topic` is al de artefactnaam (`commands/code_mapper.py:220–228`).
-- [ ] **Step 3:** Weglaatregels in de volgorde van §8; lijsten gesorteerd volgens §7.4.
-- [ ] **Step 4:** `repositories` krijgt alvast rijen met `NO_GIT_HEAD` en `remote_url: null`, want de loader vereist ze (`loader.py:142–151`, `:186`). Taak 9 vult ze.
-- [ ] **Step 5:** `finish_c4` bouwt het contract buiten de proefrun en geeft het mee als `C4Build.contract`.
-- [ ] **Step 6:** Tests, ruff en mypy.
+- [x] **Step 2:** Pure functie `build_contract(model, evidence, topics, repository_of) -> tuple[Contract, ContractCounts]`, met een eigen getypeerde vorm en geen import uit `chunkhound/autodoc`, behalve in de test. `TopicSources.topic` is al de artefactnaam (`commands/code_mapper.py:220–228`).
+- [x] **Step 3:** Weglaatregels in de volgorde van §8; lijsten gesorteerd volgens §7.4.
+- [x] **Step 4:** `repositories` krijgt alvast rijen met `NO_GIT_HEAD` en `remote_url: null`, want de loader vereist ze (`loader.py:142–151`, `:186`). Taak 9 vult ze.
+- [x] **Step 5:** `finish_c4` bouwt het contract buiten de proefrun en geeft het mee als `C4Build.contract`.
+- [x] **Step 6:** Tests, ruff en mypy.
 
 ### Task 9: Repositories en bronlinks (spec §9)
 

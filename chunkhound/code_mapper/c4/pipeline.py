@@ -17,6 +17,12 @@ from chunkhound.code_mapper.c4.assemble import (
     assemble_with_unlinked,
 )
 from chunkhound.code_mapper.c4.classify import Classification, ClassifyItem, classify
+from chunkhound.code_mapper.c4.contract import (
+    ROOT_REPOSITORY,
+    Contract,
+    ContractCounts,
+    build_contract,
+)
 from chunkhound.code_mapper.c4.documented import (
     DocElement,
     DocRelation,
@@ -132,6 +138,8 @@ class C4Build:
     lock: ScopeLock | None
     fallback_count: int
     report_extra: list[str] = field(default_factory=list)
+    contract: Contract | None = None
+    contract_counts: ContractCounts | None = None
 
 
 def _classification_items(draft: C4Draft) -> list[ClassifyItem]:
@@ -742,4 +750,17 @@ async def finish_c4(
         f"{unlinked.no_match} geen treffer, {unlinked.ambiguous} meerdere "
         f"treffers, {unlinked.not_allowed} niet toegestaan",
     ]
-    return C4Build(model, evidence, updated, fallback_count, report_extra)
+    contract, contract_counts = (
+        build_contract(model, evidence, topics, lambda _path: ROOT_REPOSITORY)
+        if kind == "full"
+        else (None, None)
+    )
+    return C4Build(
+        model,
+        evidence,
+        updated,
+        fallback_count,
+        report_extra,
+        contract,
+        contract_counts,
+    )
