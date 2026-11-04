@@ -26,14 +26,15 @@ construct, or a part of the described system itself.
 
 The term is the literal plain name from the fragment: "Astro", not "Astro 7"; one
 name per element, never "A or B". Do not add an ID prefix or normalize it. The
-description is one short sentence in Dutch (Nederlands) saying what the element is
+description is one short sentence in English saying what the element is
 or does, based on the cited text; leave it empty when that text gives none.
 
 Every relation has at least one person or external element as an endpoint. Relation
 endpoints use the literal terms of those elements; for any part of the described
-system, use "{system}". A table or list of services the system supports states a
-relation for each row, cited by that row. Direction follows who calls or uses whom.
-Write new relationship titles in Dutch (Nederlands), starting with a verb.
+system, use "{system}". Every endpoint other than "{system}" appears literally in
+the relation's cited lines. A table or list of services the system supports states
+a relation for each row, cited by that row. Direction follows who calls or uses
+whom. Write new relationship titles in English, starting with a verb.
 
 Every citation is {start_line, end_line, quote}: 1-based inclusive line numbers
 within the same fragment, and an exact nonempty quotation within those lines.

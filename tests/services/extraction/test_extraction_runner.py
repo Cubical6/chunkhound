@@ -186,7 +186,7 @@ async def test_input_refusal_is_fatal_configuration_error(tmp_path, error):
 
     assert raised.value.limit == 1_048_576
     assert raised.value.chars > 0
-    assert "1048576 tekens" in str(raised.value)
+    assert "1048576 characters" in str(raised.value)
     # The wrapped variant also looks transient: refusal must be checked first.
     assert _is_retryable_poi_error(
         RuntimeError("LLM structured completion failed: input_too_large")

@@ -32,7 +32,7 @@ _KINDS = {
 }
 _LEGEND = (
     "C4: Software system / Container / Component; Person / External system. "
-    "Muted: gedocumenteerd. Solid: aangetroffen; dotted: gedocumenteerd. "
+    "Muted: documented. Solid: found; dotted: documented. "
     "Dashed aggregate: inspect individual relationship statuses."
 )
 
@@ -66,7 +66,7 @@ def _label(model: C4Model, source: str, target: str, relations: list[Relation]) 
         right = min(len(titles[1]), 57 - left)
         left = min(len(titles[0]), 57 - right)
         return titles[0][:left] + " · " + titles[1][:right]
-    suffix = f" +{len(titles) - 1} relaties"
+    suffix = f" +{len(titles) - 1} relations"
     return titles[0][: 60 - len(suffix)] + suffix
 
 
@@ -91,7 +91,7 @@ class LikeC4Writer:
         (out_dir / "views.c4").write_text(self._views(model, views), encoding="utf-8")
 
     def _specification(self) -> str:
-        lines = ["specification {", "  tag gedocumenteerd"]
+        lines = ["specification {", "  tag documented"]
         for kind, title in _KINDS.items():
             shape = (
                 "person"
@@ -139,7 +139,7 @@ class LikeC4Writer:
             f"{source['startLine']}-{source['endLine']}"
             for source in sources
         )
-        lines.append(f"  bronnen {_text(readable)}")
+        lines.append(f"  sources {_text(readable)}")
         lines.append(f"  topics {_text(_json(topics))}")
         lines.append("}")
         for source in sources:
@@ -196,12 +196,12 @@ class LikeC4Writer:
 
         def emit(element: SoftwareSystem | Element, indent: str) -> None:
             detail = self._element_detail(element, sources)
-            documented = detail["status"] == Status.GEDOCUMENTEERD.value
+            documented = detail["status"] == Status.DOCUMENTED.value
             lines.append(
                 f"{indent}{self._ids.allocate(element)} = "
                 f"{detail['kind']} {_text(element.name)} {{"
             )
-            props = ["#gedocumenteerd"] if documented else []
+            props = ["#documented"] if documented else []
             props.append(f"description {_text(element.description)}")
             if isinstance(element, Element) and element.technology:
                 props.append(f"technology {_text(element.technology)}")
@@ -239,7 +239,7 @@ class LikeC4Writer:
                 f"{self._ids.fqn(relation.target_id)} {_text(relation.title)} {{"
             )
             props = [f"technology {_text(relation.technology)}"]
-            line = "dotted" if relation.status == Status.GEDOCUMENTEERD else "solid"
+            line = "dotted" if relation.status == Status.DOCUMENTED else "solid"
             props.append(f"style {{ line {line} }}")
             props.extend(self._metadata(relation.id, detail))
             lines.extend("    " + prop for prop in props)
@@ -250,7 +250,7 @@ class LikeC4Writer:
         self, model: C4Model, source: str, target: str, relations: list[Relation]
     ) -> str:
         statuses = {relation.status for relation in relations}
-        line = "dotted" if Status.GEDOCUMENTEERD in statuses else "solid"
+        line = "dotted" if Status.DOCUMENTED in statuses else "solid"
         notation = next(iter(statuses)).value
         if len(statuses) > 1:
             line = "dashed"
@@ -292,9 +292,9 @@ class LikeC4Writer:
         }
         lines = []
         documented = {
-            element.id: _KINDS[element.kind.value] + " — gedocumenteerd"
+            element.id: _KINDS[element.kind.value] + " — documented"
             for element in model.elements
-            if element.status == Status.GEDOCUMENTEERD
+            if element.status == Status.DOCUMENTED
         }
         for element_id in sorted(visible):
             rule = "include " + self._ids.fqn(element_id)

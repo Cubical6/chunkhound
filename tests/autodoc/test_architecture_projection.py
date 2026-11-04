@@ -40,7 +40,7 @@ def test_site_records_use_final_urls_and_exclude_relations(tmp_path: Path) -> No
                 "App",
                 "Runs app",
                 "",
-                Status.AANGETROFFEN,
+                Status.FOUND,
                 [],
                 [],
             ),
@@ -51,7 +51,7 @@ def test_site_records_use_final_urls_and_exclude_relations(tmp_path: Path) -> No
                 "API",
                 "Serves API",
                 "",
-                Status.AANGETROFFEN,
+                Status.FOUND,
                 ["api.py"],
                 [],
             ),
@@ -62,7 +62,7 @@ def test_site_records_use_final_urls_and_exclude_relations(tmp_path: Path) -> No
                 "Reader",
                 "Reads docs",
                 "",
-                Status.GEDOCUMENTEERD,
+                Status.DOCUMENTED,
                 [],
                 [],
             ),
@@ -73,7 +73,7 @@ def test_site_records_use_final_urls_and_exclude_relations(tmp_path: Path) -> No
                 "Provider",
                 "External service",
                 "",
-                Status.GEDOCUMENTEERD,
+                Status.DOCUMENTED,
                 [],
                 [],
             ),
@@ -85,7 +85,7 @@ def test_site_records_use_final_urls_and_exclude_relations(tmp_path: Path) -> No
                 "external",
                 "Calls provider",
                 "",
-                Status.AANGETROFFEN,
+                Status.FOUND,
                 [],
             )
         ],
@@ -119,7 +119,7 @@ def test_site_records_use_final_urls_and_exclude_relations(tmp_path: Path) -> No
         "name": "API",
         "kind": "component",
         "description": "Serves API",
-        "status": "aangetroffen",
+        "status": "found",
         "focusView": "focus_636f6d706f6e656e74",
         "defaultView": None,
     }
@@ -148,7 +148,7 @@ def test_site_records_use_final_urls_and_exclude_relations(tmp_path: Path) -> No
     api = next(r for r in records if r["title"] == "API")
     assert api["description"] == "Serves API"
     assert "component" in api["body"]
-    assert "aangetroffen" in api["body"]
+    assert "found" in api["body"]
 
 
 def test_disabled_site_data_has_no_partial_map() -> None:

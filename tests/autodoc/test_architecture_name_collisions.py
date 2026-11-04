@@ -28,7 +28,7 @@ from chunkhound.autodoc.architecture.views import (
 
 _ARCHIVE = (
     Path(__file__).parents[2]
-    / "chunkhound/autodoc/assets/vendor/likec4/likec4-1.60.0-chunkhound.1.tgz"
+    / "chunkhound/autodoc/assets/vendor/likec4/likec4-1.60.0-chunkhound.2.tgz"
 )
 _NETWORK_FAILURE = re.compile(
     r"\b(ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNREFUSED|ECONNRESET|"
@@ -48,7 +48,7 @@ def _system(name: str) -> SoftwareSystem:
 def _element(
     element_id: str, kind: ElementKind, parent_id: str | None, name: str
 ) -> Element:
-    status = Status.AANGETROFFEN if parent_id else Status.GEDOCUMENTEERD
+    status = Status.FOUND if parent_id else Status.DOCUMENTED
     return Element(
         element_id, kind, parent_id, name, f"{name} description", "", status, [], []
     )
@@ -64,7 +64,7 @@ def _component(element_id: str, parent_id: str, name: str) -> Element:
 
 def _relation(relation_id: str, source_id: str, target_id: str, title: str) -> Relation:
     return Relation(
-        relation_id, source_id, target_id, title, "", Status.AANGETROFFEN, []
+        relation_id, source_id, target_id, title, "", Status.FOUND, []
     )
 
 

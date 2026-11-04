@@ -204,16 +204,16 @@ class _C4Run:
                     out_dir=out_dir, scope_label=self.scope.scope_label
                 )
             except OSError as exc:
-                formatter.warning(f"C4: oude uitvoer niet verwijderd: {exc}")
+                formatter.warning(f"C4: old output not removed: {exc}")
         if self.build.fallback_count:
             formatter.warning(
-                f"C4: {self.build.fallback_count} elementen via terugval "
-                "(niet opgeslagen)"
+                f"C4: {self.build.fallback_count} elements via fallback "
+                "(not stored)"
             )
         if self.build.model.run.fallback_fragments:
             formatter.warning(
                 f"C4: {self.build.model.run.fallback_fragments} "
-                "documentatiefragmenten niet onderzocht"
+                "documentation fragments not examined"
             )
         logger.info(f"C4 LLM calls: {self.llm.calls}")
         for line in self.llm.report_lines():

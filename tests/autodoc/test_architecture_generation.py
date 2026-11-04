@@ -59,7 +59,7 @@ def write_input(root: Path) -> Path:
     )
     (root / "original.md").write_text("# Original title\n\nReadable topic.\n")
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "system": {"id": "system", "name": "Fixture System", "description": "Root"},
         "repositories": [
             {
@@ -87,7 +87,7 @@ def write_input(root: Path) -> Path:
                 "name": "Application",
                 "description": "Runs requests",
                 "technology": "Python",
-                "status": "aangetroffen",
+                "status": "found",
                 "files": ["shared.py"],
                 "sources": ["code"],
             },
@@ -98,7 +98,7 @@ def write_input(root: Path) -> Path:
                 "name": "Request API",
                 "description": "Serves requests",
                 "technology": "Python",
-                "status": "aangetroffen",
+                "status": "found",
                 "files": ["app.py"],
                 "sources": ["code"],
             },
@@ -110,7 +110,7 @@ def write_input(root: Path) -> Path:
                 "target": "api",
                 "title": "Dispatches requests",
                 "technology": "",
-                "status": "aangetroffen",
+                "status": "found",
                 "sources": ["code"],
             }
         ],
@@ -201,7 +201,7 @@ async def test_full_generation_removes_only_owned_architecture_outputs(
         "src/components/ArchitectureMap.tsx",
         "src/components/ArchitectureMiniMap.astro",
         "src/components/ArchitectureMiniMap.tsx",
-        "vendor/likec4/likec4-1.60.0-chunkhound.1.tgz",
+        "vendor/likec4/likec4-1.60.0-chunkhound.2.tgz",
     ):
         assert not (output / path).exists(), path
     assert (

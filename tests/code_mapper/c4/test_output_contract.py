@@ -51,8 +51,8 @@ def sample_pair() -> tuple[C4Model, C4Evidence]:
                     "coverage": {"status": "none", "topics": []},
                 }
                 for id_, kind, name, parent in [
-                    ("systeem:app", "system", "App", None),
-                    ("container:app", "container", "App runtime", "systeem:app"),
+                    ("system:app", "system", "App", None),
+                    ("container:app", "container", "App runtime", "system:app"),
                     ("component:api", "component", "API", "container:app"),
                     ("component:data", "component", "Données", "container:app"),
                 ]
@@ -342,15 +342,15 @@ def test_assembled_elements_state_technology_and_description(tmp_path: Path) -> 
     )
 
     assert {e.id: (e.technology, e.description) for e in elements} == {
-        "systeem:shop": ("", "A shop"),
+        "system:shop": ("", "A shop"),
         container: ("Python, Rust", "A shop"),
         "storage:redis": ("redis", "Cache"),
         "component:app": ("Objective-C, Python, Rust", "Core logic"),
         "component:guide": ("Markdown, YAML", ""),
         "component:blob": ("", ""),
-        "opslag:duckdb": ("duckdb", ""),
-        "opslag:data": ("", ""),
-        "extern:stripe": ("", None),
-        "persoon:user": ("", None),
+        "storage:duckdb": ("duckdb", ""),
+        "storage:data": ("", ""),
+        "external:stripe": ("", None),
+        "person:user": ("", None),
         "container:dashboard": ("", ""),
     }

@@ -133,10 +133,10 @@ def relation_fingerprint(
 def fallback_title(kinds: Iterable[ReferenceKind]) -> str:
     present = set(kinds)
     if "inherit" in present:
-        return "erft van"
+        return "inherits from"
     if "call" in present:
-        return "roept aan"
-    return "importeert"
+        return "calls"
+    return "imports"
 
 
 @dataclass(frozen=True)
@@ -594,7 +594,7 @@ async def merge_container(
     def too_large(aliases: _MergeAliases) -> str:
         prompt = _merge_prompt(aliases, groups, references, None)
         size = measure_request(prompt, schema, ())
-        return f"invoer te groot: {size} tekens, limiet {limit.max_chars}"
+        return f"input too large: {size} characters, limit {limit.max_chars}"
 
     nothing_placed = MergeResult(list(known), [], False)
     aliases = _merge_aliases(pending, known)
@@ -604,7 +604,7 @@ async def merge_container(
         return result
     report = llm.report(
         "merge",
-        f"container {json.dumps(container.id)}: {len(pending)} niet-geclaimde groepen",
+        f"container {json.dumps(container.id)}: {len(pending)} unclaimed groups",
     )
 
     async def call_once(
@@ -640,10 +640,10 @@ async def merge_container(
             if not leftover:
                 return value
             report.mark_fallback()
-            return _unplaced(value, leftover, "antwoord onvolledig")
+            return _unplaced(value, leftover, "incomplete answer")
 
         def default() -> MergeResult:
-            reason = report.outcomes[-1].removesuffix(", terugval")
+            reason = report.outcomes[-1].removesuffix(", fallback")
             return _unplaced(placed, waiting, reason)
 
         retries.defer(f"merge:{container.id}", attempt, default, apply, report=report)
@@ -733,12 +733,12 @@ async def title_relations(
     report = llm.report(
         "titles",
         f"container {json.dumps(container)}: "
-        f"{len(pending)} nieuwe of gewijzigde relaties",
+        f"{len(pending)} new or changed relationships",
     )
     refused = prompt is None
     if prompt is None:
         size = measure_request(prompts[-1], schema, ())
-        report.record(f"invoer te groot: {size} tekens, limiet {limit.max_chars}")
+        report.record(f"input too large: {size} characters, limit {limit.max_chars}")
 
     async def attempt() -> dict[str, str]:
         nonlocal refused

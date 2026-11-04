@@ -89,9 +89,9 @@ export default function ArchitectureMap({ data }: { data: ArchitectureData }): R
         style={{ width: "100%", height: "70vh", minHeight: "32rem" }}
       />
       <p className="architecture-map-legend">
-        C4: software system → container → component; people and external systems stay outside. Muted: gedocumenteerd.
-        Solid: aangetroffen; dotted: gedocumenteerd. Dashed aggregate: inspect each relationship’s own status and
-        sources.
+        C4: software system → container → component; people and external systems
+        stay outside. Muted: documented. Solid: found; dotted: documented.
+        Dashed aggregate: inspect each relationship’s own status and sources.
       </p>
     </section>
   );

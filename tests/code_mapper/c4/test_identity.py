@@ -82,14 +82,14 @@ def test_component_identity_majority() -> None:
 @pytest.mark.parametrize(
     ("kind", "term", "expected"),
     [
-        ("system", "Shop", "systeem:shop"),
+        ("system", "Shop", "system:shop"),
         ("container", "Order API", "container:order-api"),
-        ("storage", "DATA_DIR", "opslag:data-dir"),
-        ("external", "acme/pay", "extern:acme-pay"),
+        ("storage", "DATA_DIR", "storage:data-dir"),
+        ("external", "acme/pay", "external:acme-pay"),
         (
             "person",
             "Ontwikkelaar met AI-assistent",
-            "persoon:ontwikkelaar-met-ai-assistent",
+            "person:ontwikkelaar-met-ai-assistent",
         ),
         ("component", " Café / Orders ", "component:caf-orders"),
     ],

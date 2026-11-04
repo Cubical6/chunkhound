@@ -34,7 +34,7 @@ from chunkhound.code_mapper.c4.model import (
 from chunkhound.code_mapper.orchestrator import _get_head_sha
 from chunkhound.utils.git_safe import GitCommandError, run_git
 
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2
 NO_GIT_HEAD = "NO_GIT_HEAD"
 ROOT_REPOSITORY = "."
 _MAX_LABEL_LENGTH = 60
@@ -42,7 +42,6 @@ _MAX_LABEL_LENGTH = 60
 ContractElementKind: TypeAlias = Literal[
     "container", "component", "person", "externalSystem"
 ]
-ContractStatus: TypeAlias = Literal["aangetroffen", "gedocumenteerd"]
 ContractSourceKind: TypeAlias = Literal["code", "config", "doc"]
 
 _ELEMENT_KINDS: dict[ElementKind, ContractElementKind] = {
@@ -51,10 +50,6 @@ _ELEMENT_KINDS: dict[ElementKind, ContractElementKind] = {
     "component": "component",
     "external": "externalSystem",
     "person": "person",
-}
-_STATUSES: dict[Status, ContractStatus] = {
-    "found": "aangetroffen",
-    "documented": "gedocumenteerd",
 }
 # A "topic" citation has no contract kind, so it never becomes a source.
 _SOURCE_KINDS: dict[SourceKind, ContractSourceKind] = {
@@ -86,7 +81,7 @@ class ContractElement:
     parent: str | None
     name: str
     technology: str
-    status: ContractStatus
+    status: Status
     files: list[str]
     sources: list[str]
     description: str = ""
@@ -99,7 +94,7 @@ class ContractRelation:
     target: str
     title: str
     technology: str
-    status: ContractStatus
+    status: Status
     sources: list[str]
 
 
@@ -321,7 +316,7 @@ def _element(
         name=element.name,
         description=element.description or "",
         technology=element.technology,
-        status=_STATUSES[element.status],
+        status=element.status,
         files=files,
         sources=sorted(sources),
     )
@@ -334,7 +329,7 @@ def _relation(relation: Relation, sources: Iterable[str]) -> ContractRelation:
         target=relation.to_id,
         title=relation.title,
         technology="",
-        status=_STATUSES[relation.status],
+        status=relation.status,
         sources=sorted(sources),
     )
 
@@ -529,7 +524,7 @@ def _git(args: Sequence[str], directory: Path) -> str:
     process = run_git(args, cwd=directory)
     if process.returncode != 0:
         raise GitCommandError(
-            f"git {args[0]} mislukt", process.returncode, process.stderr
+            f"git {args[0]} failed", process.returncode, process.stderr
         )
     return process.stdout or ""
 
@@ -554,8 +549,8 @@ def _without_credentials(url: str) -> str:
 
 def _blocked_files(paths: Iterable[str], state: str) -> _NoSourceLinksError:
     ordered = sorted(paths)
-    noun = "geciteerd bestand" if len(ordered) == 1 else "geciteerde bestanden"
-    return _NoSourceLinksError(f"{len(ordered)} {noun} {state}, eerste: {ordered[0]}")
+    noun = "cited file" if len(ordered) == 1 else "cited files"
+    return _NoSourceLinksError(f"{len(ordered)} {noun} {state}, first: {ordered[0]}")
 
 
 def _checked_remote_url(
@@ -564,24 +559,24 @@ def _checked_remote_url(
     """The URL of `origin` if every link condition holds; `run_head` is only for `.`."""
     toplevel = _git(["rev-parse", "--show-toplevel"], directory).rstrip("\n")
     if Path(toplevel).resolve() != directory.resolve():
-        raise _NoSourceLinksError(f"de wortel van deze repository is {toplevel}")
+        raise _NoSourceLinksError(f"the root of this repository is {toplevel}")
     if run_head is not None and _get_head_sha(directory) != run_head:
-        raise _NoSourceLinksError("HEAD is tijdens de run veranderd")
+        raise _NoSourceLinksError("HEAD changed during the run")
     if commit == NO_GIT_HEAD:
-        raise _NoSourceLinksError("de repository heeft geen commit")
+        raise _NoSourceLinksError("the repository has no commit")
     url = _git(["remote", "get-url", "origin"], directory).strip()
     contains = ["branch", "-r", "--contains", commit, "--list", "origin/*"]
     if not _git(contains, directory).strip():
-        raise _NoSourceLinksError(f"commit {commit} staat niet op origin")
+        raise _NoSourceLinksError(f"commit {commit} is not on origin")
     untracked = cited - set(_git(["ls-files", "-z"], directory).split("\0"))
     if untracked:
-        raise _blocked_files(untracked, "niet gevolgd")
+        raise _blocked_files(untracked, "untracked")
     # Each entry is two status characters, a space and the path; never strip the
     # output, because a change in the worktree alone starts with a space.
     status = _git(["status", "--porcelain", "-z", "--no-renames"], directory)
     changed = cited.intersection(entry[3:] for entry in status.split("\0"))
     if changed:
-        raise _blocked_files(changed, "gewijzigd")
+        raise _blocked_files(changed, "modified")
     return _without_credentials(url)
 
 

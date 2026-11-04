@@ -5,17 +5,17 @@
     "version": "1.60.0"
   },
   "fork": {
-    "commit": "bb2398b72db19d034d604a6571a4021a1e9a3ca0"
+    "commit": "5fac2d6730df90b139eba6a7c682eb0ab5e6aea6"
   },
   "patch": {
     "file": "chunkhound.patch",
-    "sha256": "5f6bc59c5962d8a43b5554a464569b2970114722b0862bce2f4d7a4245363101"
+    "sha256": "9b5434403b6d87b9975f71615ad2749a2fd4105cb4d8571f2f9c10cb19f677cb"
   },
   "artifact": {
-    "file": "likec4-1.60.0-chunkhound.1.tgz",
+    "file": "likec4-1.60.0-chunkhound.2.tgz",
     "package": "likec4",
-    "version": "1.60.0-chunkhound.1",
-    "sha256": "f2e53729c31faf5f04f10e043d451dccdee5713b8ad2c1013a275d60d3d37a78"
+    "version": "1.60.0-chunkhound.2",
+    "sha256": "050f29c49fc2d1d5c34dc32d8fa1b0f1edb5e327975a4aa66d22d1755012dca0"
   },
   "license": {
     "file": "LICENSE",
@@ -36,7 +36,7 @@
   "reconstruction": {
     "base": "upstream.commit",
     "patch": "chunkhound.patch",
-    "verified": "Committed fork build/pack and independent clean upstream plus full patch, frozen install, serialized build/pack; both installed archives passed computed and layouted exact-selection/original-endpoint contracts, all six native hierarchy directions with frame-boundary geometry and clickable status/source details plus Focus navigation, direct-plus-derived and marked-plus-ordinary aggregation, hostile text safety, local fonts, and valid/invalid strict Vite plugin builds.",
+    "verified": "For 1.60.0-chunkhound.2 (only the detail-panel label 'bronnen' became 'sources', the hierarchy fixture statuses became 'found'/'documented', and the package version was bumped): the patch applies cleanly to a fresh checkout of the pinned upstream commit and reproduces the committed fork tree; frozen install, serialized build and pack succeeded; the language-server hierarchy/relation and core boundary/clean-connections/multiple-relationships specs passed; the archive contains the 'sources' labels and no 'bronnen'; in a clean npm consumer it validated and built a small model and imported the likec4, likec4/react and likec4/vite-plugin exports. The browser, hierarchy-geometry and strict-plugin checks that passed for chunkhound.1 were not repeated.",
     "byteIdenticalArchiveRequired": false
   }
 }

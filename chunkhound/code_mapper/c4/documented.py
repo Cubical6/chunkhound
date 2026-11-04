@@ -51,7 +51,7 @@ from chunkhound.services.extraction.sources import SourceVersion, read_source
 from chunkhound.services.extraction.store import ExtractionStore
 
 EXTRACTION_CACHE = Path(".chunkhound/extraction")
-_VALIDATOR_VERSION = 1
+_VALIDATOR_VERSION = 2
 # History, not architecture: compared with the start of the lowercase file name.
 _HISTORY_DOCUMENTS = (
     "changelog",
@@ -277,6 +277,7 @@ class _DocumentedGoal:
     line_numbering: Literal["relative", "absolute"] = "relative"
 
     def __init__(self, system_name: str) -> None:
+        self._system = system_name
         self._instructions = load_c4_prompt("documented").replace(
             "{system}", system_name
         )
@@ -314,6 +315,9 @@ class _DocumentedGoal:
                 verified=True,
             )
 
+        def stated(citation: Citation, term: str) -> bool:
+            return _quote_in_lines(lines, citation.start_line, citation.end_line, term)
+
         elements = tuple(
             (
                 DocElement(item.kind, item.term, citation, item.description),
@@ -321,10 +325,10 @@ class _DocumentedGoal:
             )
             for item in part.elements
             if (citation := cited(item.citation)) is not None
-            and _quote_in_lines(
-                lines, citation.start_line, citation.end_line, item.term
-            )
+            and stated(citation, item.term)
         )
+        # The prompt names the system itself for its internal parts; any other
+        # endpoint must be written in the cited lines, like an element term.
         relations = tuple(
             (
                 DocRelation(item.from_term, item.to_term, item.title, citation),
@@ -332,6 +336,10 @@ class _DocumentedGoal:
             )
             for item in part.relations
             if (citation := cited(item.citation)) is not None
+            and all(
+                term == self._system or stated(citation, term)
+                for term in (item.from_term, item.to_term)
+            )
         )
         if (part.elements or part.relations) and not (elements or relations):
             return Rejected("no proposed item has a literal quote")
@@ -543,9 +551,9 @@ async def extract_documented(
         return _previous_outcome(locked, hashes, project_root, fallback=False)
 
     if locked is None:
-        reason = "geen opgeslagen uitkomst"
+        reason = "no stored outcome"
     elif locked.hashes == hashes:
-        reason = "documentatiestap gewijzigd"
+        reason = "documentation step changed"
     else:
         added = len(hashes.keys() - locked.hashes.keys())
         removed = len(locked.hashes.keys() - hashes.keys())
@@ -553,7 +561,7 @@ async def extract_documented(
             hashes[file] != locked.hashes[file]
             for file in hashes.keys() & locked.hashes.keys()
         )
-        reason = f"documentatieset gewijzigd (+{added}/-{removed}/~{changed})"
+        reason = f"documentation set changed (+{added}/-{removed}/~{changed})"
     report = llm.report("documented", reason)
 
     limit = llm.input_limit("utility")
@@ -573,11 +581,11 @@ async def extract_documented(
 
     def on_attempt(record: AttemptRecord) -> None:
         if record.outcome == "accepted":
-            report.record("geaccepteerd")
+            report.record("accepted")
         elif record.outcome == "transient":
-            report.record("tijdelijke fout")
+            report.record("transient error")
         else:
-            report.record(f"afgekeurd ({public_rule(record.rule)})")
+            report.record(f"rejected ({public_rule(record.rule)})")
 
     async def extract(
         subset: Sequence[Fragment],
@@ -667,8 +675,8 @@ def report_lines(docs: DocumentedOutcome) -> list[str]:
         return []
     failed = len(docs.fallback_fragments)
     return [
-        f"C4 documented-bundels: {docs.counts.reused} hergebruikt, "
-        f"{docs.counts.new} nieuw, {docs.counts.split} gesplitst, "
-        f"{docs.fallback_bundles} teruggevallen; fragmenten "
-        f"{docs.fragment_total - failed} gedekt, {failed} teruggevallen"
+        f"C4 documented bundles: {docs.counts.reused} reused, "
+        f"{docs.counts.new} new, {docs.counts.split} split, "
+        f"{docs.fallback_bundles} fell back; fragments "
+        f"{docs.fragment_total - failed} covered, {failed} fell back"
     ]

@@ -115,7 +115,7 @@ def pair(
             "run": {
                 "id": "",
                 "kind": "full",
-                "schema_version": 4,
+                "schema_version": 5,
                 "head_sha": "abc",
                 "scope": "/",
                 "fallback_count": 0,
@@ -129,7 +129,7 @@ def pair(
     )
     evidence = C4Evidence.model_validate(
         {
-            "schema_version": 4,
+            "schema_version": 5,
             "run_id": "",
             "references": [],
             "citations": list(citations),
@@ -281,7 +281,7 @@ def test_elements_and_relations_translate_to_contract_terms() -> None:
 
     document = build_contract(model, evidence, None, root_repository)[0].to_dict()
 
-    assert document["schema_version"] == 1
+    assert document["schema_version"] == 2
     assert document["system"] == {
         "id": "system:app",
         "name": "app",
@@ -301,7 +301,7 @@ def test_elements_and_relations_translate_to_contract_terms() -> None:
             "name": "api",
             "description": "Serves requests.",
             "technology": "Python",
-            "status": "aangetroffen",
+            "status": "found",
             "files": ["pyproject.toml"],
             "sources": [("pyproject.toml", "code")],
         },
@@ -312,7 +312,7 @@ def test_elements_and_relations_translate_to_contract_terms() -> None:
             "name": "orders",
             "description": "Handles orders.",
             "technology": "Python",
-            "status": "aangetroffen",
+            "status": "found",
             "files": ["shop/orders.py"],
             "sources": [("shop/orders.py", "code")],
         },
@@ -322,7 +322,7 @@ def test_elements_and_relations_translate_to_contract_terms() -> None:
             "parent": "system:app",
             "name": "db",
             "technology": "DuckDB",
-            "status": "gedocumenteerd",
+            "status": "documented",
             "files": [],
             "sources": [("compose.yaml", "config")],
         },
@@ -332,7 +332,7 @@ def test_elements_and_relations_translate_to_contract_terms() -> None:
             "parent": None,
             "name": "stripe",
             "technology": "",
-            "status": "aangetroffen",
+            "status": "found",
             "files": [],
             "sources": [("shop/orders.py", "code")],
         },
@@ -342,7 +342,7 @@ def test_elements_and_relations_translate_to_contract_terms() -> None:
             "parent": None,
             "name": "admin",
             "technology": "",
-            "status": "gedocumenteerd",
+            "status": "documented",
             "files": [],
             "sources": [("README.md", "doc")],
         },
@@ -352,8 +352,8 @@ def test_elements_and_relations_translate_to_contract_terms() -> None:
     assert relations["component:orders->storage:db"]["target"] == "storage:db"
     assert relations["component:orders->storage:db"]["title"] == "writes"
     assert relations["component:orders->storage:db"]["technology"] == ""
-    assert relations["component:orders->storage:db"]["status"] == "aangetroffen"
-    assert relations["person:admin->system:app"]["status"] == "gedocumenteerd"
+    assert relations["component:orders->storage:db"]["status"] == "found"
+    assert relations["person:admin->system:app"]["status"] == "documented"
     for rows in (document["elements"], document["relations"], document["sources"]):
         assert [row["id"] for row in rows] == sorted(row["id"] for row in rows)
 

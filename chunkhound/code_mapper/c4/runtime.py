@@ -479,7 +479,7 @@ def scan_runtime(
         )
     container_of = _bind_files(file_set, containers)
     return RuntimeScan(
-        f"systeem:{_slug(system_name)}",
+        f"system:{_slug(system_name)}",
         system_name,
         containers,
         uncertain,

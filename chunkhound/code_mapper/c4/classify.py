@@ -199,7 +199,7 @@ async def classify(
         else:
             pending.append(item)
     if pending:
-        report = llm.report("classify", f"{len(pending)} nieuwe kandidaten")
+        report = llm.report("classify", f"{len(pending)} new candidates")
         try:
             result.update(await _vote(pending, llm, seed, report))
         except TransientStepError:

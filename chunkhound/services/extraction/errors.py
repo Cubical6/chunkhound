@@ -23,8 +23,8 @@ class InputRejectedError(RuntimeError):
 
     def __init__(self, provider: str, chars: int, limit: int) -> None:
         super().__init__(
-            f"Invoer geweigerd door provider {provider}: aanvraag {chars} tekens, "
-            f"opgegeven grens {limit} tekens. Pas de invoerlimiet aan."
+            f"Input refused by provider {provider}: request of {chars} characters, "
+            f"declared limit {limit} characters. Adjust the input limit."
         )
         self.provider = provider
         self.chars = chars

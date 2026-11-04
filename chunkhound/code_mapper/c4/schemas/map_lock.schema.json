@@ -375,7 +375,7 @@
       "type": "object"
     },
     "version": {
-      "default": 4,
+      "default": 5,
       "title": "Version",
       "type": "integer"
     }

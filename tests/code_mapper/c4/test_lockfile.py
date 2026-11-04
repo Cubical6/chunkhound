@@ -20,7 +20,7 @@ def sample_lock(base_sha: str = "abc") -> ScopeLock:
     return ScopeLock.model_validate(
         {
             "base_sha": base_sha,
-            "system": "systeem:app",
+            "system": "system:app",
             "containers": {"pyproject.toml": "container:app"},
             "direct_groups": {"container:app": ["container:app/."]},
             "transition": None,
@@ -35,7 +35,7 @@ def sample_lock(base_sha: str = "abc") -> ScopeLock:
             },
             "tombstones": {"component:old": "abc"},
             "relations": {
-                "component:api->extern:service": {
+                "component:api->external:service": {
                     "title": "Calls",
                     "fingerprint": "123",
                 }
@@ -79,7 +79,7 @@ def test_lock_keeps_direct_groups_without_components(tmp_path: Path) -> None:
     lock.components = {}
     path = write_scope_lock(tmp_path, "/", lock)
     raw = json.loads(path.read_text())
-    assert raw["version"] == 4
+    assert raw["version"] == 5
     assert raw["scopes"]["/"]["direct_groups"] == {"container:app": ["container:app/."]}
     assert not {"tree_spec", "group_membership"}.intersection(raw["scopes"]["/"])
     restored = read_scope_lock(tmp_path, "/")
@@ -98,6 +98,8 @@ def test_lock_keeps_direct_groups_without_components(tmp_path: Path) -> None:
                 "scopes": {"/": {"tree_spec": {}, "group_membership": {}}},
             }
         ),
+        # Version 4 locked Dutch documentation outcomes and statuses.
+        '{"version": 4, "scopes": {"/": {"tree_spec": {}}}}',
         '{"version": 99, "scopes": {}}',
         '{"scopes": {}}',
         "{}",
@@ -106,7 +108,7 @@ def test_lock_keeps_direct_groups_without_components(tmp_path: Path) -> None:
         '"version"',
     ],
 )
-def test_v3_lock_gives_clear_message(tmp_path: Path, content: str) -> None:
+def test_older_lock_gives_clear_message(tmp_path: Path, content: str) -> None:
     path = tmp_path / LOCK_RELATIVE_PATH
     path.parent.mkdir(parents=True)
     path.write_text(content)
@@ -142,8 +144,8 @@ def test_lock_sections_are_independent_per_scope(tmp_path: Path) -> None:
         "not JSON",
         '{"version": 1, "scopes": {"/": {}}}',
         '{"version": 99, "scopes": {}}',
-        '{"version": 4, "scopes": {"/": {}}}',
-        '{"version": 4, "scopes": {"/": {"tree_spec": {}}}}',
+        '{"version": 5, "scopes": {"/": {}}}',
+        '{"version": 5, "scopes": {"/": {"tree_spec": {}}}}',
     ],
 )
 def test_corrupt_lockfile_is_reported_not_overwritten(

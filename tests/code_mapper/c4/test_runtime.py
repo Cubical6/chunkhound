@@ -20,7 +20,7 @@ def test_container_boundaries(fixture_repo: Path) -> None:
         locked_containers={},
         tombstones={},
     )
-    assert (scan.system_id, scan.system_name) == ("systeem:shop", "shop")
+    assert (scan.system_id, scan.system_name) == ("system:shop", "shop")
     assert {c.id for c in scan.containers} == {
         "container:shop",
         "container:web",
@@ -104,7 +104,7 @@ def test_scope_without_manifest_or_git(tmp_path: Path) -> None:
         locked_containers={},
         tombstones={},
     )
-    assert (scan.system_id, scan.system_name) == ("systeem:plain-app", "Plain App")
+    assert (scan.system_id, scan.system_name) == ("system:plain-app", "Plain App")
     assert len(scan.containers) == 1
     container = scan.containers[0]
     assert container.id == "container:plain-app"
@@ -157,7 +157,7 @@ def test_explicit_startpoints_classification_and_storage_types(tmp_path: Path) -
         tombstones={},
     )
     scan = scan_runtime(**kwargs)
-    assert scan.system_id == "systeem:workspace"
+    assert scan.system_id == "system:workspace"
     assert {c.id for c in scan.containers} == {
         "container:worker",
         "container:tool",
@@ -213,7 +213,7 @@ def test_system_name_prefers_selected_root_container(tmp_path: Path) -> None:
     scan = _scan_sources(
         tmp_path, {"Cargo.toml": _RUST_LIB, "pyproject.toml": _PYTHON_APP}
     )
-    assert (scan.system_id, scan.system_name) == ("systeem:chunkhound", "chunkhound")
+    assert (scan.system_id, scan.system_name) == ("system:chunkhound", "chunkhound")
     assert [c.name for c in scan.containers] == ["chunkhound"]
 
 

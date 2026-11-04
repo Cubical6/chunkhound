@@ -12,11 +12,11 @@ from chunkhound.utils.text import slugify_kebab
 
 PREFIXES: Mapping[ElementKind, str] = MappingProxyType(
     {
-        "system": "systeem:",
+        "system": "system:",
         "container": "container:",
-        "storage": "opslag:",
-        "external": "extern:",
-        "person": "persoon:",
+        "storage": "storage:",
+        "external": "external:",
+        "person": "person:",
         "component": "component:",
     }
 )

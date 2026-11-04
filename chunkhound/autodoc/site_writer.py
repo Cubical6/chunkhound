@@ -54,7 +54,7 @@ _MAP_ASSETS = (
     "src/components/ArchitectureMiniMap.astro",
     "src/components/ArchitectureMiniMap.tsx",
 )
-_MAP_ARCHIVE = "vendor/likec4/likec4-1.60.0-chunkhound.1.tgz"
+_MAP_ARCHIVE = "vendor/likec4/likec4-1.60.0-chunkhound.2.tgz"
 _MAP_DSL = tuple(f"likec4/{name}.c4" for name in ("specification", "model", "views"))
 
 

@@ -62,31 +62,31 @@ class StepReport:
     @contextmanager
     def attempt(self) -> Iterator[None]:
         index = len(self.outcomes)
-        self.outcomes.append("bezig")
+        self.outcomes.append("running")
         try:
             yield
         except AnswerRejectedError as exc:
-            self.outcomes[index] = f"afgekeurd ({rejection_rule(exc)})"
+            self.outcomes[index] = f"rejected ({rejection_rule(exc)})"
             raise
         except TransientStepError:
-            self.outcomes[index] = "tijdelijke fout"
+            self.outcomes[index] = "transient error"
             raise
         except ProviderInputRefusedError:
-            self.outcomes[index] = "invoer geweigerd"
+            self.outcomes[index] = "input refused"
             raise
         except Exception:
-            self.outcomes[index] = "fout"
+            self.outcomes[index] = "error"
             raise
         else:
-            self.outcomes[index] = "geaccepteerd"
+            self.outcomes[index] = "accepted"
 
     def record(self, outcome: str) -> None:
         """Record one finished call whose outcome was decided elsewhere."""
         self.outcomes.append(outcome)
 
     def mark_fallback(self) -> None:
-        if self.outcomes and not self.outcomes[-1].endswith(", terugval"):
-            self.outcomes[-1] += ", terugval"
+        if self.outcomes and not self.outcomes[-1].endswith(", fallback"):
+            self.outcomes[-1] += ", fallback"
 
 
 class C4Llm:
@@ -123,7 +123,7 @@ class C4Llm:
                 )
                 for report in reports
             )
-            yield f"C4 {step}: {count} pogingen" + (f"; {details}" if details else "")
+            yield f"C4 {step}: {count} attempts" + (f"; {details}" if details else "")
 
     @property
     def trial(self) -> bool:

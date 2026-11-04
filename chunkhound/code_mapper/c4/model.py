@@ -6,7 +6,7 @@ from typing import Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 ElementKind: TypeAlias = Literal[
     "system", "container", "storage", "component", "external", "person"

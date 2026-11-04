@@ -325,7 +325,7 @@ async def test_answer_placing_nothing_is_rejected_and_retried_once(
         assert result.components == result.direct_groups == []
         assert result.pending_groups == [g.id for g in GROUPS]
         assert result.fallback
-        assert result.failure_reason == "afgekeurd (answer places no group)"
+        assert result.failure_reason == "rejected (answer places no group)"
 
 
 @pytest.mark.parametrize(
@@ -351,7 +351,7 @@ async def test_truncated_answer_does_not_end_the_run(
     assert result.fallback is not recovers
     if not recovers:
         assert result.pending_groups == [g.id for g in GROUPS]
-        assert result.failure_reason == "afgekeurd (invalid answer schema)"
+        assert result.failure_reason == "rejected (invalid answer schema)"
 
 
 @pytest.mark.parametrize(
@@ -373,9 +373,9 @@ async def test_input_refusal_goes_to_fallback_without_retry(
     assert result.fallback
     assert result.components == result.direct_groups == []
     assert result.pending_groups == [g.id for g in GROUPS]
-    assert result.failure_reason == "invoer geweigerd"
+    assert result.failure_reason == "input refused"
     report = "\n".join(llm.report_lines())
-    assert "invoer geweigerd, terugval" in report
+    assert "input refused, fallback" in report
     assert "secret" not in report
 
     # Refused on the narrow retry: what the first call placed stays placed.
@@ -388,18 +388,18 @@ async def test_input_refusal_goes_to_fallback_without_retry(
     assert result.fallback
     assert result.direct_groups == [GROUPS[0].id]
     assert result.pending_groups == [GROUPS[1].id, GROUPS[2].id]
-    assert result.failure_reason == "invoer geweigerd"
+    assert result.failure_reason == "input refused"
 
 
 @pytest.mark.parametrize(
     ("responses", "placed", "reason"),
     [
-        ((place_first, place_first), 2, "antwoord onvolledig"),
-        ((TimeoutError("busy"), place_first), 1, "antwoord onvolledig"),
-        ((answer(), place_first), 1, "antwoord onvolledig"),
-        ((place_first, TimeoutError("busy")), 1, "tijdelijke fout"),
-        ((place_first, answer()), 1, "afgekeurd (answer places no group)"),
-        ((TimeoutError("busy"), TimeoutError("busy")), 0, "tijdelijke fout"),
+        ((place_first, place_first), 2, "incomplete answer"),
+        ((TimeoutError("busy"), place_first), 1, "incomplete answer"),
+        ((answer(), place_first), 1, "incomplete answer"),
+        ((place_first, TimeoutError("busy")), 1, "transient error"),
+        ((place_first, answer()), 1, "rejected (answer places no group)"),
+        ((TimeoutError("busy"), TimeoutError("busy")), 0, "transient error"),
     ],
 )
 async def test_at_most_two_merge_calls_per_container(
@@ -456,7 +456,7 @@ async def test_narrow_retry_that_does_not_fit_makes_no_call(c4_llm_manager, scri
         ("Orders", (GROUPS[0].id,))
     ]
     assert result.pending_groups == [GROUPS[1].id, GROUPS[2].id]
-    assert result.failure_reason.startswith("invoer te groot")
+    assert result.failure_reason.startswith("input too large")
     assert str(limit) in result.failure_reason
 
 
@@ -511,7 +511,7 @@ async def test_merge_fallback_leaves_groups_pending(c4_llm_manager, scripted):
     ]
     assert result.direct_groups == []
     assert result.pending_groups == [GROUPS[1].id, GROUPS[2].id]
-    assert result.failure_reason == "tijdelijke fout"
+    assert result.failure_reason == "transient error"
 
 
 async def test_merge_trial_has_no_calls_or_deferred_work():
@@ -687,9 +687,9 @@ async def test_fatal_merge_error_propagates(c4_llm_manager, scripted):
 @pytest.mark.parametrize(
     ("kinds", "title"),
     [
-        ({"import"}, "importeert"),
-        ({"call", "import"}, "roept aan"),
-        ({"inherit", "call", "import"}, "erft van"),
+        ({"import"}, "imports"),
+        ({"call", "import"}, "calls"),
+        ({"inherit", "call", "import"}, "inherits from"),
     ],
 )
 def test_fallback_titles(kinds, title):
@@ -779,7 +779,7 @@ async def test_titles_prompt_too_large_or_refused_falls_back_and_goes_on(
         container=CONTAINER.id, pending=pending, llm=llm, retries=queue
     )
     assert await queue.drain() == 1
-    assert result == {"fp": "roept aan"}
+    assert result == {"fp": "calls"}
     assert llm.calls == 1
 
     # Too large even without targets: no call at all, with the reason in the report.
@@ -791,9 +791,9 @@ async def test_titles_prompt_too_large_or_refused_falls_back_and_goes_on(
         container=CONTAINER.id, pending=pending, llm=llm, retries=queue
     )
     assert await queue.drain() == 1
-    assert result == {"fp": "roept aan"}
+    assert result == {"fp": "calls"}
     assert llm.calls == 1
-    assert "invoer te groot" in "\n".join(llm.report_lines())
+    assert "input too large" in "\n".join(llm.report_lines())
 
 
 async def test_titles_timeout_fallback_and_trial(c4_llm_manager, scripted):
@@ -807,7 +807,7 @@ async def test_titles_timeout_fallback_and_trial(c4_llm_manager, scripted):
         retries=queue,
     )
     assert await queue.drain() == 1
-    assert result == {"fp": "erft van"}
+    assert result == {"fp": "inherits from"}
     trial_queue = RetryQueue()
     assert (
         await title_relations(
@@ -832,7 +832,7 @@ async def test_merge_attaches_new_group_to_existing_component(c4_llm_manager, sc
     scripted.answers["merge"] = answer(
         [component("Orders", ["G1"])],
         ["G2"],
-        [{"from": "component:E1", "to": "container", "title": "importeert"}],
+        [{"from": "component:E1", "to": "container", "title": "imports"}],
     )
     result = await merge_container(
         container=CONTAINER,
@@ -850,7 +850,7 @@ async def test_merge_attaches_new_group_to_existing_component(c4_llm_manager, sc
     assert merged.key == "component:orders"
     assert merged.groups == (GROUPS[0].id, GROUPS[1].id)
     assert merged.description == "Keep this description"
-    assert result.titles == {("component:orders", CONTAINER.id): "importeert"}
+    assert result.titles == {("component:orders", CONTAINER.id): "imports"}
 
 
 @pytest.mark.parametrize("mode", ["reverse", "self", "blank", "duplicate"])

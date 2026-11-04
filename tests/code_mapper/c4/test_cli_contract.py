@@ -326,7 +326,9 @@ def c4_report(output):
     return [
         line.removeprefix("[INFO] ")
         for line in output.splitlines()
-        if line.startswith(("[INFO] C4-bron", "[INFO] C4-merge", "[INFO] C4-contract"))
+        if line.startswith(
+            ("[INFO] C4-source", "[INFO] C4-merge", "[INFO] C4-contract")
+        )
     ]
 
 
@@ -340,29 +342,25 @@ async def test_report_lines(cli, capsys):
     )
     await command.code_mapper_command(parse(cli.repo, cli.out), config)
     head = pair(cli.out)[0].run.head_sha
-    source = (
-        "C4-bron: 14 bestanden geanalyseerd, 1 uitgesloten als testcode, "
-        "1 door c4.exclude"
-    )
+    source = "C4-source: 14 files analyzed, 1 excluded as test code, 1 by c4.exclude"
     contract = [
-        "C4-contract: 12 elementen, 1 relaties, 21 bronnen, 0 labels, 2 topics",
-        "C4-contract weggelaten: 0 componenten zonder container, 0 elementen zonder "
-        "bron, 0 componenten zonder geldige container, 0 relaties zonder eindpunt, "
-        "0 relaties zonder bron, 0 labels, 0 relaties binnen een container, "
-        "0 overbodige relaties van directe bestanden",
-        "C4-contract zonder relatie weggelaten: 1 externe systemen (Stripe), "
-        "1 personen (beheerder)",
-        "C4-contract onvolledig: 1 zonder technologie, 6 zonder omschrijving, "
-        "0 relaties tussen containers zonder protocol",
-        f"C4-contract repository .: geen bronlinks (commit {head} staat niet op "
-        "origin)",
+        "C4-contract: 12 elements, 1 relationships, 21 sources, 0 labels, 2 topics",
+        "C4-contract omitted: 0 components without container, 0 elements without "
+        "source, 0 components without valid container, 0 relationships without "
+        "endpoint, 0 relationships without source, 0 labels, 0 relationships "
+        "inside a container, 0 redundant relationships from direct files",
+        "C4-contract omitted without relationship: 1 external systems (Stripe), "
+        "1 people (beheerder)",
+        "C4-contract incomplete: 1 without technology, 6 without description, "
+        "0 relationships between containers without protocol",
+        f"C4-contract repository .: no source links (commit {head} is not on origin)",
     ]
     assert c4_report(capsys.readouterr().out) == [
         source,
-        "C4-merge container:acme-admin: 2 bouwstenen, 2 geplaatst, "
-        "0 plaatsingen verwijderd",
-        "C4-merge container:shop: 3 bouwstenen, 3 geplaatst, 0 plaatsingen verwijderd",
-        "C4-merge container:web: 2 bouwstenen, 2 geplaatst, 0 plaatsingen verwijderd",
+        "C4-merge container:acme-admin: 2 building blocks, 2 placed, "
+        "0 placements removed",
+        "C4-merge container:shop: 3 building blocks, 3 placed, 0 placements removed",
+        "C4-merge container:web: 2 building blocks, 2 placed, 0 placements removed",
         *contract,
     ]
 
@@ -376,7 +374,7 @@ async def test_report_lines(cli, capsys):
     await command.code_mapper_command(parse(cli.repo, cli.out), config)
     assert c4_report(capsys.readouterr().out) == [
         source,
-        "C4-merge: override voor onbekende groep genegeerd: container:shop/gone",
+        "C4-merge: override for unknown group ignored: container:shop/gone",
         *contract,
     ]
 
@@ -393,18 +391,18 @@ async def test_report_states_each_contract_count_under_its_own_label(cli, capsys
     await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
     report = c4_report(capsys.readouterr().out)
     assert (
-        "C4-contract weggelaten: 1 componenten zonder container, 2 elementen zonder "
-        "bron, 3 componenten zonder geldige container, 4 relaties zonder eindpunt, "
-        "5 relaties zonder bron, 6 labels, 10 relaties binnen een container, "
-        "11 overbodige relaties van directe bestanden"
+        "C4-contract omitted: 1 components without container, 2 elements without "
+        "source, 3 components without valid container, 4 relationships without "
+        "endpoint, 5 relationships without source, 6 labels, 10 relationships "
+        "inside a container, 11 redundant relationships from direct files"
     ) in report
     assert (
-        "C4-contract zonder relatie weggelaten: 2 externe systemen (Stripe, Mollie), "
-        "1 personen (Beheerder)"
+        "C4-contract omitted without relationship: 2 external systems "
+        "(Stripe, Mollie), 1 people (Beheerder)"
     ) in report
     assert (
-        "C4-contract onvolledig: 7 zonder technologie, 8 zonder omschrijving, "
-        "9 relaties tussen containers zonder protocol"
+        "C4-contract incomplete: 7 without technology, 8 without description, "
+        "9 relationships between containers without protocol"
     ) in report
 
 
@@ -432,8 +430,8 @@ async def test_report_names_why_groups_stay_unplaced(cli, capsys):
         if line.startswith("C4-merge")
     ]
     assert lines == [
-        f"C4-merge container:{name}: {total} bouwstenen, 1 geplaatst, "
-        f"{total - 1} niet geplaatst (tijdelijke fout), 1 plaatsingen verwijderd"
+        f"C4-merge container:{name}: {total} building blocks, 1 placed, "
+        f"{total - 1} not placed (transient error), 1 placements removed"
         for name, total in (("acme-admin", 2), ("shop", 3), ("web", 2))
     ]
 
@@ -443,9 +441,9 @@ async def test_report_says_a_trial_writes_no_contract(cli, capsys):
         parse(cli.repo, cli.out, "--plan", "--no-markdown"), cli.config
     )
     report = c4_report(capsys.readouterr().out)
-    assert report[0].startswith("C4-bron: ")
-    # The trial makes no call, so a merge line would contradict "0 pogingen".
-    assert report[1:] == ["C4-contract: niet geschreven (proefrun)"]
+    assert report[0].startswith("C4-source: ")
+    # The trial makes no call, so a merge line would contradict "0 attempts".
+    assert report[1:] == ["C4-contract: not written (trial run)"]
 
 
 async def test_end_to_end_contract_links_topics_to_pages(cli):
@@ -499,7 +497,7 @@ async def test_failed_cleanup_does_not_fail_a_published_run(cli, capsys):
     assert load_contract_quietly(cli.out).elements
     assert (cli.repo / LOCK_RELATIVE_PATH).exists()
     output = " ".join(capsys.readouterr().out.split())
-    assert "[WARN] C4: oude uitvoer niet verwijderd" in output
+    assert "[WARN] C4: old output not removed" in output
     assert OLD_EVIDENCE in output
 
 
@@ -535,19 +533,19 @@ async def test_call_report_names_step_and_reason(cli, capsys, response):
     assert set(cli.provider.calls) == {"documented"}
     assert len(report) == 1
     line = report[0]
-    assert "documentatieset gewijzigd" in line
+    assert "documentation set changed" in line
     assert "+1/-0/~0" in line
     for secret in (private_file, private_text, "PRIVATE_RESPONSE_CONTENT"):
         assert secret not in line
     if response == "accepted":
         assert cli.provider.calls["documented"] == 1
-        assert "1 pogingen" in line
-        assert "geaccepteerd" in line
+        assert "1 attempts" in line
+        assert "accepted" in line
     else:
         assert cli.provider.calls["documented"] == 2
-        assert "2 pogingen" in line
-        assert line.count("afgekeurd") == 2
-        assert "terugval" in line
+        assert "2 attempts" in line
+        assert line.count("rejected") == 2
+        assert "fallback" in line
         rule = {
             "quote_rejected": "no proposed item has a literal quote",
             "schema_rejected": "invalid answer schema",
@@ -573,17 +571,17 @@ async def test_call_report_counts_bundled_rounds_and_retry_outcome(
         line
         for line in capsys.readouterr().out.splitlines()
         if line.startswith("[INFO] C4 ")
-        and "C4 documented-bundels:" not in line
-        and "C4 documentatierelaties" not in line
+        and "C4 documented bundles:" not in line
+        and "C4 documentation relationships" not in line
     ]
     assert len(lines) == 5
     line = next(line for line in lines if "C4 classify:" in line)
     assert cli.provider.calls["classify"] == 6
-    assert "6 pogingen" in line
-    assert "nieuwe kandidaten" in line
-    assert line.count("tijdelijke fout") == (3 if recover else 6)
-    assert ("terugval" in line) is not recover
-    assert ("geaccepteerd" in line) is recover
+    assert "6 attempts" in line
+    assert "new candidates" in line
+    assert line.count("transient error") == (3 if recover else 6)
+    assert ("fallback" in line) is not recover
+    assert ("accepted" in line) is recover
     assert "PRIVATE_PROVIDER_ERROR" not in line
 
 
@@ -616,10 +614,10 @@ async def test_full_run_writes_contract_and_map_pair(cli):
     assert not (cli.out / OLD_EVIDENCE).exists()
     model, evidence = pair(cli.out)
     assert model.run.kind == "full"
-    assert model.run.schema_version == evidence.schema_version == 4
+    assert model.run.schema_version == evidence.schema_version == 5
     raw = (cli.out / CONTRACT).read_text(encoding="utf-8")
     contract = json.loads(raw)
-    assert contract["schema_version"] == 1
+    assert contract["schema_version"] == 2
     assert raw == (
         json.dumps(contract, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     )
@@ -803,10 +801,7 @@ async def test_failed_merge_warns(cli, capsys):
         [e for e in model.elements if e.kind == "container" and "fallback" in e.markers]
     )
     assert count > 0
-    assert (
-        f"C4: {count} elementen via terugval (niet opgeslagen)"
-        in capsys.readouterr().out
-    )
+    assert f"C4: {count} elements via fallback (not stored)" in capsys.readouterr().out
     document = json.loads((cli.repo / LOCK_RELATIVE_PATH).read_text())
     assert document["scopes"]["/"]["components"] == {}
     assert document["scopes"]["/"]["containers"]
@@ -818,7 +813,7 @@ async def test_failed_documentation_fragment_warns_the_user(cli, capsys):
     model, _ = pair(cli.out)
     count = model.run.fallback_fragments
     assert count > 0
-    assert f"C4: {count} documentatiefragmenten niet onderzocht" in (
+    assert f"C4: {count} documentation fragments not examined" in (
         capsys.readouterr().out
     )
 
@@ -874,16 +869,16 @@ async def test_cli_reports_documented_bundles(cli, capsys):
     await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
     output = capsys.readouterr().out
     assert (
-        "C4 documented-bundels: 0 hergebruikt, 1 nieuw, 0 gesplitst, "
-        "0 teruggevallen; fragmenten 1 gedekt, 0 teruggevallen"
+        "C4 documented bundles: 0 reused, 1 new, 0 split, "
+        "0 fell back; fragments 1 covered, 0 fell back"
     ) in output
     relations = [
-        line for line in output.splitlines() if "C4 documentatierelaties" in line
+        line for line in output.splitlines() if "C4 documentation relationships" in line
     ]
     assert len(relations) == 1
-    assert "geen treffer" in relations[0]
-    assert "meerdere treffers" in relations[0]
-    assert "niet toegestaan" in relations[0]
+    assert "no match" in relations[0]
+    assert "multiple matches" in relations[0]
+    assert "not allowed" in relations[0]
     assert len([line for line in output.splitlines() if "C4 documented:" in line]) == 1
 
 

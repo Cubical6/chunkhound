@@ -23,7 +23,7 @@ is the zero-based position of a file when counting the files of all groups in
 input order, and E<n> is an existing component, summed over all its files.
 
 Write all newly generated component names, descriptions, and relationship titles
-in Dutch (Nederlands). Preserve existing component names exactly when attaching
+in English. Preserve existing component names exactly when attaching
 groups. Keep JSON field names, group IDs, component IDs, and endpoint tokens
 unchanged; do not translate them.
 

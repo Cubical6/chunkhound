@@ -197,6 +197,35 @@ async def test_documented_discards_invalid_items(
     assert llm.calls == 1
 
 
+async def test_relation_endpoints_must_be_cited_or_the_system(
+    fixture_repo, c4_llm_manager, scripted
+):
+    payload = answer()
+    payload["relations"] = [
+        dict(
+            from_term="beheerder",
+            to_term=to_term,
+            title="gebruikt",
+            citation=citation(),
+        )
+        for to_term in ("Stripe", "shop", "Betaaldienst")
+    ]
+    scripted.answers["documented"] = payload
+    retries = RetryQueue()
+    result = await extract_documented(
+        project_root=fixture_repo,
+        system_name="shop",
+        doc_files=["README.md"],
+        locked=None,
+        llm=C4Llm(c4_llm_manager, concurrency=1, trial=False),
+        retries=retries,
+    )
+    # "shop" is not in the quote; the system name is always a valid endpoint.
+    assert [item.to_term for item in result.relations] == ["Stripe", "shop"]
+    assert not result.fallback
+    assert await retries.drain() == 0
+
+
 async def test_documented_reuses_on_same_hashes(fixture_repo, c4_llm_manager, scripted):
     llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
     first = await extract_documented(
@@ -606,7 +635,7 @@ async def test_unreadable_answer_halves_and_reports_the_split(
 
     assert fallbacks == 0 and not outcome.fallback
     assert {e.term for e in outcome.elements} == {f"Component{n}" for n in range(12)}
-    assert "1 gesplitst" in report_lines(outcome)[0]
+    assert "1 split" in report_lines(outcome)[0]
 
 
 @pytest.mark.parametrize(
@@ -621,7 +650,7 @@ async def test_input_refusal_stops_with_size_and_limit(
 ):
     scripted.answers["documented"] = RuntimeError(text)
 
-    with pytest.raises(InputRejectedError, match="opgegeven grens"):
+    with pytest.raises(InputRejectedError, match="declared limit"):
         await run_documented(fixture_repo, c4_llm_manager, ["README.md"])
 
     assert scripted.calls["documented"] == 1
@@ -686,7 +715,7 @@ async def test_temporary_error_after_a_split_is_reported_as_temporary(
     )
 
     report = next(line for line in llm.report_lines() if "C4 documented" in line)
-    assert "#2 tijdelijke fout" in report
+    assert "#2 transient error" in report
     assert fallbacks == 0 and not outcome.fallback
 
 

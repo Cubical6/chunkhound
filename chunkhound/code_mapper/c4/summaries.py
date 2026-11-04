@@ -189,7 +189,7 @@ async def label_arrows(
             ensure_ascii=False,
         )
     )
-    report = llm.report("summaries", f"{len(pending)} nieuwe labels")
+    report = llm.report("summaries", f"{len(pending)} new labels")
 
     async def attempt() -> dict[str, str]:
         with report.attempt():

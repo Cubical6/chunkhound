@@ -1,7 +1,7 @@
 # Pinned LikeC4 distribution
 
 This directory is the complete publication boundary for the local
-`likec4@1.60.0-chunkhound.1` fork. It modifies LikeC4's native element
+`likec4@1.60.0-chunkhound.2` fork. It modifies LikeC4's native element
 and relationship details and preserves selected neutral boundary and hierarchy
 relationships with native compound-frame geometry. It does not add a renderer
 or public adapter API.
@@ -14,7 +14,7 @@ to consume the tarball. Normal npm dependencies still require installation.
   commands, and SHA-256 checksums.
 - `chunkhound.patch`: the complete source/package/lockfile patch against the
   pinned upstream commit; reconstructs the fork without its local Git DB.
-- `likec4-1.60.0-chunkhound.1.tgz`: the native `packages/likec4` package, not the
+- `likec4-1.60.0-chunkhound.2.tgz`: the native `packages/likec4` package, not the
   monorepo root. Existing `likec4/react` and `likec4/vite-plugin` exports remain.
 - `LICENSE` and `NOTICE`: MIT license and retained attribution, including NVIDIA.
 
@@ -36,29 +36,23 @@ pnpm turbo run pack --filter=likec4
 ```
 
 The archive is produced at
-`packages/likec4/likec4-1.60.0-chunkhound.1.tgz`. The ordinary native build
+`packages/likec4/likec4-1.60.0-chunkhound.2.tgz`. The ordinary native build
 `pnpm turbo run build --filter=likec4` was also exercised: this checkout's
 parallel tasks can race when React reads diagram declaration files while
 diagram cleans its output. Serial Turbo scheduling avoids that race without
 skipping any native generate, styles, React, SPA, or plugin prerequisite.
-The successful build/pack chain above was repeated independently from a clean
-upstream tree plus the complete patch, with a new frozen install and no reused
-build output. Both the shipped archive and that reconstructed archive were
-installed in separate clean consumers. Each passed actual computed and layouted
-model contracts for the unchanged eight-relationship hierarchy fixture, a
-separate topic directly targeting both its container and component, and the
-20-element/15-relationship collision, aggregation and hostile-text fixture.
-The strict Vite plugin built valid models, rejected deliberately invalid DSL,
-and built again after the invalid input was removed.
 
-Both installed archives were also exercised in the real native React surface:
-all six system/container/component hierarchy directions were independently
-clicked, retaining original endpoints, individual statuses, code/doc sources
-and native endpoint-to-Focus navigation. Actual routes attach to the real
-compound/child boundaries, preserve nesting and distinct reverse lanes, and
-keep arrowheads, labels and bounds usable. Direct-plus-derived aggregation,
-marked-plus-ordinary valid aggregation, literal hostile text, and locally
-loaded fonts were checked in the same native surface.
+Verified for `chunkhound.2` (the only change from `chunkhound.1` is the
+English `sources` detail-panel label, English fixture statuses and the version
+bump): the complete patch applies to a fresh checkout of the pinned upstream
+commit and reproduces the committed fork tree; a frozen install and the serial
+build/pack above succeeded; the language-server hierarchy and relation specs and
+the core boundary-relations, clean-connections and multiple-relationships specs
+passed; the archive contains the `sources` label in the element and
+relationship details and no `bronnen`. In a clean npm consumer the installed
+archive validated and built a small model and imported the `likec4`,
+`likec4/react` and `likec4/vite-plugin` exports. The browser, hierarchy-geometry
+and strict-plugin checks that passed for `chunkhound.1` were not repeated.
 Gzip timestamps and embedded build identities need not be byte-identical;
 the checksum identifies this shipped archive, not every reconstruction.
 

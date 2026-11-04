@@ -208,11 +208,11 @@ async def test_documented_terms_require_their_own_literal_span(
     )
     ids = {element.id for element in result.model.elements}
     assert not {
-        "extern:invented-payment-authority",
-        "extern:shop",
-        "extern:beheerder",
+        "external:invented-payment-authority",
+        "external:shop",
+        "external:beheerder",
     }.intersection(ids)
-    assert {"persoon:beheerder", "extern:de-webwinkel"} <= ids
+    assert {"person:beheerder", "external:de-webwinkel"} <= ids
     assert all(
         any(
             citation.target == id
@@ -220,7 +220,7 @@ async def test_documented_terms_require_their_own_literal_span(
             and citation.verified
             for citation in result.evidence.citations
         )
-        for id in ("persoon:beheerder", "extern:de-webwinkel")
+        for id in ("person:beheerder", "external:de-webwinkel")
     )
     if origin == "fallback":
         assert pipeline_answers.calls["documented"] == 2
@@ -942,7 +942,7 @@ async def test_recovered_merge_titles_use_final_identity_without_titles_call(
             {
                 "from": "group:" + source,
                 "to": "group:" + target,
-                "title": "importeert via domein",
+                "title": "imports via domain",
             }
             for source, target in sorted(
                 {(owners[left], owners[right]) for left, right, _ in data["file_links"]}
@@ -966,7 +966,7 @@ async def test_recovered_merge_titles_use_final_identity_without_titles_call(
     assert supplied
     assert pipeline_answers.calls["titles"] == 0
     relation = next(
-        r for r in result.model.relations if r.title == "importeert via domein"
+        r for r in result.model.relations if r.title == "imports via domain"
     )
     assert relation.from_id.startswith("component:")
     assert relation.to_id.startswith("component:")
@@ -979,14 +979,14 @@ async def test_successful_fallback_wording_is_cached(
 ):
     pipeline_answers.answers["titles"] = lambda prompt: {
         "titles": [
-            {"fingerprint": row["fingerprint"], "title": "importeert"}
+            {"fingerprint": row["fingerprint"], "title": "imports"}
             for row in payload(prompt)["relations"]
         ]
     }
     result = await build(fixture_repo, c4_llm_manager)
     assert result.lock.relations
     assert all("fallback" not in r.markers for r in result.model.relations)
-    assert all(r.title == "importeert" for r in result.lock.relations.values())
+    assert all(r.title == "imports" for r in result.lock.relations.values())
 
 
 async def test_nested_containers_retain_unbound_root_references(

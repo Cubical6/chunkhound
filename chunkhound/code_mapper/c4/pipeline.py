@@ -676,9 +676,9 @@ def _build_lock(
 
 def _source_line(draft: C4Draft) -> str:
     return (
-        f"C4-bron: {len(draft.files)} bestanden geanalyseerd, "
-        f"{draft.excluded_as_test_code} uitgesloten als testcode, "
-        f"{draft.excluded_by_pattern} door c4.exclude"
+        f"C4-source: {len(draft.files)} files analyzed, "
+        f"{draft.excluded_as_test_code} excluded as test code, "
+        f"{draft.excluded_by_pattern} by c4.exclude"
     )
 
 
@@ -690,15 +690,15 @@ def _merge_lines(draft: C4Draft, trial: bool) -> list[str]:
         if trial or not (merge.placed_groups or pending):
             continue
         unplaced = (
-            f"{pending} niet geplaatst ({merge.failure_reason}), " if pending else ""
+            f"{pending} not placed ({merge.failure_reason}), " if pending else ""
         )
         lines.append(
-            f"C4-merge {container}: {merge.placed_groups + pending} bouwstenen, "
-            f"{merge.placed_groups} geplaatst, {unplaced}"
-            f"{merge.removed_placements} plaatsingen verwijderd"
+            f"C4-merge {container}: {merge.placed_groups + pending} building blocks, "
+            f"{merge.placed_groups} placed, {unplaced}"
+            f"{merge.removed_placements} placements removed"
         )
     lines.extend(
-        f"C4-merge: override voor onbekende groep genegeerd: {group}"
+        f"C4-merge: override for unknown group ignored: {group}"
         for group in draft.unknown_overrides
     )
     return lines
@@ -713,27 +713,27 @@ def _contract_lines(
     contract: Contract, counts: ContractCounts, repository_reasons: dict[str, str]
 ) -> list[str]:
     return [
-        f"C4-contract: {len(contract.elements)} elementen, "
-        f"{len(contract.relations)} relaties, {len(contract.sources)} bronnen, "
+        f"C4-contract: {len(contract.elements)} elements, "
+        f"{len(contract.relations)} relationships, {len(contract.sources)} sources, "
         f"{len(contract.merged_labels)} labels, {len(contract.topics)} topics",
-        f"C4-contract weggelaten: {counts.components_without_container} componenten "
-        f"zonder container, {counts.elements_without_source} elementen zonder bron, "
-        f"{counts.components_without_valid_container} componenten zonder geldige "
-        f"container, {counts.relations_without_endpoint} relaties zonder eindpunt, "
-        f"{counts.relations_without_source} relaties zonder bron, "
-        f"{counts.labels} labels, "
-        f"{counts.relations_inside_container} relaties binnen een container, "
-        f"{counts.redundant_direct_relations} overbodige relaties van directe "
-        "bestanden",
-        "C4-contract zonder relatie weggelaten: "
-        f"{_named(counts.externals_without_relation, 'externe systemen')}, "
-        f"{_named(counts.persons_without_relation, 'personen')}",
-        f"C4-contract onvolledig: {counts.without_technology} zonder technologie, "
-        f"{counts.without_description} zonder omschrijving, "
-        f"{counts.container_relations_without_protocol} relaties tussen containers "
-        "zonder protocol",
+        f"C4-contract omitted: {counts.components_without_container} components "
+        f"without container, {counts.elements_without_source} elements without "
+        f"source, {counts.components_without_valid_container} components without "
+        f"valid container, {counts.relations_without_endpoint} relationships "
+        f"without endpoint, {counts.relations_without_source} relationships without "
+        f"source, {counts.labels} labels, "
+        f"{counts.relations_inside_container} relationships inside a container, "
+        f"{counts.redundant_direct_relations} redundant relationships from direct "
+        "files",
+        "C4-contract omitted without relationship: "
+        f"{_named(counts.externals_without_relation, 'external systems')}, "
+        f"{_named(counts.persons_without_relation, 'people')}",
+        f"C4-contract incomplete: {counts.without_technology} without technology, "
+        f"{counts.without_description} without description, "
+        f"{counts.container_relations_without_protocol} relationships between "
+        "containers without protocol",
         *(
-            f"C4-contract repository {id}: geen bronlinks ({reason})"
+            f"C4-contract repository {id}: no source links ({reason})"
             for id, reason in sorted(repository_reasons.items())
         ),
     ]
@@ -844,9 +844,9 @@ async def finish_c4(
     unlinked = assemble_with_unlinked(inp)[3]
     report_extra = [
         *documented_report_lines(docs),
-        "C4 documentatierelaties niet gekoppeld: "
-        f"{unlinked.no_match} geen treffer, {unlinked.ambiguous} meerdere "
-        f"treffers, {unlinked.not_allowed} niet toegestaan",
+        "C4 documentation relationships not linked: "
+        f"{unlinked.no_match} no match, {unlinked.ambiguous} multiple "
+        f"matches, {unlinked.not_allowed} not allowed",
         _source_line(draft),
         *_merge_lines(draft, llm.trial),
     ]
@@ -862,7 +862,7 @@ async def finish_c4(
         )
         report_extra += _contract_lines(contract, contract_counts, repository_reasons)
     else:
-        report_extra.append("C4-contract: niet geschreven (proefrun)")
+        report_extra.append("C4-contract: not written (trial run)")
     return C4Build(
         model,
         evidence,

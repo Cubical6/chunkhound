@@ -970,7 +970,7 @@ index 000000000..447c259e0
 +  return `${value.kind}: ${value.path}:${value.startLine}–${value.endLine}`;
 +}
 diff --git a/packages/diagram/src/likec4diagram/relationship-popover/RelationshipPopover.tsx b/packages/diagram/src/likec4diagram/relationship-popover/RelationshipPopover.tsx
-index e9ea7cd52..8f93ce7bc 100644
+index e9ea7cd52..d9abf73f5 100644
 --- a/packages/diagram/src/likec4diagram/relationship-popover/RelationshipPopover.tsx
 +++ b/packages/diagram/src/likec4diagram/relationship-popover/RelationshipPopover.tsx
 @@ -5,13 +5,13 @@
@@ -1811,7 +1811,7 @@ index e9ea7cd52..8f93ce7bc 100644
 +      {detail && (
 +        <VStack alignItems="stretch" gap="1">
 +          {detail.status && <Text size="xs">status: {detail.status}</Text>}
-+          <Label>bronnen</Label>
++          <Label>sources</Label>
 +          {detail.sources.map((source, index) => {
 +            const href = detailHref(source.url);
 +            return (
@@ -1950,7 +1950,7 @@ index e9ea7cd52..8f93ce7bc 100644
 +  return { full, short };
  }
 diff --git a/packages/diagram/src/overlays/element-details/ElementDetailsCard.tsx b/packages/diagram/src/overlays/element-details/ElementDetailsCard.tsx
-index 84cf01efe..be9f2d5ed 100644
+index 84cf01efe..0c35ac8ad 100644
 --- a/packages/diagram/src/overlays/element-details/ElementDetailsCard.tsx
 +++ b/packages/diagram/src/overlays/element-details/ElementDetailsCard.tsx
 @@ -5,18 +5,9 @@
@@ -2727,7 +2727,7 @@ index 84cf01efe..be9f2d5ed 100644
 +  return (
 +    <>
 +      {detail.status && <ElementProperty title="status">{detail.status}</ElementProperty>}
-+      <ElementProperty title="bronnen">
++      <ElementProperty title="sources">
 +        <Stack gap="xs">
 +          {detail.sources.map((source, index) => {
 +            const href = detailHref(source.url);
@@ -2767,7 +2767,7 @@ index 84cf01efe..be9f2d5ed 100644
  }
 diff --git a/packages/language-server/src/__tests__/chunkhound-hierarchy.spec.ts b/packages/language-server/src/__tests__/chunkhound-hierarchy.spec.ts
 new file mode 100644
-index 000000000..f29b6e960
+index 000000000..c5e8ea853
 --- /dev/null
 +++ b/packages/language-server/src/__tests__/chunkhound-hierarchy.spec.ts
 @@ -0,0 +1,231 @@
@@ -2777,14 +2777,14 @@ index 000000000..f29b6e960
 +import { createTestServices } from "../test/testServices";
 +
 +const relations = [
-+  ["r-app-component", "system.app", "system.app.component", "aangetroffen", "code"],
-+  ["r-component-app", "system.app.component", "system.app", "gedocumenteerd", "doc"],
-+  ["r-sys-app", "system", "system.app", "aangetroffen", "code"],
-+  ["r-app-sys", "system.app", "system", "gedocumenteerd", "doc"],
-+  ["r-sys-component", "system", "system.app.component", "aangetroffen", "code"],
-+  ["r-component-sys", "system.app.component", "system", "gedocumenteerd", "doc"],
-+  ["r-app-external", "system.app", "external", "aangetroffen", "code"],
-+  ["r-component-external", "system.app.component", "external", "gedocumenteerd", "doc"],
++  ["r-app-component", "system.app", "system.app.component", "found", "code"],
++  ["r-component-app", "system.app.component", "system.app", "documented", "doc"],
++  ["r-sys-app", "system", "system.app", "found", "code"],
++  ["r-app-sys", "system.app", "system", "documented", "doc"],
++  ["r-sys-component", "system", "system.app.component", "found", "code"],
++  ["r-component-sys", "system.app.component", "system", "documented", "doc"],
++  ["r-app-external", "system.app", "external", "found", "code"],
++  ["r-component-external", "system.app.component", "external", "documented", "doc"],
 +] as const;
 +
 +const selections = {
@@ -4864,14 +4864,14 @@ index 4fa2d04e0..dd49d18ec 100644
 +  }) as any;
  }
 diff --git a/packages/likec4/package.json b/packages/likec4/package.json
-index 88e3f9dc6..0a575b078 100644
+index 88e3f9dc6..7b1439624 100644
 --- a/packages/likec4/package.json
 +++ b/packages/likec4/package.json
 @@ -1,6 +1,6 @@
  {
    "name": "likec4",
 -  "version": "1.60.0",
-+  "version": "1.60.0-chunkhound.1",
++  "version": "1.60.0-chunkhound.2",
    "description": "Toolchain for your architecture diagrams",
    "keywords": [
      "likec4",

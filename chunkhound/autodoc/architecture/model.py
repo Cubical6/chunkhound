@@ -5,8 +5,8 @@ from enum import Enum
 
 
 class Status(str, Enum):
-    AANGETROFFEN = "aangetroffen"
-    GEDOCUMENTEERD = "gedocumenteerd"
+    FOUND = "found"
+    DOCUMENTED = "documented"
 
 
 class ElementKind(str, Enum):

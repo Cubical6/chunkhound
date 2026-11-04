@@ -24,6 +24,8 @@ from chunkhound.autodoc.architecture.model import (
 
 _Warning = Callable[[str], None]
 _E = TypeVar("_E", bound=Enum)
+# The producer's contract version; version 1 used Dutch statuses.
+_SCHEMA_VERSION = 2
 
 
 class _InvalidModelError(ValueError):
@@ -122,15 +124,18 @@ class ModelLoader:
             return _read_model(_object(document), warn)
         except (OSError, UnicodeError, json.JSONDecodeError, _InvalidModelError) as exc:
             warn(
-                f"{exc}. Re-run map to regenerate the version 1 C4 model "
-                "beside the selected index; continuing without architecture."
+                f"{exc}. Re-run map to regenerate the version {_SCHEMA_VERSION} C4 "
+                "model beside the selected index; continuing without architecture."
             )
             return None
 
 
 def _read_model(data: dict[str, Any], warn: _Warning) -> C4Model:
-    if type(data.get("schema_version")) is not int or data["schema_version"] != 1:
-        raise _InvalidModelError("unsupported schema_version (expected 1)")
+    version = data.get("schema_version")
+    if type(version) is not int or version != _SCHEMA_VERSION:
+        raise _InvalidModelError(
+            f"unsupported schema_version (expected {_SCHEMA_VERSION})"
+        )
     raw_system = _object(data.get("system"))
     system = SoftwareSystem(
         id=_text(raw_system, "id"),
@@ -155,7 +160,7 @@ def _read_model(data: dict[str, Any], warn: _Warning) -> C4Model:
     element_ids = {system.id, *(element.id for element in elements)}
     relations = _read_relations(data, element_ids, source_ids, warn)
     return C4Model(
-        schema_version=1,
+        schema_version=_SCHEMA_VERSION,
         system=system,
         repositories=repositories,
         elements=elements,

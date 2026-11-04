@@ -73,7 +73,7 @@ def assembly_input():
         ]
     ]
     runtime = RuntimeScan(
-        "systeem:app",
+        "system:app",
         "App",
         [container],
         [],
@@ -124,23 +124,23 @@ def test_status_follows_sources():
     elements, relations, evidence = assemble(assembly_input())
     by_id = {e.id: e for e in elements}
     assert by_id["component:a"].status == "found"
-    assert by_id["persoon:user"].status == "documented"
+    assert by_id["person:user"].status == "documented"
     assert by_id["container:dashboard"].coverage.status == "none"
     assert by_id["component:b"].markers == ["imports_only"]
-    assert "extern:helper" not in by_id
-    assert by_id["opslag:sqlite"].markers == ["disputed"]
+    assert "external:helper" not in by_id
+    assert by_id["storage:sqlite"].markers == ["disputed"]
     assert (
         citation("pyproject.toml", 2, "configuration", "container:app")
         in evidence.citations
     )
-    assert citation("a.py", 2, "code", "extern:stripe") in evidence.citations
+    assert citation("a.py", 2, "code", "external:stripe") in evidence.citations
     assert (
-        citation("config.py", 8, "configuration", "opslag:db-path")
+        citation("config.py", 8, "configuration", "storage:db-path")
         in evidence.citations
     )
     assert {r.id for r in relations} == {
-        "component:a->extern:stripe",
-        "component:a->opslag:sqlite",
+        "component:a->external:stripe",
+        "component:a->storage:sqlite",
     }
     assert [r.relation for r in evidence.references][2:] == [None] * 4
     assert evidence.element_files["component:a"] == ["a.py"]
@@ -163,7 +163,7 @@ def test_documentation_relation_rules():
     _, relations, evidence = assemble(inp)
     assert "component:a->component:b" not in {r.id for r in relations}
     assert (
-        next(r for r in relations if r.from_id == "persoon:user").status == "documented"
+        next(r for r in relations if r.from_id == "person:user").status == "documented"
     )
     assert len([c for c in evidence.citations if not c.verified]) == 2
     inp.references.references.append(
@@ -188,7 +188,7 @@ def test_ambiguous_untyped_documentation_endpoint_stays_off_map():
     inp.documented.elements.append(DocElement("person", "Dashboard", citation()))
     inp.documented.relations = [DocRelation("User", "Dashboard", "uses", citation())]
     _, relations, evidence = assemble(inp)
-    assert not any(r.from_id == "persoon:user" for r in relations)
+    assert not any(r.from_id == "person:user" for r in relations)
     assert citation().model_copy(update={"verified": False}) in evidence.citations
 
 
@@ -228,7 +228,7 @@ def test_coverage_via_shared_cited_files():
     _, _, evidence = assemble(assembly_input())
     files = evidence.element_files
     assert files["container:app"] == ["a.py", "b.py", "shared.py"]
-    assert files["systeem:app"] == ["a.py", "b.py"]
+    assert files["system:app"] == ["a.py", "b.py"]
     direct = {"container:app": ["shared.py"]}
     topics = [
         TopicSources("shared", ("shared.py",)),
@@ -239,7 +239,7 @@ def test_coverage_via_shared_cited_files():
     assert result["component:b"].status == "undescribed"
     assert result["component:a"].topics == ["a", "both"]
     assert result["container:app"].topics == ["both", "a", "shared"]
-    assert result["systeem:app"].topics == ["a", "both"]
+    assert result["system:app"].topics == ["a", "both"]
     assert result["container:dashboard"].status == "none"
     direct_only = compute_coverage(
         element_files=files, direct_files=direct, topics=[topics[0]]
@@ -286,12 +286,12 @@ def test_documented_relation_with_shared_name_links_to_container():
     _, relations, evidence, unlinked = assemble_with_unlinked(inp)
 
     assert unlinked == UnlinkedCounts()
-    assert {"persoon:user->container:app", "container:app->persoon:user"} <= {
+    assert {"person:user->container:app", "container:app->person:user"} <= {
         r.id for r in relations
     }
     assert {c.target for c in evidence.citations if c.start_line in {5, 6}} >= {
-        "persoon:user->container:app",
-        "container:app->persoon:user",
+        "person:user->container:app",
+        "container:app->person:user",
     }
 
 
@@ -315,12 +315,12 @@ def test_documented_own_name_joins_that_element_and_links_its_relations():
     ]
     elements, relations, evidence, unlinked = assemble_with_unlinked(inp)
     ids = {element.id for element in elements}
-    assert {"extern:app", "component:app", "extern:duckdb"}.isdisjoint(ids)
-    assert {"persoon:app", "extern:stripe"} <= ids
-    assert "container:app->extern:stripe" in {relation.id for relation in relations}
+    assert {"external:app", "component:app", "external:duckdb"}.isdisjoint(ids)
+    assert {"person:app", "external:stripe"} <= ids
+    assert "container:app->external:stripe" in {relation.id for relation in relations}
     assert unlinked.ambiguous == 0
     assert citation(line=7, target="container:app") in evidence.citations
-    assert citation(line=9, target="opslag:duckdb") in evidence.citations
+    assert citation(line=9, target="storage:duckdb") in evidence.citations
 
 
 def test_document_gives_a_description_and_a_package_its_display_name():
@@ -333,17 +333,17 @@ def test_document_gives_a_description_and_a_package_its_display_name():
         DocElement("person", "Beheerder", citation(line=9), "Beheert de app."),
     ]
     elements = {element.id: element for element in assemble(inp)[0]}
-    assert elements["extern:openai"].name == "OpenAI"
-    assert elements["extern:openai"].description == "Levert taalmodellen."
-    assert elements["persoon:beheerder"].description == "Beheert de app."
+    assert elements["external:openai"].name == "OpenAI"
+    assert elements["external:openai"].description == "Levert taalmodellen."
+    assert elements["person:beheerder"].description == "Beheert de app."
 
     inp.overrides = Overrides(
-        names={"extern:openai": "Eigen naam"},
-        descriptions={"extern:openai": "Eigen zin."},
+        names={"external:openai": "Eigen naam"},
+        descriptions={"external:openai": "Eigen zin."},
     )
     elements = {element.id: element for element in assemble(inp)[0]}
-    assert elements["extern:openai"].name == "Eigen naam"
-    assert elements["extern:openai"].description == "Eigen zin."
+    assert elements["external:openai"].name == "Eigen naam"
+    assert elements["external:openai"].description == "Eigen zin."
 
 
 def test_other_shared_names_stay_ambiguous():

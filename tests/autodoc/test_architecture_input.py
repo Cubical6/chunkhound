@@ -12,7 +12,7 @@ from chunkhound.autodoc.architecture.model import Status
 
 def model_document() -> dict[str, Any]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "system": {"id": "system", "name": "System", "description": "Root"},
         "repositories": [
             {
@@ -47,7 +47,7 @@ def model_document() -> dict[str, Any]:
                 "parent": "system",
                 "name": "Frontend",
                 "technology": "TS",
-                "status": "aangetroffen",
+                "status": "found",
                 "files": ["frontend/shared.ts", "frontend/src/client.ts"],
                 "sources": ["code", "doc"],
             },
@@ -57,7 +57,7 @@ def model_document() -> dict[str, Any]:
                 "parent": "container",
                 "name": "Client",
                 "technology": "TS",
-                "status": "aangetroffen",
+                "status": "found",
                 "files": ["frontend/src/client.ts"],
                 "sources": ["code"],
             },
@@ -67,7 +67,7 @@ def model_document() -> dict[str, Any]:
                 "parent": "container",
                 "name": "Planned UI",
                 "technology": "",
-                "status": "gedocumenteerd",
+                "status": "documented",
                 "files": [],
                 "sources": ["doc"],
             },
@@ -108,10 +108,10 @@ def test_input_failures_warn_without_inventing_architecture(
         model_path.write_text("{broken", encoding="utf-8")
     elif failure == "version":
         document = model_document()
-        document["schema_version"] = 2
+        document["schema_version"] = 1
         model_path.write_text(json.dumps(document), encoding="utf-8")
     elif failure == "shape":
-        model_path.write_text('{"schema_version": 1, "system": []}', encoding="utf-8")
+        model_path.write_text('{"schema_version": 2, "system": []}', encoding="utf-8")
     elif failure == "encoding":
         model_path.write_bytes(b"\xff")
     warnings: list[str] = []
@@ -128,7 +128,7 @@ def test_R1_R2_R6_R10_preserve_identity_status_and_zero_relations(tmp_path: Path
     document = model_document()
     # Consumption is not reclassification, even when producer status differs
     # from what a consumer might infer from the source kind.
-    document["elements"][1]["status"] = "gedocumenteerd"
+    document["elements"][1]["status"] = "documented"
     model = load_document(tmp_path, document)
     assert model is not None
     assert model.system.id == "system"
@@ -137,7 +137,7 @@ def test_R1_R2_R6_R10_preserve_identity_status_and_zero_relations(tmp_path: Path
         ("component", "container"),
         ("planned", "container"),
     ]
-    assert model.elements[1].status == Status.GEDOCUMENTEERD
+    assert model.elements[1].status == Status.DOCUMENTED
     assert model.elements[0].source_ids == ["code", "doc"]
     assert model.relations == []
 
@@ -168,7 +168,7 @@ def test_dangling_references_remove_only_dependent_content(tmp_path: Path):
         "target": "system",
         "title": "Uses",
         "technology": "",
-        "status": "gedocumenteerd",
+        "status": "documented",
         "sources": ["doc", "unknown-source"],
     }
     document["relations"] = [
@@ -222,7 +222,7 @@ def test_unusable_merged_label_does_not_remove_relations(
         "target": "system",
         "title": "Uses",
         "technology": "",
-        "status": "aangetroffen",
+        "status": "found",
         "sources": ["code"],
     }
     document["relations"] = [relation, {**relation, "id": "second", "title": "Sends"}]
@@ -253,7 +253,7 @@ def test_malformed_merged_label_rows_preserve_valid_architecture(
         "target": "system",
         "title": "Sends events",
         "technology": "HTTP",
-        "status": "aangetroffen",
+        "status": "found",
         "sources": ["code", "doc"],
     }
     document["relations"] = [
@@ -262,7 +262,7 @@ def test_malformed_merged_label_rows_preserve_valid_architecture(
             **relation,
             "id": "doc-link",
             "title": "Reads status",
-            "status": "gedocumenteerd",
+            "status": "documented",
             "sources": ["doc"],
         },
     ]
@@ -288,8 +288,8 @@ def test_malformed_merged_label_rows_preserve_valid_architecture(
     assert [source.id for source in model.sources] == ["code", "doc"]
     assert len(warnings) == 2
     assert [(r.id, r.status.value, r.source_ids) for r in model.relations] == [
-        ("code-link", "aangetroffen", ["code", "doc"]),
-        ("doc-link", "gedocumenteerd", ["doc"]),
+        ("code-link", "found", ["code", "doc"]),
+        ("doc-link", "documented", ["doc"]),
     ]
     assert [
         (label.source_id, label.target_id, label.relation_ids, label.label)

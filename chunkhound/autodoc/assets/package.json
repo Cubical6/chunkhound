@@ -18,7 +18,7 @@
     "vite": "8.3.5",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "likec4": "file:vendor/likec4/likec4-1.60.0-chunkhound.1.tgz",
+    "likec4": "file:vendor/likec4/likec4-1.60.0-chunkhound.2.tgz",
     "mermaid": "^10.9.0",
     "remark-gfm": "^4.0.0"
   }
