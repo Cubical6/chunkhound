@@ -1,7 +1,7 @@
 # Spec deel A: `map` levert een C4-kaart voor AutoDoc (O-MAP)
 
 - Datum: 2026-11-04 · Branch: `c4/shared-extraction-layer` (HEAD bij start `cfb59235`)
-- **Status:** goedgekeurd op 2026-11-04, inclusief de punten uit §12 en de wijzigingen in §3.1 en §16 na de planreview; plan goedgekeurd; geen providerrun goedgekeurd
+- **Status:** goedgekeurd op 2026-11-04, inclusief de punten uit §12 en de wijzigingen in §3.1 en §16 na de planreview; plan goedgekeurd; geen providerrun goedgekeurd. §17 goedgekeurd op 2026-11-04, inclusief één providerrun en de eenmalige ingreep in het lockbestand
 - Besluitenlog: [2026-10-27-map-structuuranalyse.md](../decisions/2026-10-27-map-structuuranalyse.md), de rijen "O-MAP", "Bronselectie", "Groepsindeling", "C4-toets" en "Bouwstenen en reikwijdte" (hieronder "besluit: …")
 - Consument: [AutoDoc-spec](2026-10-29-autodoc-c4-map-design.md) en `chunkhound/autodoc/architecture/`
 - Vervolg: [deel B, containers per proces](2026-11-04-c4-processen-design.md)
@@ -491,3 +491,106 @@ Verplicht volgens `AGENTS.md`: smoke tests, ruff en mypy, en de volledige suite 
 - **Remote-informatie is lokaal.** `origin/*` kan verouderd zijn, en een commit die later verwijderd is, geeft een dode link.
 - **`run_git` negeert de globale Git-configuratie** (`git_safe.py:25–36`). In een container met een andere gebruiker kan dat "dubious ownership" geven, dus `NO_GIT_HEAD`.
 - **Task6** blijft open, en AutoDoc is op deze branch niet definitief geaccepteerd. Een kaart die rendert, sluit dat niet af.
+
+## 17. Aanvulling na de eerste echte run
+
+**Aanleiding.** De run op `9457f168` gaf de hoofdcontainer 18 echte componenten, zonder fixtures of procesdocumenten. De kaart voldoet toch niet aan C4: 95 van de 105 relaties hebben een titel zonder inhoud, 30 van de 33 externe systemen hebben geen relatie, en 15 relaties lopen tussen een container en zijn eigen component. Deze aanvulling herstelt dat vóór deel B. Elementen en id's van componenten blijven gelijk, net als het lockformaat (versie 4).
+
+### 17.1 Eigen namen
+
+`ChunkHound` staat in de documentuitkomst als container, extern systeem en component. Daardoor is de term ambigu, en vervallen de relaties ermee, waaronder die naar de providers.
+
+**Regel.** Een documentterm van soort `external`, `container` of `component` wordt geen nieuw element als zijn genormaliseerde naam (`slugify_kebab`, als in R4) gelijk is aan die van het eigen systeem, een container of opslag. Het citaat en de term gaan naar dat bestaande element; bij systeem plus container is dat de container (§3.4). Blijft er meer dan één kandidaat over, dan verandert er niets. Personen vallen buiten deze regel.
+
+Dit lost ook DuckDB en LanceDB op, die nu zowel opslag als extern systeem zijn. Geen modelaanroep.
+
+### 17.2 Externe systemen en personen zonder relatie
+
+C4 toont een persoon of extern systeem omdat die met het systeem samenwerkt. Zonder relatie is daar geen grond voor.
+
+**Regel, alleen in het contract.** Een extern systeem of persoon blijft staan als er minstens één contractrelatie is met een intern element (systeem, container, opslag of component). Andere vervallen, met hun relaties, zoals GitHub Actions → PyPI. Het interne paar blijft compleet (invariant 3).
+
+**Rapport.** Omdat deze regel ook echte systemen kan raken, noemt het rapport ze bij naam:
+
+```text
+C4-contract zonder relatie weggelaten: <n> externe systemen (<namen>), <n> personen (<namen>)
+```
+
+Dit vult §7.2 en §8 aan. Geen modelaanroep.
+
+### 17.3 Relaties van directe bestanden
+
+Een container is eigenaar van de bestanden die in geen component zitten (`assemble.py:215`). Elke verwijzing daarvan wordt een relatie van of naar de container. Dat geeft pijlen tussen een container en zijn eigen component, die C4 niet kent: een component zit ín de container. Deel B kan bovendien geen relatie afbeelden die eindigt op een gesplitste container.
+
+**Regels.** Een relatie telt niet mee voor kaart en labels als:
+
+- **a.** ze loopt tussen een container en een component van diezelfde container;
+- **b.** ze een aangetroffen relatie is van een container naar een doel, terwijl een component van die container ook een relatie met dat doel heeft. De containerview toont die pijl dan al.
+
+Andere relaties blijven: een container zonder componenten houdt zijn pijl naar opslag, en een relatie naar een container vanaf buiten blijft staan.
+
+**Waar.** Eén pure functie bepaalt deze set. `derive_views` en `build_contract` gebruiken hem allebei, zodat een label nooit vervalt door een onderliggende relatie die hier wegvalt (§7.5). Het interne paar houdt de relaties.
+
+**Rapport.** De regel `C4-contract weggelaten` krijgt `<n> relaties binnen een container` en `<n> overbodige relaties van directe bestanden`.
+
+**Gevolg.** In deze run gaat het om alle 17 relaties met `container:chunkhound` als eindpunt: 15 naar eigen componenten en 2 naar opslag, waar `Databaseopslag` al naar wijst. Daarmee vervallen ook echte afhankelijkheden, zoals `Realtime-indexering` naar `chunkhound/watchman_runtime`, want die map hangt direct onder de container. De kaart toont die dan niet; het bewijs wel.
+
+### 17.4 Titels
+
+Het model krijgt nu alleen een hash en aantallen per soort (`merge.py:687`) en kan dus niets over de bedoeling zeggen.
+
+**Invoer per relatie:**
+
+```json
+{"fingerprint": "...", "from": {"name": "...", "description": "..."},
+ "to": {"name": "...", "description": "..."}, "kinds": {"call": 3},
+ "targets": ["<ten hoogste 5 bereikte bestanden of pakketten>"]}
+```
+
+**Prompt.** Een titel van ten hoogste 60 tekens begint met een werkwoord en zegt waarvoor de bron het doel gebruikt. Hij beschrijft niet het mechanisme ("importeert", "roept aan", "via codeverwijzingen"). Hij gebruikt alleen wat de feiten dragen; ontbreekt een specifieke bedoeling, dan wordt het "gebruikt <doel>". De lengte staat alleen in de prompt: een te lange titel keurt niet het hele antwoord af.
+
+**Cache.** `relation_fingerprint` krijgt de hash van `c4_titles.md` erbij. Een gewijzigde prompt geeft zo nieuwe titels. Deze cache is de enige die een promptversie kent: classificaties en documentuitkomsten zijn bewust stabiele beslissingen (§17.5).
+
+**Grenzen,** als in §4.3 en §4.5: past de prompt niet, dan vervallen eerst `targets`, en daarna volgt de terugvaltitel met de reden in het rapport. Hetzelfde geldt voor geweigerde invoer. Terugvaltitels gaan niet in het lockbestand.
+
+### 17.5 Provider-SDK's
+
+Geen enkel van de 155 kandidaten is `external_system`: `openai`, `anthropic` en `voyageai` kregen 2 tegen 1 `library`. De code levert daardoor geen pijl naar een provider, terwijl de verwijzingen er zijn.
+
+**Prompt `c4_classify.md`.** Bij `external_system` komt erbij dat een SDK of client die bestaat om één extern beheerde dienst aan te roepen hieronder valt, ook al draait zijn code in het proces. Een algemene HTTP-client of parser die geen dienst aanwijst, blijft `library`. `library` blijft de veilige standaard.
+
+**Eenmalig in dit lockbestand.** De cache kent geen promptversie, en dat blijft zo, omdat opnieuw stemmen ook stabiele keuzes kan omdraaien, zoals `site/package.json` (2 tegen 1). Daarom haal ik vóór de run alleen de vermeldingen met waarde `library` of `external_system` uit `classifications`. Opslag en de vragen over containers blijven staan. Andere repository's hebben nog geen lockbestand versie 4, want deze branch is niet uitgebracht. Vóór de ingreep maak ik een kopie, omdat het lockbestand niet in Git staat.
+
+### 17.6 Run en acceptatie
+
+Eén volledige run plus `chunkhound autodoc` en `npm run build`. C4-aanroepen: 3 classify, 1 titels en 1 labels. `documented` blijft in de cache, behalve als topics andere documenten citeren. Daarbovenop komen HyDE en de researches, samen ongeveer 30 minuten, en AutoDoc, ongeveer 18 minuten.
+
+**Controles op de uitvoer:**
+
+1. geen merge-aanroep, dezelfde 19 componenten en id's;
+2. geen titel met "codeverwijzingen", en een steekproef van 20 titels tegen de code, want een statische verwijzing bewijst een afhankelijkheid en geen bedoeling;
+3. elk extern systeem en elke persoon in het contract heeft een relatie; `extern:chunkhound` en `extern:duckdb` bestaan niet meer;
+4. pijlen van `LLM-providers` of `Embeddingproviders` naar externe systemen;
+5. geen relatie tussen een container en zijn eigen component in het contract;
+6. labels met twee of meer titels aanwezig, en `ModelLoader` en de LikeC4-build zonder waarschuwing.
+
+**Verwacht, afgeleid en niet gedraaid:** ongeveer 12 externe systemen en 2 personen. Ollama verdwijnt waarschijnlijk van de kaart, want er is geen pakket en geen relatie die het draagt.
+
+### 17.7 Testen
+
+Contracttests volgens `AGENTS.md`, op de bestaande routes:
+
+1. Een externe documentterm met de naam van een container, opslag of het systeem geeft geen element, en een documentrelatie met die term koppelt.
+2. Contract zonder onverbonden extern systeem en persoon, met telling en namen; het interne paar houdt ze; een persoon of extern systeem met een relatie blijft.
+3. Regels a en b, met de tegenvoorbeelden: een container zonder componenten houdt zijn pijl, en een label blijft bestaan als een relatie uit regel b onder dezelfde pijl valt.
+4. Het titelverzoek bevat namen, omschrijvingen en doelen; een gewijzigde prompt vraagt nieuwe titels, en dezelfde prompt niet.
+5. Een te grote of geweigerde titelprompt breekt de run niet af en gaat niet in het lockbestand.
+
+### 17.8 Bewust niet
+
+- **Omschrijvingen van externe systemen en personen:** §5 blijft staan. C4 vraagt ze wel, dus de 40 lege omschrijvingen uit het rapport worden minder, maar verdwijnen niet.
+- **Misleidende mapnamen,** zoals `chunkhound/utils`: groepen blijven per map (§12, punt 4).
+- **Runtimecode die direct onder de container hangt,** zoals `watchman_runtime`: de merge-keuze blijft staan; een gebruiker kan die met `overrides.placements` veranderen.
+- **Weergavenaam:** een extern systeem uit een pakket heet `openai`, niet `OpenAI`.
+- **`c4_documented.md` herschrijven:** dat maakt alle documentuitkomsten ongeldig en voegt onzekerheid toe. Personen die de documenten niet noemen, zoals een MCP-client, blijven dus ontbreken.
+- **Protocollen op relaties tussen containers:** §12, punt 7. De telling daarvan daalt in deze run naar 0, terwijl dit niet is opgelost. Deel B pakt dit op.

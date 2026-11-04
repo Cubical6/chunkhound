@@ -8,6 +8,7 @@ import sys
 
 import pytest
 
+from chunkhound.code_mapper.c4 import merge as merge_module
 from chunkhound.code_mapper.c4.documented import TopicSources
 from chunkhound.code_mapper.c4.llm import C4Llm, RetryQueue
 from chunkhound.code_mapper.c4.lockfile import read_scope_lock, write_scope_lock
@@ -1190,6 +1191,27 @@ def test_new_limit_fields_do_not_change_input_fingerprint(tmp_path):
     assert _input_fingerprint(tmp_path, ["app.py"], plain, tmp_path) == (
         _input_fingerprint(tmp_path, ["app.py"], limited, tmp_path)
     )
+
+
+async def test_changed_titles_prompt_asks_new_titles_and_same_prompt_does_not(
+    fixture_repo, c4_llm_manager, pipeline_answers, monkeypatch
+):
+    first = await build(fixture_repo, c4_llm_manager)
+    assert pipeline_answers.calls["titles"]
+    pipeline_answers.calls.clear()
+
+    await build(fixture_repo, c4_llm_manager, lock=first.lock)
+    assert "titles" not in pipeline_answers.calls
+
+    original = merge_module.load_c4_prompt
+    monkeypatch.setattr(
+        merge_module,
+        "load_c4_prompt",
+        lambda step: original(step) + ("\nSay more." if step == "titles" else ""),
+    )
+    await build(fixture_repo, c4_llm_manager, lock=first.lock)
+    assert pipeline_answers.calls["titles"]
+    assert "merge" not in pipeline_answers.calls
 
 
 def test_input_fingerprint_is_the_same_in_every_process(tmp_path):

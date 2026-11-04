@@ -31,6 +31,7 @@ from chunkhound.code_mapper.c4.references import ReferenceScan
 from chunkhound.code_mapper.c4.runtime import RuntimeScan
 from chunkhound.core.detection.language_detector import detect_language
 from chunkhound.core.types.common import Language
+from chunkhound.utils.text import slugify_kebab
 
 # Every other language is its enum value, capitalized.
 _LANGUAGE_NAMES = {
@@ -317,8 +318,25 @@ class _Assembly:
             )
         return references
 
+    def _own_element(self, term: str) -> str | None:
+        """The system, container or storage this documentation term names, if one."""
+        slug = slugify_kebab(term, ascii_only=True)
+        own = {
+            element.id
+            for element in self.elements.values()
+            if element.kind in {"system", "container", "storage"}
+            and slugify_kebab(element.name, ascii_only=True) == slug
+        }
+        ids = self._relation_endpoint(own)
+        return next(iter(ids)) if len(ids) == 1 else None
+
     def documented_elements(self) -> None:
         for item in self.inp.documented.elements:
+            own = None if item.kind == "person" else self._own_element(item.term)
+            if own is not None:
+                self.citations.append(item.citation.model_copy(update={"target": own}))
+                self.doc_terms[item.term].add(own)
+                continue
             id = element_id(item.kind, item.term)
             # Match current names too: inherited component IDs may differ from names.
             matching = [

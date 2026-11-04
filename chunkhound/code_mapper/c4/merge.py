@@ -7,6 +7,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
+from typing import NoReturn
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -118,8 +119,14 @@ class _TitlesAnswer(_AnswerModel):
 def relation_fingerprint(
     from_key: str, to_key: str, refs: Iterable[tuple[ReferenceKind, str]]
 ) -> str:
-    """Multiplicity and source locations do not change the cached title."""
-    payload = json.dumps([from_key, to_key, sorted(set(refs))], ensure_ascii=True)
+    """Multiplicity and source locations do not change the cached title.
+
+    A changed titles prompt does: otherwise the lock would keep the old titles.
+    """
+    prompt = hashlib.sha256(load_c4_prompt("titles").encode()).hexdigest()
+    payload = json.dumps(
+        [prompt, from_key, to_key, sorted(set(refs))], ensure_ascii=True
+    )
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
@@ -345,6 +352,18 @@ def _apply_answer(
     return value
 
 
+def _raise_sorted(step: str, exc: Exception) -> NoReturn:
+    """Raise a provider failure as one of the step's failure kinds, or as fatal."""
+    translated = translate_call_error(exc, _is_retryable_poi_error)
+    if translated is None:
+        raise exc
+    if isinstance(translated, UnreadableAnswerError):
+        raise AnswerRejectedError(f"{step}: {translated.rule}") from exc
+    if isinstance(translated, TransientCallError):
+        raise TransientStepError(str(translated)) from exc
+    raise translated from exc
+
+
 async def _ask_merge(llm: C4Llm, prompt: str) -> MergeAnswer:
     """One provider call, with its failures sorted into the step's failure kinds."""
     try:
@@ -358,14 +377,7 @@ async def _ask_merge(llm: C4Llm, prompt: str) -> MergeAnswer:
     except AnswerRejectedError:
         raise
     except Exception as exc:
-        translated = translate_call_error(exc, _is_retryable_poi_error)
-        if translated is None:
-            raise
-        if isinstance(translated, UnreadableAnswerError):
-            raise AnswerRejectedError(f"merge: {translated.rule}") from exc
-        if isinstance(translated, TransientCallError):
-            raise TransientStepError(str(translated)) from exc
-        raise translated from exc
+        _raise_sorted("merge", exc)
 
 
 @dataclass(frozen=True)
@@ -653,10 +665,42 @@ async def merge_container(
     return result
 
 
+@dataclass(frozen=True)
+class TitleRequest:
+    """What a relation is known to connect: without it no title can say why."""
+
+    from_name: str
+    from_description: str
+    to_name: str
+    to_description: str
+    kinds: Mapping[ReferenceKind, int]
+    targets: tuple[str, ...]
+
+
+def _titles_prompt(
+    container: str, pending: Mapping[str, TitleRequest], *, targets: bool
+) -> str:
+    rows = [
+        {
+            "fingerprint": key,
+            "from": {"name": item.from_name, "description": item.from_description},
+            "to": {"name": item.to_name, "description": item.to_description},
+            "kinds": dict(sorted(item.kinds.items())),
+            **({"targets": list(item.targets)} if targets else {}),
+        }
+        for key, item in sorted(pending.items())
+    ]
+    return (
+        load_c4_prompt("titles")
+        + "\nInput:\n"
+        + json.dumps({"container": container, "relations": rows})
+    )
+
+
 async def title_relations(
     *,
     container: str,
-    pending: Mapping[str, Counter[ReferenceKind]],
+    pending: Mapping[str, TitleRequest],
     llm: C4Llm,
     retries: RetryQueue,
 ) -> dict[str, str]:
@@ -664,49 +708,62 @@ async def title_relations(
 
     The caller owns relation markers/cache exclusion: RetryQueue reports fallback
     operations, while this prescribed mapping contains only fingerprint/title.
+    A prompt that does not fit or is refused gets fallback titles, like any other
+    failure, so they stay out of the lock.
     """
     if not pending:
         return {}
 
     def default() -> dict[str, str]:
         return {
-            key: fallback_title(kind for kind, count in kinds.items() if count > 0)
-            for key, kinds in pending.items()
+            key: fallback_title(kind for kind, count in item.kinds.items() if count > 0)
+            for key, item in pending.items()
         }
 
     if llm.trial:
         return default()
-    prompt = (
-        load_c4_prompt("titles")
-        + "\nInput:\n"
-        + json.dumps(
-            {
-                "container": container,
-                "relations": [
-                    {"fingerprint": key, "kinds": dict(sorted(kinds.items()))}
-                    for key, kinds in sorted(pending.items())
-                ],
-            }
-        )
+    schema = _TitlesAnswer.model_json_schema()
+    limit = llm.input_limit("synthesis")
+    prompts = [
+        _titles_prompt(container, pending, targets=targets) for targets in (True, False)
+    ]
+    prompt = next(
+        (p for p in prompts if fits(p, schema, limit, llm.estimate_tokens)), None
     )
     report = llm.report(
         "titles",
         f"container {json.dumps(container)}: "
         f"{len(pending)} nieuwe of gewijzigde relaties",
     )
+    refused = prompt is None
+    if prompt is None:
+        size = measure_request(prompts[-1], schema, ())
+        report.record(f"invoer te groot: {size} tekens, limiet {limit.max_chars}")
 
     async def attempt() -> dict[str, str]:
-        with report.attempt():
-            answer = await llm.call(
-                "titles", _TitlesAnswer, prompt, provider="synthesis"
-            )
-            if Counter(row.fingerprint for row in answer.titles) != Counter(
-                {key: 1 for key in pending}
-            ) or any(not row.title.strip() for row in answer.titles):
-                raise AnswerRejectedError(
-                    "titles: every fingerprint must occur exactly once"
-                )
-            return {row.fingerprint: row.title for row in answer.titles}
+        nonlocal refused
+        if refused or prompt is None:
+            raise TransientStepError("titles: input refused")
+        try:
+            with report.attempt():
+                try:
+                    answer = await llm.call(
+                        "titles", _TitlesAnswer, prompt, provider="synthesis"
+                    )
+                except AnswerRejectedError:
+                    raise
+                except Exception as exc:
+                    _raise_sorted("titles", exc)
+                if Counter(row.fingerprint for row in answer.titles) != Counter(
+                    {key: 1 for key in pending}
+                ) or any(not row.title.strip() for row in answer.titles):
+                    raise AnswerRejectedError(
+                        "titles: every fingerprint must occur exactly once"
+                    )
+                return {row.fingerprint: row.title for row in answer.titles}
+        except ProviderInputRefusedError as exc:
+            refused = True
+            raise TransientStepError("titles: input refused") from exc
 
     result: dict[str, str] = {}
 

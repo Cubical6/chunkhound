@@ -6,10 +6,12 @@ from pathlib import Path
 
 import pytest
 
+from chunkhound.code_mapper.c4 import merge as merge_module
 from chunkhound.code_mapper.c4.grouping import Group
 from chunkhound.code_mapper.c4.llm import C4Llm, RetryQueue
 from chunkhound.code_mapper.c4.merge import (
     MergeAnswer,
+    TitleRequest,
     fallback_title,
     merge_container,
     relation_fingerprint,
@@ -18,7 +20,11 @@ from chunkhound.code_mapper.c4.merge import (
 from chunkhound.code_mapper.c4.model import LockedComponent, Reference
 from chunkhound.code_mapper.c4.runtime import RuntimeUnit
 from chunkhound.llm_manager import LLMManager
-from chunkhound.services.extraction.budget import ENVELOPE_MARGIN_CHARS, schema_text
+from chunkhound.services.extraction.budget import (
+    ENVELOPE_MARGIN_CHARS,
+    InputLimit,
+    schema_text,
+)
 
 CONTAINER = RuntimeUnit("container:shop", "shop", "pyproject.toml", ".", False, (), ())
 GROUPS = [
@@ -36,6 +42,17 @@ def answer(components=(), direct=(), titles=()):
         "direct": list(direct),
         "titles": list(titles),
     }
+
+
+def title_request(kinds, targets=("db/store.py",)):
+    return TitleRequest(
+        from_name="Orders",
+        from_description="Handles orders.",
+        to_name="Storage",
+        to_description="Keeps data.",
+        kinds=Counter(kinds),
+        targets=targets,
+    )
 
 
 def component(name, groups):
@@ -679,6 +696,14 @@ def test_fallback_titles(kinds, title):
     assert fallback_title(kinds) == title
 
 
+def test_fingerprint_follows_the_titles_prompt(monkeypatch):
+    refs = [("call", "db/store.py")]
+    before = relation_fingerprint("a", "b", refs)
+    assert before == relation_fingerprint("a", "b", refs)
+    monkeypatch.setattr(merge_module, "load_c4_prompt", lambda step: "another prompt")
+    assert before != relation_fingerprint("a", "b", refs)
+
+
 def test_fingerprint_tracks_pair_kind_target_but_not_order_or_duplicates():
     refs = [("call", "db/store.py"), ("import", "db/types.py")]
     fingerprint = relation_fingerprint("a", "b", refs)
@@ -705,7 +730,7 @@ async def test_titles_validate_all_fingerprints_and_retry(c4_llm_manager, script
     llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
     result = await title_relations(
         container=CONTAINER.id,
-        pending={"fp": Counter({"call": 1})},
+        pending={"fp": title_request({"call": 1})},
         llm=llm,
         retries=queue,
     )
@@ -715,10 +740,66 @@ async def test_titles_validate_all_fingerprints_and_retry(c4_llm_manager, script
     assert llm.calls == 2
 
 
+async def test_titles_prompt_names_what_the_relation_connects(
+    c4_llm_manager, scripted
+):
+    seen = []
+
+    def respond(prompt):
+        seen.append(data(prompt))
+        return {"titles": [{"fingerprint": "fp", "title": "bewaart bestellingen in"}]}
+
+    scripted.answers["titles"] = respond
+    result = await title_relations(
+        container=CONTAINER.id,
+        pending={"fp": title_request({"call": 2})},
+        llm=C4Llm(c4_llm_manager, concurrency=1, trial=False),
+        retries=RetryQueue(),
+    )
+    assert result == {"fp": "bewaart bestellingen in"}
+    assert seen[0]["relations"] == [
+        {
+            "fingerprint": "fp",
+            "from": {"name": "Orders", "description": "Handles orders."},
+            "to": {"name": "Storage", "description": "Keeps data."},
+            "kinds": {"call": 2},
+            "targets": ["db/store.py"],
+        }
+    ]
+
+
+async def test_titles_prompt_too_large_or_refused_falls_back_and_goes_on(
+    c4_llm_manager, scripted, monkeypatch
+):
+    pending = {"fp": title_request({"call": 1})}
+    llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
+    scripted.answers["titles"] = RuntimeError("input_too_large")
+    queue = RetryQueue()
+    result = await title_relations(
+        container=CONTAINER.id, pending=pending, llm=llm, retries=queue
+    )
+    assert await queue.drain() == 1
+    assert result == {"fp": "roept aan"}
+    assert llm.calls == 1
+
+    # Too large even without targets: no call at all, with the reason in the report.
+    monkeypatch.setattr(
+        llm, "input_limit", lambda role: InputLimit(max_chars=10, max_tokens=None)
+    )
+    queue = RetryQueue()
+    result = await title_relations(
+        container=CONTAINER.id, pending=pending, llm=llm, retries=queue
+    )
+    assert await queue.drain() == 1
+    assert result == {"fp": "roept aan"}
+    assert llm.calls == 1
+    assert "invoer te groot" in "\n".join(llm.report_lines())
+
+
 async def test_titles_timeout_fallback_and_trial(c4_llm_manager, scripted):
     scripted.answers["titles"] = TimeoutError("unavailable")
     queue = RetryQueue()
-    pending = {"fp": Counter({"import": 2, "inherit": 1})}
+    pending = {"fp": title_request({"import": 2, "inherit": 1})}
     result = await title_relations(
         container=CONTAINER.id,
         pending=pending,

@@ -7,6 +7,9 @@ For question "dependency", choose exactly one value:
 
 - "library": code loaded and executed inside its consuming runtime; the safe default.
 - "external_system": a package representing an independently operated remote service.
+  This includes an SDK or client that exists to call one such service, even though
+  its code runs inside the consuming runtime. A general HTTP client or parser that
+  names no service stays "library".
 - "storage_driver": a client or driver for storage. A driver alone is not a declared
   storage location and does not establish an extra runtime container.
 

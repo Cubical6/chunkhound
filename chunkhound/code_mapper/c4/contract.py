@@ -29,6 +29,7 @@ from chunkhound.code_mapper.c4.model import (
     Relation,
     SourceKind,
     Status,
+    relations_off_the_map,
 )
 from chunkhound.code_mapper.orchestrator import _get_head_sha
 from chunkhound.utils.git_safe import GitCommandError, run_git
@@ -165,6 +166,10 @@ class ContractCounts:
     without_technology: int = 0
     without_description: int = 0
     container_relations_without_protocol: int = 0
+    relations_inside_container: int = 0
+    redundant_direct_relations: int = 0
+    externals_without_relation: tuple[str, ...] = ()
+    persons_without_relation: tuple[str, ...] = ()
 
 
 def _source_id(
@@ -267,6 +272,32 @@ def _keep_elements(
         without_source=len(placed) - len(cited),
         without_valid_container=len(cited) - len(kept),
     )
+
+
+def _unconnected(
+    elements: Sequence[Element],
+    relations: Iterable[Relation],
+    system_id: str,
+) -> set[str]:
+    """Externals and persons with no relation to anything inside the system."""
+    outside = {e.id for e in elements if e.kind in {"external", "person"}}
+    inside = {system_id, *(e.id for e in elements)} - outside
+    connected = {
+        end
+        for relation in relations
+        for end, other in (
+            (relation.from_id, relation.to_id),
+            (relation.to_id, relation.from_id),
+        )
+        if other in inside
+    }
+    return outside - connected
+
+
+def _names(
+    elements: Iterable[Element], ids: set[str], kind: ElementKind
+) -> tuple[str, ...]:
+    return tuple(sorted(e.name for e in elements if e.id in ids and e.kind == kind))
 
 
 def _element(
@@ -398,14 +429,20 @@ def build_contract(
     direct_files = _direct_files(model, evidence)
 
     kept = _keep_elements(model, sources)
+    inside, redundant = relations_off_the_map(model.elements, model.relations)
+    on_the_map = [r for r in model.relations if r.id not in inside | redundant]
+    unconnected = _unconnected(
+        kept.elements, (r for r in on_the_map if sources.get(r.id)), system.id
+    )
     elements = [
         _element(element, system.id, direct_files[element.id], sources[element.id])
         for element in kept.elements
+        if element.id not in unconnected
     ]
     endpoints = {system.id, *(element.id for element in elements)}
     connected = [
         relation
-        for relation in model.relations
+        for relation in on_the_map
         if {relation.from_id, relation.to_id} <= endpoints
     ]
     relations = [
@@ -427,9 +464,13 @@ def build_contract(
         components_without_container=kept.without_container,
         elements_without_source=kept.without_source,
         components_without_valid_container=kept.without_valid_container,
-        relations_without_endpoint=len(model.relations) - len(connected),
+        relations_without_endpoint=len(on_the_map) - len(connected),
         relations_without_source=len(connected) - len(relations),
         labels=omitted_labels,
+        relations_inside_container=len(inside),
+        redundant_direct_relations=len(redundant),
+        externals_without_relation=_names(kept.elements, unconnected, "external"),
+        persons_without_relation=_names(kept.elements, unconnected, "person"),
         # C4 asks technology of containers and components only (spec §5).
         without_technology=sum(
             not element.technology

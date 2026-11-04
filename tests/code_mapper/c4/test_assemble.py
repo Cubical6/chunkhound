@@ -295,6 +295,34 @@ def test_documented_relation_with_shared_name_links_to_container():
     }
 
 
+def test_documented_own_name_joins_that_element_and_links_its_relations():
+    inp = assembly_input()
+    inp.runtime = replace(
+        inp.runtime,
+        storage=[StorageCandidate("Duckdb", "compose.yaml", 2, "DUCKDB=1")],
+    )
+    inp.classifications["Duckdb"] = Classification("yes", ("yes",), (), False)
+    inp.documented.elements = [
+        DocElement("external", "APP", citation(line=7)),
+        DocElement("component", "App", citation(line=8)),
+        DocElement("external", "DuckDB", citation(line=9)),
+        DocElement("external", "Stripe", citation(line=10)),
+        # A person may carry a name of the system, so this one stays.
+        DocElement("person", "App", citation(line=11)),
+    ]
+    inp.documented.relations = [
+        DocRelation("APP", "Stripe", "betaalt via", citation(line=12))
+    ]
+    elements, relations, evidence, unlinked = assemble_with_unlinked(inp)
+    ids = {element.id for element in elements}
+    assert {"extern:app", "component:app", "extern:duckdb"}.isdisjoint(ids)
+    assert {"persoon:app", "extern:stripe"} <= ids
+    assert "container:app->extern:stripe" in {relation.id for relation in relations}
+    assert unlinked.ambiguous == 0
+    assert citation(line=7, target="container:app") in evidence.citations
+    assert citation(line=9, target="opslag:duckdb") in evidence.citations
+
+
 def test_other_shared_names_stay_ambiguous():
     def ambiguous_count(*extra_units: RuntimeUnit) -> int:
         inp = assembly_input()

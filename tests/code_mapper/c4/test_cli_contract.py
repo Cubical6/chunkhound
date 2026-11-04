@@ -345,11 +345,14 @@ async def test_report_lines(cli, capsys):
         "1 door c4.exclude"
     )
     contract = [
-        "C4-contract: 14 elementen, 1 relaties, 22 bronnen, 0 labels, 2 topics",
+        "C4-contract: 12 elementen, 1 relaties, 21 bronnen, 0 labels, 2 topics",
         "C4-contract weggelaten: 0 componenten zonder container, 0 elementen zonder "
         "bron, 0 componenten zonder geldige container, 0 relaties zonder eindpunt, "
-        "0 relaties zonder bron, 0 labels",
-        "C4-contract onvolledig: 1 zonder technologie, 8 zonder omschrijving, "
+        "0 relaties zonder bron, 0 labels, 0 relaties binnen een container, "
+        "0 overbodige relaties van directe bestanden",
+        "C4-contract zonder relatie weggelaten: 1 externe systemen (Stripe), "
+        "1 personen (beheerder)",
+        "C4-contract onvolledig: 1 zonder technologie, 6 zonder omschrijving, "
         "0 relaties tussen containers zonder protocol",
         f"C4-contract repository .: geen bronlinks (commit {head} staat niet op "
         "origin)",
@@ -382,7 +385,9 @@ async def test_report_states_each_contract_count_under_its_own_label(cli, capsys
     build = c4_pipeline.build_contract
 
     def counted(*args):
-        return build(*args)[0], ContractCounts(1, 2, 3, 4, 5, 6, 7, 8, 9)
+        return build(*args)[0], ContractCounts(
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, ("Stripe", "Mollie"), ("Beheerder",)
+        )
 
     cli.monkeypatch.setattr(c4_pipeline, "build_contract", counted)
     await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
@@ -390,7 +395,12 @@ async def test_report_states_each_contract_count_under_its_own_label(cli, capsys
     assert (
         "C4-contract weggelaten: 1 componenten zonder container, 2 elementen zonder "
         "bron, 3 componenten zonder geldige container, 4 relaties zonder eindpunt, "
-        "5 relaties zonder bron, 6 labels"
+        "5 relaties zonder bron, 6 labels, 10 relaties binnen een container, "
+        "11 overbodige relaties van directe bestanden"
+    ) in report
+    assert (
+        "C4-contract zonder relatie weggelaten: 2 externe systemen (Stripe, Mollie), "
+        "1 personen (Beheerder)"
     ) in report
     assert (
         "C4-contract onvolledig: 7 zonder technologie, 8 zonder omschrijving, "

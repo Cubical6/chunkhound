@@ -48,6 +48,7 @@ from chunkhound.code_mapper.c4.llm import C4Llm, RetryQueue, StepReport
 from chunkhound.code_mapper.c4.merge import (
     MergeResult,
     ProposedComponent,
+    TitleRequest,
     merge_container,
     relation_fingerprint,
     title_relations,
@@ -450,15 +451,25 @@ def _fingerprints(
     }
 
 
+def _title_targets(evidence: C4Evidence) -> dict[str, tuple[str, ...]]:
+    reached: dict[str, set[str]] = defaultdict(set)
+    for reference in evidence.references:
+        if reference.relation:
+            reached[reference.relation].add(reference.to.removeprefix("package:"))
+    return {id: tuple(sorted(targets)[:5]) for id, targets in reached.items()}
+
+
 def _pending_titles(
     inp: AssemblyInput,
     elements: Sequence[Element],
     relations: Sequence[Relation],
-    fingerprints: dict[str, str],
+    evidence: C4Evidence,
     lock: ScopeLock | None,
-) -> dict[str, dict[str, Counter[ReferenceKind]]]:
+) -> dict[str, dict[str, TitleRequest]]:
     by_id = {element.id: element for element in elements}
-    pending: dict[str, dict[str, Counter[ReferenceKind]]] = defaultdict(dict)
+    fingerprints = _fingerprints(evidence, relations)
+    targets = _title_targets(evidence)
+    pending: dict[str, dict[str, TitleRequest]] = defaultdict(dict)
     for relation in relations:
         fingerprint = fingerprints.get(relation.id)
         if (
@@ -474,7 +485,15 @@ def _pending_titles(
         source = by_id[relation.from_id]
         container = source.parent if source.kind == "component" else source.id
         assert container is not None
-        pending[container][fingerprint] = Counter(relation.reference_counts)
+        target = by_id[relation.to_id]
+        pending[container][fingerprint] = TitleRequest(
+            from_name=source.name,
+            from_description=source.description or "",
+            to_name=target.name,
+            to_description=target.description or "",
+            kinds=Counter(relation.reference_counts),
+            targets=targets.get(relation.id, ()),
+        )
     return dict(pending)
 
 
@@ -483,7 +502,7 @@ async def _titles(
 ) -> tuple[list[Element], list[Relation], C4Evidence]:
     elements, relations, evidence = assemble(inp)
     fingerprints = _fingerprints(evidence, relations)
-    pending = _pending_titles(inp, elements, relations, fingerprints, lock)
+    pending = _pending_titles(inp, elements, relations, evidence, lock)
     outcomes = {
         container: await title_relations(
             container=container, pending=items, llm=llm, retries=draft.steps
@@ -684,6 +703,11 @@ def _merge_lines(draft: C4Draft, trial: bool) -> list[str]:
     return lines
 
 
+def _named(names: tuple[str, ...], noun: str) -> str:
+    listed = f" ({', '.join(names)})" if names else ""
+    return f"{len(names)} {noun}{listed}"
+
+
 def _contract_lines(
     contract: Contract, counts: ContractCounts, repository_reasons: dict[str, str]
 ) -> list[str]:
@@ -696,7 +720,13 @@ def _contract_lines(
         f"{counts.components_without_valid_container} componenten zonder geldige "
         f"container, {counts.relations_without_endpoint} relaties zonder eindpunt, "
         f"{counts.relations_without_source} relaties zonder bron, "
-        f"{counts.labels} labels",
+        f"{counts.labels} labels, "
+        f"{counts.relations_inside_container} relaties binnen een container, "
+        f"{counts.redundant_direct_relations} overbodige relaties van directe "
+        "bestanden",
+        "C4-contract zonder relatie weggelaten: "
+        f"{_named(counts.externals_without_relation, 'externe systemen')}, "
+        f"{_named(counts.persons_without_relation, 'personen')}",
         f"C4-contract onvolledig: {counts.without_technology} zonder technologie, "
         f"{counts.without_description} zonder omschrijving, "
         f"{counts.container_relations_without_protocol} relaties tussen containers "

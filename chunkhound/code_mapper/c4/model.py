@@ -1,5 +1,6 @@
 """Versioned, renderer-independent C4 output and per-scope cache contracts."""
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
@@ -180,6 +181,43 @@ class ScopeLock(_C4BaseModel):
 class MapLock(_C4BaseModel):
     version: int = SCHEMA_VERSION
     scopes: dict[str, ScopeLock]
+
+
+def relations_off_the_map(
+    elements: Sequence[Element], relations: Sequence[Relation]
+) -> tuple[set[str], set[str]]:
+    """Relations that stay in the pair but not on the map: (inside, redundant).
+
+    Files in no component belong to their container, so their references become
+    relations of that container. One with its own component runs inside it, and
+    one whose target a component also reaches adds nothing to the container view.
+    """
+    parents = {
+        element.id: element.parent
+        for element in elements
+        if element.kind == "component"
+    }
+    containers = {element.id for element in elements if element.kind == "container"}
+    reached = {
+        (parents[relation.from_id], relation.to_id)
+        for relation in relations
+        if relation.from_id in parents
+    }
+    inside = {
+        relation.id
+        for relation in relations
+        if parents.get(relation.from_id) == relation.to_id
+        or parents.get(relation.to_id) == relation.from_id
+    }
+    redundant = {
+        relation.id
+        for relation in relations
+        if relation.from_id in containers
+        and relation.status == "found"
+        and relation.id not in inside
+        and (relation.from_id, relation.to_id) in reached
+    }
+    return inside, redundant
 
 
 class C4PairMismatchError(ValueError):

@@ -14,7 +14,13 @@ from chunkhound.code_mapper.c4.llm import (
     TransientStepError,
     load_c4_prompt,
 )
-from chunkhound.code_mapper.c4.model import Element, Marker, MergedArrow, Relation
+from chunkhound.code_mapper.c4.model import (
+    Element,
+    Marker,
+    MergedArrow,
+    Relation,
+    relations_off_the_map,
+)
 
 
 class _SummaryLabel(BaseModel):
@@ -86,6 +92,8 @@ def derive_views(
     elements: Sequence[Element], relations: Sequence[Relation]
 ) -> list[MergedArrow]:
     by_id = {e.id: e for e in elements}
+    inside, redundant = relations_off_the_map(elements, relations)
+    on_the_map = [r for r in relations if r.id not in inside | redundant]
     context = {e.id for e in elements if e.kind in {"system", "person", "external"}}
     containers = {
         e.id for e in elements if e.kind != "component" and e.kind != "system"
@@ -101,7 +109,7 @@ def derive_views(
     return [
         arrow
         for view, visible in sorted(views.items())
-        for arrow in _view_arrows(view, visible, by_id, relations)
+        for arrow in _view_arrows(view, visible, by_id, on_the_map)
     ]
 
 

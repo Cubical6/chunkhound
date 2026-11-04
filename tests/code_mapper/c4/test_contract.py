@@ -21,6 +21,7 @@ from chunkhound.code_mapper.c4.contract import (
 )
 from chunkhound.code_mapper.c4.documented import TopicSources
 from chunkhound.code_mapper.c4.model import C4Evidence, C4Model
+from chunkhound.code_mapper.c4.summaries import derive_views
 from chunkhound.utils.git_safe import run_git
 from tests.code_mapper.c4.test_pipeline import (
     build,
@@ -257,6 +258,7 @@ def test_elements_and_relations_translate_to_contract_terms() -> None:
         ],
         [
             relation("component:orders", "storage:db", "writes"),
+            relation("component:orders", "external:stripe", "charges"),
             relation("person:admin", "system:app", "uses", status="documented"),
         ],
         citations=[
@@ -267,6 +269,7 @@ def test_elements_and_relations_translate_to_contract_terms() -> None:
             cite("external:stripe", "shop/orders.py", 4),
             cite("person:admin", "README.md", 3, source="documentation"),
             cite("component:orders->storage:db", "shop/orders.py", 9),
+            cite("component:orders->external:stripe", "shop/orders.py", 4),
             cite("person:admin->system:app", "README.md", 3, source="documentation"),
         ],
         files={
@@ -448,6 +451,135 @@ def test_repository_of_the_index_root_is_always_listed() -> None:
     assert [row.id for row in contract.repositories] == [".", "vendor"]
 
 
+def test_external_and_person_without_relation_leave_the_contract_only() -> None:
+    model, evidence = pair(
+        [
+            element("container:api", "container"),
+            element("external:used", "external", None),
+            element("external:alone", "external", None),
+            element("external:pair-a", "external", None),
+            element("external:pair-b", "external", None),
+            element("person:user", "person", None),
+            element("person:alone", "person", None),
+        ],
+        [
+            relation("container:api", "external:used"),
+            relation("person:user", "system:app"),
+            # Connected only to each other: nothing ties them to the system.
+            relation("external:pair-a", "external:pair-b"),
+        ],
+        citations=[
+            cite(id)
+            for id in (
+                "container:api",
+                "external:used",
+                "external:alone",
+                "external:pair-a",
+                "external:pair-b",
+                "person:user",
+                "person:alone",
+                "container:api->external:used",
+                "person:user->system:app",
+                "external:pair-a->external:pair-b",
+            )
+        ],
+    )
+
+    contract, counts = build_contract(model, evidence, None, root_repository)
+
+    assert {row.id for row in contract.elements} == {
+        "container:api",
+        "external:used",
+        "person:user",
+    }
+    assert {row.id for row in contract.relations} == {
+        "container:api->external:used",
+        "person:user->system:app",
+    }
+    assert counts.externals_without_relation == ("alone", "pair-a", "pair-b")
+    assert counts.persons_without_relation == ("alone",)
+    assert counts.relations_without_endpoint == 1
+    assert {"external:alone", "person:alone"} <= {e.id for e in model.elements}
+
+
+def direct_file_pair(
+    *relations: dict[str, Any],
+) -> tuple[C4Model, C4Evidence]:
+    return pair(
+        [
+            element("container:api", "container"),
+            element("component:orders", "component", "container:api"),
+            element("container:bare", "container"),
+            element("storage:db", "storage"),
+        ],
+        relations,
+        citations=[
+            *(
+                cite(id)
+                for id in (
+                    "container:api",
+                    "component:orders",
+                    "container:bare",
+                    "storage:db",
+                )
+            ),
+            *(cite(row["id"]) for row in relations),
+        ],
+    )
+
+
+def test_relations_of_direct_files_leave_the_map_only_when_adding_nothing() -> None:
+    model, evidence = direct_file_pair(
+        # Rule a: a container and its own component, in either direction.
+        relation("container:api", "component:orders", "a"),
+        relation("component:orders", "container:api", "b"),
+        # Rule b: the component already reaches this target.
+        relation("container:api", "storage:db", "c"),
+        relation("component:orders", "storage:db", "d"),
+        # Kept: no component of this container reaches the target.
+        relation("container:bare", "storage:db", "e"),
+        relation("container:api", "container:bare", "f"),
+    )
+
+    contract, counts = build_contract(model, evidence, None, root_repository)
+
+    assert {row.id for row in contract.relations} == {
+        "component:orders->storage:db",
+        "container:bare->storage:db",
+        "container:api->container:bare",
+    }
+    assert counts.relations_inside_container == 2
+    assert counts.redundant_direct_relations == 1
+    assert counts.relations_without_endpoint == 0
+    assert len(model.relations) == 6
+
+
+def test_documented_relation_of_a_container_is_not_redundant() -> None:
+    model, evidence = direct_file_pair(
+        relation("container:api", "storage:db", "c", status="documented"),
+        relation("component:orders", "storage:db", "d"),
+    )
+    contract, counts = build_contract(model, evidence, None, root_repository)
+    assert "container:api->storage:db" in {row.id for row in contract.relations}
+    assert counts.redundant_direct_relations == 0
+
+
+def test_views_ignore_relations_off_the_map_so_their_labels_survive() -> None:
+    model, _ = direct_file_pair(
+        relation("container:api", "component:orders", "a"),
+        relation("container:api", "storage:db", "c"),
+        relation("component:orders", "storage:db", "d"),
+    )
+    arrows = {
+        arrow.id: arrow.underlying
+        for arrow in derive_views(model.elements, model.relations)
+    }
+    assert arrows["containers:container:api->storage:db"] == [
+        "component:orders->storage:db"
+    ]
+    assert not any("container:api->component:orders" in ids for ids in arrows.values())
+
+
 def test_omitted_parts_are_absent_counted_and_kept_in_the_pair(tmp_path) -> None:
     model, evidence = pair(
         [
@@ -469,7 +601,7 @@ def test_omitted_parts_are_absent_counted_and_kept_in_the_pair(tmp_path) -> None
             relation("component:orphan", "component:kept"),
             relation("component:kept", "external:never-existed"),
             # Rule 3: both endpoints exist, but nothing supports the relation.
-            relation("container:kept", "component:kept"),
+            relation("system:app", "container:kept"),
         ],
         citations=[
             cite("container:kept", "kept.py"),
@@ -781,7 +913,8 @@ def test_incomplete_parts_are_counted() -> None:
         [
             relation("container:bare", "container:full"),
             relation("container:full", "storage:volume"),
-            relation("component:bare", "container:full"),
+            relation("component:bare", "storage:volume"),
+            relation("component:bare", "external:api"),
             relation("person:admin", "container:full"),
         ],
         citations=[
@@ -793,7 +926,8 @@ def test_incomplete_parts_are_counted() -> None:
             cite("external:api"),
             cite("container:bare->container:full", line=2),
             cite("container:full->storage:volume", line=3),
-            cite("component:bare->container:full", line=4),
+            cite("component:bare->storage:volume", line=4),
+            cite("component:bare->external:api", line=6),
             cite("person:admin->container:full", line=5),
         ],
     )
