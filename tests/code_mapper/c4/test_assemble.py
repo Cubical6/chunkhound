@@ -15,7 +15,7 @@ from chunkhound.code_mapper.c4.documented import (
     DocumentedOutcome,
     TopicSources,
 )
-from chunkhound.code_mapper.c4.grouping import Group, GroupingResult
+from chunkhound.code_mapper.c4.grouping import Group
 from chunkhound.code_mapper.c4.merge import ProposedComponent
 from chunkhound.code_mapper.c4.model import Citation, Overrides, Reference
 from chunkhound.code_mapper.c4.references import ReferenceScan
@@ -102,7 +102,7 @@ def assembly_input():
             frozenset({"b.py"}),
             {"stripe": [("a.py", 2)], "sqlite": [("a.py", 3)]},
         ),
-        GroupingResult({}, groups, frozenset(), {}),
+        groups,
         components,
         {container.id: ["direct"]},
         {

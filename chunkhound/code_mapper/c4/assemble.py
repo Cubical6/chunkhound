@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from chunkhound.code_mapper.c4.classify import Classification
 from chunkhound.code_mapper.c4.documented import DocumentedOutcome
-from chunkhound.code_mapper.c4.grouping import GroupingResult
+from chunkhound.code_mapper.c4.grouping import Group
 from chunkhound.code_mapper.c4.identity import element_id
 from chunkhound.code_mapper.c4.merge import (
     ProposedComponent,
@@ -33,7 +33,7 @@ from chunkhound.code_mapper.c4.runtime import RuntimeScan
 class AssemblyInput:
     runtime: RuntimeScan
     references: ReferenceScan
-    groups: GroupingResult
+    groups: list[Group]
     components: dict[str, tuple[ProposedComponent, str]]
     direct_groups: dict[str, list[str]]
     classifications: dict[str, Classification]
@@ -130,7 +130,7 @@ class _Assembly:
             self.cite(id, candidate.file, candidate.line, "configuration")
 
     def components(self) -> None:
-        groups = {group.id: group for group in self.inp.groups.groups}
+        groups = {group.id: group for group in self.inp.groups}
         for proposal, id in sorted(
             self.inp.components.values(), key=lambda pair: pair[1]
         ):
@@ -156,7 +156,7 @@ class _Assembly:
 
     def implementation_sources(self) -> None:
         implementation_files = {
-            file for group in self.inp.groups.groups for file in group.files
+            file for group in self.inp.groups for file in group.files
         }
         for file in sorted(implementation_files):
             owner = self.owners[file]

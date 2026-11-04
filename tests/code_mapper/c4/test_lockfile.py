@@ -22,18 +22,14 @@ def sample_lock(base_sha: str = "abc") -> ScopeLock:
             "base_sha": base_sha,
             "system": "systeem:app",
             "containers": {"pyproject.toml": "container:app"},
-            "tree_spec": {"app": {"groups": ["src"]}},
-            "group_membership": {
-                "container:app": {"src/api.py": "1", "settings.py": "2"}
-            },
-            "direct_groups": {"container:app": ["container:app/2"]},
+            "direct_groups": {"container:app": ["container:app/."]},
             "transition": None,
             "components": {
                 "component:api": {
                     "name": "API",
                     "description": None,
                     "container": "container:app",
-                    "groups": ["src"],
+                    "groups": ["container:app/src"],
                     "files": ["src/api.py"],
                 }
             },
@@ -78,19 +74,52 @@ def test_lock_is_byte_stable(tmp_path: Path) -> None:
     jsonschema.validate(document, shipped_schema("map_lock"))
 
 
-def test_lock_keeps_membership_for_groups_without_components(tmp_path: Path) -> None:
+def test_lock_keeps_direct_groups_without_components(tmp_path: Path) -> None:
     lock = sample_lock()
     lock.components = {}
     path = write_scope_lock(tmp_path, "/", lock)
     raw = json.loads(path.read_text())
-    assert raw["scopes"]["/"]["group_membership"] == {
-        "container:app": {"src/api.py": "1", "settings.py": "2"}
-    }
+    assert raw["version"] == 4
+    assert raw["scopes"]["/"]["direct_groups"] == {"container:app": ["container:app/."]}
+    assert not {"tree_spec", "group_membership"}.intersection(raw["scopes"]["/"])
     restored = read_scope_lock(tmp_path, "/")
     assert restored is not None
-    assert restored.group_membership == lock.group_membership
+    assert restored.direct_groups == lock.direct_groups
     assert restored.components == {}
     jsonschema.validate(raw, shipped_schema("map_lock"))
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        json.dumps(
+            {
+                "version": 3,
+                "scopes": {"/": {"tree_spec": {}, "group_membership": {}}},
+            }
+        ),
+        '{"version": 99, "scopes": {}}',
+        '{"scopes": {}}',
+        "{}",
+        "[]",
+        "null",
+        '"version"',
+    ],
+)
+def test_v3_lock_gives_clear_message(tmp_path: Path, content: str) -> None:
+    path = tmp_path / LOCK_RELATIVE_PATH
+    path.parent.mkdir(parents=True)
+    path.write_text(content)
+    for attempt in (
+        lambda: read_scope_lock(tmp_path, "/"),
+        lambda: write_scope_lock(tmp_path, "/", sample_lock()),
+    ):
+        with pytest.raises(LockfileError) as raised:
+            attempt()
+        assert str(path) in str(raised.value)
+        assert "older version" in str(raised.value)
+        assert "delete" in str(raised.value).lower()
+    assert path.read_text() == content
 
 
 def test_lock_sections_are_independent_per_scope(tmp_path: Path) -> None:
@@ -113,6 +142,8 @@ def test_lock_sections_are_independent_per_scope(tmp_path: Path) -> None:
         "not JSON",
         '{"version": 1, "scopes": {"/": {}}}',
         '{"version": 99, "scopes": {}}',
+        '{"version": 4, "scopes": {"/": {}}}',
+        '{"version": 4, "scopes": {"/": {"tree_spec": {}}}}',
     ],
 )
 def test_corrupt_lockfile_is_reported_not_overwritten(

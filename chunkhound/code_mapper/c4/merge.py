@@ -168,7 +168,7 @@ def _default_merge(container: str, groups: Sequence[Group], trial: bool) -> Merg
         [
             ProposedComponent(
                 _proposal_key(container, [group.id]),
-                group.prefix or group.name,
+                group.name,
                 None,
                 (group.id,),
                 (marker, "not_merged", "provisional"),

@@ -101,7 +101,7 @@ async def test_merge_fallback_marks_components(c4_llm_manager, scripted):
     assert llm.calls == 2
     assert result.fallback
     assert [(c.name, c.groups, c.description) for c in result.components] == [
-        (g.prefix, (g.id,), None) for g in GROUPS
+        (g.name, (g.id,), None) for g in GROUPS
     ]
     assert all(
         set(c.markers) == {"fallback", "not_merged", "provisional"}

@@ -91,18 +91,18 @@ uv run scripts/generate_c4_schemas.py                                           
 
 Dit is de grootste enkele taak, en de bestaande tests wijzigen hier het meest. Herschrijf ze; laat geen oude en nieuwe versie naast elkaar staan.
 
-- [ ] **Step 1: Rode tests.**
+- [x] **Step 1: Rode tests.**
   - `test_each_directory_is_one_group`: alleen directe bestanden, wortel als `.`, naam van de wortel is de containernaam.
   - `test_new_file_in_known_directory_needs_no_merge_call`.
   - `test_new_directory_needs_one_merge_call`, ook onder een geclaimde map.
   - `test_v3_lock_gives_clear_message`: ook zonder object of versie.
   - Herschrijf `test_groups_are_deterministic_and_replay` en `test_explicit_root_survives_changed_file_parent_ancestry`. Verwijder `test_known_term_and_fallback_members_stay_while_new_directory_is_grouped` en `test_unplaced_and_unparseable_files_are_not_dropped`, want zonder parsen is er geen plaatsingsstap meer.
-- [ ] **Step 2:** `build_groups(*, files, container_of, container_roots, container_names) -> list[Group]`. Verwijder `GroupingResult` en parsen.
-- [ ] **Step 3:** `SCHEMA_VERSION = 4`; `tree_spec` en `group_membership` uit `ScopeLock`; `draft.grouping` wordt een lijst groepen.
-- [ ] **Step 4:** `_read_lock` controleert de versie vóór de validatie (§6).
-- [ ] **Step 5:** `_default_merge` gebruikt `group.name` als naam. Het blijft voorlopig ook bij een echte terugval gelden; dat wijzigt Taak 4.
-- [ ] **Step 6:** Verwijder `names/`. Behoud `source_inspector`, `hierarchy_fallback`, `models`, `config`, `LICENSE` en bestandskoppen. Controleer `pyproject.toml:170`, `references.py:14`.
-- [ ] **Step 7:** Schema's regenereren; tests, ruff en mypy.
+- [x] **Step 2:** `build_groups(*, files, container_of, container_roots, container_names) -> list[Group]`. Verwijder `GroupingResult` en parsen.
+- [x] **Step 3:** `SCHEMA_VERSION = 4`; `tree_spec` en `group_membership` uit `ScopeLock`; `draft.grouping` wordt een lijst groepen.
+- [x] **Step 4:** `_read_lock` controleert de versie vóór de validatie (§6).
+- [x] **Step 5:** `_default_merge` gebruikt `group.name` als naam. Het blijft voorlopig ook bij een echte terugval gelden; dat wijzigt Taak 4.
+- [x] **Step 6:** Verwijder `names/`. Behoud `source_inspector`, `hierarchy_fallback`, `models`, `config`, `LICENSE` en bestandskoppen. Controleer `pyproject.toml:170`, `references.py:14`.
+- [x] **Step 7:** Schema's regenereren; tests, ruff en mypy.
 
 ### Task 4: Mislukte of onvolledige merge-stap (spec §4.5)
 

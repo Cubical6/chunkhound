@@ -30,7 +30,7 @@ from chunkhound.code_mapper.c4.documented import (
     report_lines as documented_report_lines,
 )
 from chunkhound.code_mapper.c4.files import list_scope_files
-from chunkhound.code_mapper.c4.grouping import GroupingResult, build_groups
+from chunkhound.code_mapper.c4.grouping import Group, build_groups
 from chunkhound.code_mapper.c4.identity import (
     IdentityResult,
     assign_component_ids,
@@ -119,9 +119,7 @@ class C4Draft:
     steps: LlmSteps
     input_fingerprint: str
     direct_groups: dict[str, list[str]] = field(default_factory=dict)
-    grouping: GroupingResult = field(
-        default_factory=lambda: GroupingResult({}, [], frozenset(), {})
-    )
+    grouping: list[Group] = field(default_factory=list)
     merges: dict[str, MergeResult] = field(default_factory=dict)
     prepared: bool = False
 
@@ -194,7 +192,7 @@ def _scan(draft: C4Draft, lock: ScopeLock | None) -> RuntimeScan:
 
 
 def _group_links(draft: C4Draft) -> dict[tuple[str, str], Counter[ReferenceKind]]:
-    owners = {file: group.id for group in draft.grouping.groups for file in group.files}
+    owners = {file: group.id for group in draft.grouping for file in group.files}
     links: dict[tuple[str, str], Counter[ReferenceKind]] = defaultdict(Counter)
     for ref in draft.references.references:
         source, target = owners.get(ref.from_file), owners.get(ref.to)
@@ -206,17 +204,14 @@ def _group_links(draft: C4Draft) -> dict[tuple[str, str], Counter[ReferenceKind]
 async def _prepare(draft: C4Draft, llm: C4Llm, lock: ScopeLock | None) -> None:
     draft.runtime = _scan(draft, lock)
     draft.grouping = build_groups(
-        project_root=draft.project_root,
         files=sorted(draft.runtime.container_of),
         container_of=draft.runtime.container_of,
         container_roots={unit.id: unit.root for unit in draft.runtime.containers},
-        references=draft.references.references,
-        stored=lock.tree_spec if lock else {},
-        stored_membership=lock.group_membership if lock else {},
+        container_names={unit.id: unit.name for unit in draft.runtime.containers},
     )
     links = _group_links(draft)
     groups_by_container = defaultdict(list)
-    for group in draft.grouping.groups:
+    for group in draft.grouping:
         groups_by_container[group.container].append(group)
     for container in draft.runtime.containers:
         groups = groups_by_container[container.id]
@@ -328,7 +323,7 @@ async def analyze_c4(
 def _identify(
     draft: C4Draft, docs: DocumentedOutcome, lock: ScopeLock | None
 ) -> tuple[IdentityResult, dict[str, tuple[ProposedComponent, str]], bool]:
-    groups = {g.id: g for g in draft.grouping.groups}
+    groups = {g.id: g for g in draft.grouping}
     proposals = {p.key: p for merge in draft.merges.values() for p in merge.components}
     renames = detect_renames(draft.project_root, lock.base_sha if lock else "")
     identity = assign_component_ids(
@@ -445,7 +440,7 @@ async def _titles(
 def _lock_components(
     inp: AssemblyInput, evidence: C4Evidence
 ) -> dict[str, LockedComponent]:
-    groups = {g.id: g for g in inp.groups.groups}
+    groups = {g.id: g for g in inp.groups}
     return {
         id: LockedComponent(
             name=p.name,
@@ -549,10 +544,6 @@ def _build_lock(
             for unit in draft.runtime.containers
             if not {"fallback", "trial"}.intersection(unit.markers)
         },
-        tree_spec={
-            id: tree.to_dict() for id, tree in draft.grouping.tree_specs.items()
-        },
-        group_membership=draft.grouping.group_membership,
         direct_groups=_direct_groups(draft),
         transition=_transition(draft, model, inp, fingerprint),
         components=_lock_components(inp, evidence),

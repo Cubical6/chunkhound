@@ -38,7 +38,8 @@ def merge_answer(prompt):
     return {
         "components": [
             {
-                "name": group["name"],
+                # Root and same-named directory groups share a name, not an id.
+                "name": group["id"],
                 "description": "Domain responsibility.",
                 "groups": [group["id"]],
             }
@@ -279,7 +280,7 @@ async def test_rerun_unchanged_zero_calls_stable_output(
 ):
     first = await build(fixture_repo, c4_llm_manager)
     assert first.fallback_count == 0
-    assert first.lock.group_membership
+    assert first.lock.components
     write_scope_lock(tmp_path / "cache", "shop", first.lock)
     restored = read_scope_lock(tmp_path / "cache", "shop")
     pipeline_answers.calls.clear()
@@ -288,6 +289,73 @@ async def test_rerun_unchanged_zero_calls_stable_output(
     assert second.model == first.model
     assert second.evidence == first.evidence
     assert second.lock == first.lock
+
+
+async def test_new_file_in_known_directory_needs_no_merge_call(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    first = await build(fixture_repo, c4_llm_manager)
+    owner, before = next(
+        (id, c)
+        for id, c in first.lock.components.items()
+        if "shop/orders.py" in c.files
+    )
+    (fixture_repo / "shop/refunds.py").write_text("class Refund: pass\n")
+    pipeline_answers.calls.clear()
+    second = await build(fixture_repo, c4_llm_manager, lock=first.lock)
+    assert pipeline_answers.calls["merge"] == 0
+    assert second.fallback_count == 0
+    after = second.lock.components[owner]
+    assert after.groups == before.groups == ["container:shop/shop"]
+    assert set(after.files) == {*before.files, "shop/refunds.py"}
+    assert set(second.lock.components) == set(first.lock.components)
+
+
+@pytest.mark.parametrize(
+    ("directory", "group"),
+    [
+        ("billing", "container:shop/billing"),
+        # A directory below a claimed one is still its own, unclaimed group.
+        ("shop/billing", "container:shop/shop/billing"),
+    ],
+)
+async def test_new_directory_needs_one_merge_call(
+    fixture_repo, c4_llm_manager, pipeline_answers, directory, group
+):
+    first = await build(fixture_repo, c4_llm_manager)
+    (fixture_repo / directory).mkdir()
+    (fixture_repo / directory / "invoice.py").write_text("class Invoice: pass\n")
+    (fixture_repo / directory / "credit.py").write_text("class Credit: pass\n")
+    sent = []
+
+    def merge(prompt):
+        sent.append([row["id"] for row in payload(prompt)["groups"]])
+        return merge_answer(prompt)
+
+    pipeline_answers.answers["merge"] = merge
+    pipeline_answers.calls.clear()
+    second = await build(fixture_repo, c4_llm_manager, lock=first.lock)
+    assert pipeline_answers.calls["merge"] == 1
+    assert sent == [[group]]
+    assert second.fallback_count == 0
+    assert set(first.lock.components) < set(second.lock.components)
+    new = set(second.lock.components) - set(first.lock.components)
+    assert [second.lock.components[id].groups for id in new] == [[group]]
+
+
+async def test_trial_names_root_group_after_container(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    result = await build(fixture_repo, c4_llm_manager, trial=True)
+    root = next(
+        e
+        for e in result.model.elements
+        if e.kind == "component"
+        and "pyproject.toml" in result.evidence.element_files[e.id]
+    )
+    assert root.name == "shop"
+    assert "component:topic" not in {e.id for e in result.model.elements}
+    assert "." not in {e.name for e in result.model.elements}
 
 
 async def test_trial_run_uses_lock_only(fixture_repo, c4_llm_manager, pipeline_answers):
@@ -314,7 +382,11 @@ async def test_direct_groups_replay_without_merge(
     }
     first = await build(fixture_repo, c4_llm_manager)
     assert not first.lock.components
-    assert first.lock.group_membership
+    assert first.lock.direct_groups["container:shop"] == [
+        "container:shop/.",
+        "container:shop/shop",
+        "container:shop/templates",
+    ]
     pipeline_answers.calls.clear()
     second = await build(fixture_repo, c4_llm_manager, lock=first.lock)
     assert not pipeline_answers.calls
@@ -585,7 +657,7 @@ async def test_direct_placements_survive_independent_new_merge_failure(
     assert failed.lock.direct_groups == first.lock.direct_groups
     assert failed.lock.transition is None
     assert not failed.lock.components
-    assert "billing/invoice.py" in failed.lock.group_membership["container:shop"]
+    assert "billing/invoice.py" in failed.evidence.element_files["container:shop"]
     pipeline_answers.answers["merge"] = merge_answer
     pipeline_answers.calls.clear()
     recovered = await build(fixture_repo, c4_llm_manager, lock=failed.lock)

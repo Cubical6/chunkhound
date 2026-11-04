@@ -18,9 +18,14 @@ def _read_lock(path: Path) -> tuple[MapLock, dict[str, Any]]:
     """Validate the whole lock while keeping manual sections in their original shape."""
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
+        # Before validation: an old lock's fields would only give a schema error.
+        if not isinstance(raw, dict) or raw.get("version") != SCHEMA_VERSION:
+            raise LockfileError(
+                f"C4 lockfile {path} is from an older version of ChunkHound "
+                f"(expected lock version {SCHEMA_VERSION}). "
+                "Delete it and run `chunkhound map` again."
+            )
         lock = MapLock.model_validate(raw)
-        if lock.version != SCHEMA_VERSION:
-            raise ValueError(f"unsupported lock version {lock.version}")
     except (OSError, ValueError) as exc:
         raise LockfileError(f"Cannot read C4 lockfile {path}: {exc}") from exc
     return lock, raw

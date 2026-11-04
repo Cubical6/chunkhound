@@ -303,16 +303,6 @@
             }
           ]
         },
-        "group_membership": {
-          "additionalProperties": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object"
-          },
-          "title": "Group Membership",
-          "type": "object"
-        },
         "overrides": {
           "$ref": "#/$defs/Overrides"
         },
@@ -350,22 +340,12 @@
               "type": "null"
             }
           ]
-        },
-        "tree_spec": {
-          "additionalProperties": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "title": "Tree Spec",
-          "type": "object"
         }
       },
       "required": [
         "base_sha",
         "system",
         "containers",
-        "tree_spec",
-        "group_membership",
         "direct_groups",
         "transition",
         "components",
@@ -390,7 +370,7 @@
       "type": "object"
     },
     "version": {
-      "default": 3,
+      "default": 4,
       "title": "Version",
       "type": "integer"
     }

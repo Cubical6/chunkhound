@@ -5,7 +5,7 @@ from typing import Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 ElementKind: TypeAlias = Literal[
     "system", "container", "storage", "component", "external", "person"
@@ -165,8 +165,6 @@ class ScopeLock(_C4BaseModel):
     base_sha: str
     system: str
     containers: dict[str, str]
-    tree_spec: dict[str, dict[str, Any]]
-    group_membership: dict[str, dict[str, str]]
     direct_groups: dict[str, list[str]]
     transition: LockedTransition | None
     components: dict[str, LockedComponent]

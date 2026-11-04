@@ -113,7 +113,8 @@ def cli(fixture_repo, c4_llm_manager, scripted, monkeypatch, tmp_path):
             "merge": lambda prompt: {
                 "components": [
                     {
-                        "name": row["name"],
+                        # Root and same-named directory groups share a name.
+                        "name": row["id"],
                         "description": "Domain responsibility.",
                         "groups": [row["id"]],
                     }
@@ -377,6 +378,23 @@ async def test_corrupt_lock_stops_before_research(cli):
     assert exc.value.code == 1
     assert lock.read_text() == "not json"
     assert not cli.seen
+
+
+async def test_old_lock_stops_with_a_clear_message(cli, capsys):
+    lock = cli.repo / LOCK_RELATIVE_PATH
+    lock.parent.mkdir(exist_ok=True)
+    old = '{"version": 3, "scopes": {}}'
+    lock.write_text(old)
+    cli.monkeypatch.setattr(command, "_create_code_mapper_llm_manager", forbidden)
+    with pytest.raises(SystemExit) as exc:
+        await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
+    assert exc.value.code == 1
+    assert lock.read_text() == old
+    assert not cli.seen
+    captured = capsys.readouterr()
+    message = " ".join((captured.out + captured.err).split())
+    assert "map.lock.json" in message
+    assert "older version" in message
 
 
 async def test_fatal_c4_error_settles_parallel_research(cli):
