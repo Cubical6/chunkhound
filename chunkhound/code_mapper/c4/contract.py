@@ -3,13 +3,20 @@
 AutoDoc's loader is the source of truth for this shape. Anything the loader would
 warn about is left out here and counted, so the contract loads without a warning;
 the internal pair stays complete.
+
+`build_contract` is a pure translation. Reading Git happens around it: which repository
+holds a path is its input (`repository_lookup`), and commits and remote URLs are filled
+in on its result (`with_git_data`).
 """
 
 import hashlib
 import json
+import os
+import re
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal, TypeAlias
 
 from chunkhound.code_mapper.c4.documented import TopicSources
@@ -23,6 +30,8 @@ from chunkhound.code_mapper.c4.model import (
     SourceKind,
     Status,
 )
+from chunkhound.code_mapper.orchestrator import _get_head_sha
+from chunkhound.utils.git_safe import GitCommandError, run_git
 
 CONTRACT_VERSION = 1
 NO_GIT_HEAD = "NO_GIT_HEAD"
@@ -448,3 +457,127 @@ def build_contract(
         ),
         counts,
     )
+
+
+def repository_lookup(project_root: Path) -> Callable[[str], str]:
+    """Map a path from the index root to the deepest repository on its route.
+
+    Only directories on a path's own route are inspected, each one once.
+    """
+    known: dict[PurePosixPath, str] = {}
+
+    def of_directory(directory: PurePosixPath) -> str:
+        if directory == directory.parent:
+            return ROOT_REPOSITORY
+        if directory not in known:
+            known[directory] = (
+                directory.as_posix()
+                if os.path.exists(project_root / directory / ".git")
+                else of_directory(directory.parent)
+            )
+        return known[directory]
+
+    return lambda path: of_directory(PurePosixPath(path).parent)
+
+
+class _NoSourceLinksError(Exception):
+    """A checked condition failed; the message is the reason in the report."""
+
+
+def _git(args: Sequence[str], directory: Path) -> str:
+    process = run_git(args, cwd=directory)
+    if process.returncode != 0:
+        raise GitCommandError(
+            f"git {args[0]} mislukt", process.returncode, process.stderr
+        )
+    return process.stdout or ""
+
+
+def _without_credentials(url: str) -> str:
+    """Keep only what identifies the repository, for every remote notation.
+
+    Split by hand: `urlsplit` ends the authority at a `?` or `#` in user information,
+    which would leave part of a token behind as the host.
+    """
+    scheme, separator, rest = url.partition("://")
+    if not separator:
+        scheme, rest = "", url
+    authority, slash, path = rest.partition("/")
+    if not separator and ":" not in authority:
+        return url  # A local path, not user@host:path.
+    user, _, host = authority.rpartition("@")
+    keep_user = user.partition(":")[0] == "git" and scheme.lower() in ("", "ssh")
+    location = re.split("[?#]", f"{host}{slash}{path}", maxsplit=1)[0]
+    return f"{scheme}{separator}{'git@' if keep_user else ''}{location}"
+
+
+def _blocked_files(paths: Iterable[str], state: str) -> _NoSourceLinksError:
+    ordered = sorted(paths)
+    noun = "geciteerd bestand" if len(ordered) == 1 else "geciteerde bestanden"
+    return _NoSourceLinksError(f"{len(ordered)} {noun} {state}, eerste: {ordered[0]}")
+
+
+def _checked_remote_url(
+    directory: Path, commit: str, run_head: str | None, cited: set[str]
+) -> str:
+    """The URL of `origin` if every link condition holds; `run_head` is only for `.`."""
+    toplevel = _git(["rev-parse", "--show-toplevel"], directory).rstrip("\n")
+    if Path(toplevel).resolve() != directory.resolve():
+        raise _NoSourceLinksError(f"de wortel van deze repository is {toplevel}")
+    if run_head is not None and _get_head_sha(directory) != run_head:
+        raise _NoSourceLinksError("HEAD is tijdens de run veranderd")
+    if commit == NO_GIT_HEAD:
+        raise _NoSourceLinksError("de repository heeft geen commit")
+    url = _git(["remote", "get-url", "origin"], directory).strip()
+    contains = ["branch", "-r", "--contains", commit, "--list", "origin/*"]
+    if not _git(contains, directory).strip():
+        raise _NoSourceLinksError(f"commit {commit} staat niet op origin")
+    untracked = cited - set(_git(["ls-files", "-z"], directory).split("\0"))
+    if untracked:
+        raise _blocked_files(untracked, "niet gevolgd")
+    # Each entry is two status characters, a space and the path; never strip the
+    # output, because a change in the worktree alone starts with a space.
+    status = _git(["status", "--porcelain", "-z", "--no-renames"], directory)
+    changed = cited.intersection(entry[3:] for entry in status.split("\0"))
+    if changed:
+        raise _blocked_files(changed, "gewijzigd")
+    return _without_credentials(url)
+
+
+def _with_git_row(
+    row: ContractRepository, project_root: Path, head_sha: str, cited: set[str]
+) -> tuple[ContractRepository, str | None]:
+    directory = project_root / row.path
+    is_root = row.id == ROOT_REPOSITORY
+    commit = head_sha if is_root else _get_head_sha(directory)
+    try:
+        url = _checked_remote_url(
+            directory, commit, head_sha if is_root else None, cited
+        )
+    except _NoSourceLinksError as blocked:
+        return replace(row, commit=commit), str(blocked)
+    except (GitCommandError, OSError, ValueError) as error:
+        # Git's hints span several lines; a reason is one line of the report.
+        return replace(row, commit=commit), " ".join(str(error).split())
+    return replace(row, remote_url=url, commit=commit), None
+
+
+def with_git_data(
+    contract: Contract, project_root: Path, head_sha: str
+) -> tuple[Contract, dict[str, str]]:
+    """Fill each repository row from Git, locally, with why a row has no remote URL.
+
+    `head_sha` is the HEAD this run started from. A Git failure is never fatal: it
+    only costs that repository its source links.
+    """
+    cited: dict[str, set[str]] = defaultdict(set)
+    for source in contract.sources:
+        cited[source.repository].add(source.path.removeprefix(f"{source.repository}/"))
+    rows = []
+    reasons = {}
+    for row in contract.repositories:
+        filled, reason = _with_git_row(row, project_root, head_sha, cited[row.id])
+        rows.append(filled)
+        if reason is not None:
+            reasons[row.id] = reason
+    return replace(contract, repositories=rows), reasons

@@ -10,9 +10,18 @@ import pytest
 
 from chunkhound.autodoc.architecture.loader import ModelLoader
 from chunkhound.autodoc.architecture.model import C4Model as LoadedModel
-from chunkhound.code_mapper.c4.contract import Contract, build_contract
+from chunkhound.autodoc.architecture.source_links import SourceLinkBuilder
+from chunkhound.code_mapper.c4.contract import (
+    NO_GIT_HEAD,
+    Contract,
+    ContractRepository,
+    build_contract,
+    repository_lookup,
+    with_git_data,
+)
 from chunkhound.code_mapper.c4.documented import TopicSources
 from chunkhound.code_mapper.c4.model import C4Evidence, C4Model
+from chunkhound.utils.git_safe import run_git
 from tests.code_mapper.c4.test_pipeline import (
     build,
     classify_answer,
@@ -217,6 +226,7 @@ async def test_trial_run_builds_no_contract(
 
     assert result.contract is None
     assert result.contract_counts is None
+    assert result.repository_reasons == {}
 
 
 def test_elements_and_relations_translate_to_contract_terms() -> None:
@@ -807,3 +817,476 @@ def test_system_without_description_counts_as_incomplete() -> None:
 
     assert contract.system.description == ""
     assert counts.without_description == 1
+
+
+GITHUB = "https://github.com/acme/shop.git"
+
+
+def git(repo: Path, *args: str) -> str:
+    """Run Git the way production does, so its isolated environment is exercised."""
+    result = run_git(args, cwd=repo)
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+def commit_all(repo: Path) -> str:
+    git(repo, "add", "-A")
+    git(
+        repo,
+        "-c",
+        "user.name=C4 Fixture",
+        "-c",
+        "user.email=c4@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "Change",
+    )
+    return git(repo, "rev-parse", "HEAD")
+
+
+def write_file(path: Path, content: str = "print('hello')\n") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def pushed_repo(directory: Path, *files: str, origin: str | None = GITHUB) -> str:
+    """A committed repository whose HEAD a fetch from `origin` would have seen."""
+    directory.mkdir(parents=True, exist_ok=True)
+    git(directory, "init", "--initial-branch=main")
+    for file in files:
+        write_file(directory / file)
+    head = commit_all(directory)
+    if origin is not None:
+        git(directory, "remote", "add", "origin", origin)
+    git(directory, "update-ref", "refs/remotes/origin/main", "HEAD")
+    return head
+
+
+def contract_citing(root: Path, *paths: str) -> Contract:
+    model, evidence = pair(
+        [element("container:a", "container")],
+        citations=[cite("container:a", path) for path in paths],
+    )
+    return build_contract(model, evidence, None, repository_lookup(root))[0]
+
+
+def repositories(
+    root: Path, *paths: str, head: str | None = None
+) -> tuple[dict[str, ContractRepository], dict[str, str]]:
+    run_head = NO_GIT_HEAD
+    if head is not None:
+        run_head = head
+    else:
+        result = run_git(["rev-parse", "HEAD"], cwd=root)
+        if result.returncode == 0:
+            run_head = result.stdout.strip()
+    contract, reasons = with_git_data(contract_citing(root, *paths), root, run_head)
+    return {row.id: row for row in contract.repositories}, reasons
+
+
+def test_commit_on_origin_gives_the_url_and_a_source_link(tmp_path: Path) -> None:
+    head = pushed_repo(tmp_path, "shop/orders.py")
+
+    contract, reasons = with_git_data(
+        contract_citing(tmp_path, "shop/orders.py"), tmp_path, head
+    )
+
+    assert reasons == {}
+    assert contract.to_dict()["repositories"] == [
+        {"id": ".", "path": ".", "remote_url": GITHUB, "commit": head}
+    ]
+    loaded = load_quietly(contract, tmp_path.parent / f"{tmp_path.name}-out")
+    assert SourceLinkBuilder(loaded).link(loaded.sources[0]) == (
+        f"https://github.com/acme/shop/blob/{head}/shop/orders.py#L1"
+    )
+
+
+def test_unpushed_commit_gives_no_url(tmp_path: Path) -> None:
+    pushed_repo(tmp_path, "a.py")
+    head = commit_all(tmp_path)
+
+    rows, reasons = repositories(tmp_path, "a.py")
+
+    assert rows["."].remote_url is None
+    assert rows["."].commit == head
+    assert head in reasons["."] and "origin" in reasons["."]
+
+
+def test_missing_origin_gives_no_url_with_gits_message(tmp_path: Path) -> None:
+    head = pushed_repo(tmp_path, "a.py", origin=None)
+
+    rows, reasons = repositories(tmp_path, "a.py")
+
+    assert rows["."].remote_url is None
+    assert rows["."].commit == head
+    assert "No such remote 'origin'" in reasons["."]
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        ("a.py", "b.py"),
+        ("map met spatie/naam met spatie.py", "map met spatie/zz.py"),
+        ("café/überblick.py", "日本語/文書.py"),
+    ],
+    ids=["plain", "spaces", "non-ascii"],
+)
+@pytest.mark.parametrize("change", ["worktree", "staged", "deleted", "untracked"])
+def test_blocking_files_are_counted_and_the_first_is_named(
+    tmp_path: Path, files: tuple[str, str], change: str
+) -> None:
+    if change == "untracked":
+        pushed_repo(tmp_path, "clean.py")
+        for file in files:
+            write_file(tmp_path / file)
+    else:
+        pushed_repo(tmp_path, "clean.py", *files)
+        for file in files:
+            if change == "deleted":
+                (tmp_path / file).unlink()
+            else:
+                write_file(tmp_path / file, "print('changed')\n")
+        if change == "staged":
+            git(tmp_path, "add", "-A")
+
+    rows, reasons = repositories(tmp_path, "clean.py", *files)
+
+    assert rows["."].remote_url is None
+    assert "2 " in reasons["."]
+    assert files[0] in reasons["."]
+    assert files[1] not in reasons["."]
+
+
+def test_one_blocking_file_is_reported_with_its_full_path(tmp_path: Path) -> None:
+    # The status entry of a change in the worktree alone starts with a space.
+    pushed_repo(tmp_path, "café met spatie.py", "clean.py")
+    write_file(tmp_path / "café met spatie.py", "print('changed')\n")
+
+    rows, reasons = repositories(tmp_path, "café met spatie.py", "clean.py")
+
+    assert rows["."].remote_url is None
+    assert "1 " in reasons["."]
+    assert "café met spatie.py" in reasons["."]
+
+
+def test_changes_outside_the_cited_files_do_not_block(tmp_path: Path) -> None:
+    pushed_repo(tmp_path, "a.py", "other.py")
+    write_file(tmp_path / "other.py", "print('changed')\n")
+    write_file(tmp_path / "new file.py")
+
+    rows, reasons = repositories(tmp_path, "a.py")
+
+    assert rows["."].remote_url == GITHUB
+    assert reasons == {}
+
+
+@pytest.mark.parametrize("cited", ["oud.py", "nieuw pad é.py"], ids=["old", "new"])
+@pytest.mark.parametrize("staged", [True, False], ids=["staged", "worktree"])
+def test_renamed_file_blocks_under_either_name(
+    tmp_path: Path, cited: str, staged: bool
+) -> None:
+    pushed_repo(tmp_path, "oud.py", "clean.py")
+    (tmp_path / "oud.py").rename(tmp_path / "nieuw pad é.py")
+    if staged:
+        git(tmp_path, "add", "-A")
+
+    rows, reasons = repositories(tmp_path, cited, "clean.py")
+
+    assert rows["."].remote_url is None
+    assert "1 " in reasons["."] and cited in reasons["."]
+
+
+def test_committed_and_pushed_rename_links_the_new_name(tmp_path: Path) -> None:
+    pushed_repo(tmp_path, "oud.py")
+    (tmp_path / "oud.py").rename(tmp_path / "nieuw pad é.py")
+    head = commit_all(tmp_path)
+    git(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+    rows, reasons = repositories(tmp_path, "nieuw pad é.py")
+
+    assert rows["."] == ContractRepository(".", ".", GITHUB, head)
+    assert reasons == {}
+
+
+def test_no_git_directory_gives_the_placeholder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LC_ALL", "C")
+    write_file(tmp_path / "a.py")
+
+    rows, reasons = repositories(tmp_path, "a.py", head=NO_GIT_HEAD)
+
+    assert rows["."] == ContractRepository(".", ".", None, NO_GIT_HEAD)
+    assert "not a git repository" in reasons["."]
+
+
+def test_repository_without_a_commit_gives_no_url(tmp_path: Path) -> None:
+    git(tmp_path, "init", "--initial-branch=main")
+    git(tmp_path, "remote", "add", "origin", GITHUB)
+    write_file(tmp_path / "a.py")
+
+    rows, reasons = repositories(tmp_path, "a.py", head=NO_GIT_HEAD)
+
+    assert rows["."] == ContractRepository(".", ".", None, NO_GIT_HEAD)
+    assert reasons["."]
+
+
+def test_index_root_in_a_subdirectory_gives_no_url(tmp_path: Path) -> None:
+    head = pushed_repo(tmp_path, "sub/a.py")
+    root = tmp_path / "sub"
+
+    rows, reasons = repositories(root, "a.py", head=head)
+
+    assert rows["."] == ContractRepository(".", ".", None, head)
+    assert str(tmp_path.resolve()) in reasons["."]
+
+
+def test_index_root_through_a_symlink_is_still_the_real_root(tmp_path: Path) -> None:
+    head = pushed_repo(tmp_path / "real", "a.py")
+    (tmp_path / "link").symlink_to(tmp_path / "real")
+
+    rows, reasons = repositories(tmp_path / "link", "a.py", head=head)
+
+    assert rows["."].remote_url == GITHUB
+    assert reasons == {}
+
+
+def test_head_moved_during_the_run_gives_no_url(tmp_path: Path) -> None:
+    start = pushed_repo(tmp_path, "a.py")
+    commit_all(tmp_path)
+
+    rows, reasons = repositories(tmp_path, "a.py", head=start)
+
+    assert rows["."] == ContractRepository(".", ".", None, start)
+    assert "HEAD" in reasons["."]
+
+
+def test_nested_repository_gets_its_own_row_and_sources(tmp_path: Path) -> None:
+    head = pushed_repo(tmp_path, "a.py", "vendor/not_nested.py")
+    lib = "https://github.com/acme/lib.git"
+    deepest = "https://gitlab.com/acme/deep.git"
+    lib_head = pushed_repo(tmp_path / "vendor/lib", "src/b c.py", origin=lib)
+    deep_head = pushed_repo(tmp_path / "vendor/lib/deep", "d.py", origin=deepest)
+
+    contract, reasons = with_git_data(
+        contract_citing(
+            tmp_path,
+            "a.py",
+            "vendor/not_nested.py",
+            "vendor/lib/src/b c.py",
+            "vendor/lib/deep/d.py",
+        ),
+        tmp_path,
+        head,
+    )
+
+    assert reasons == {}
+    assert contract.repositories == [
+        ContractRepository(".", ".", GITHUB, head),
+        ContractRepository("vendor/lib", "vendor/lib", lib, lib_head),
+        ContractRepository("vendor/lib/deep", "vendor/lib/deep", deepest, deep_head),
+    ]
+    assert {source.path: source.repository for source in contract.sources} == {
+        "a.py": ".",
+        "vendor/not_nested.py": ".",
+        "vendor/lib/src/b c.py": "vendor/lib",
+        "vendor/lib/deep/d.py": "vendor/lib/deep",
+    }
+    loaded = load_quietly(contract, tmp_path.parent / f"{tmp_path.name}-out")
+    links = {
+        source.path: SourceLinkBuilder(loaded).link(source) for source in loaded.sources
+    }
+    assert links["vendor/lib/src/b c.py"] == (
+        f"https://github.com/acme/lib/blob/{lib_head}/src/b%20c.py#L1"
+    )
+    assert links["vendor/lib/deep/d.py"] == (
+        f"https://gitlab.com/acme/deep/-/blob/{deep_head}/d.py#L1"
+    )
+
+
+def test_repository_with_only_a_direct_file_is_listed(tmp_path: Path) -> None:
+    head = pushed_repo(tmp_path, "a.py")
+    lib_head = pushed_repo(tmp_path / "lib", "only_direct.py", origin=None)
+    model, evidence = pair(
+        [element("container:a", "container")],
+        citations=[cite("container:a", "a.py")],
+        files={"container:a": ["a.py", "lib/only_direct.py"]},
+    )
+    contract, _ = build_contract(model, evidence, None, repository_lookup(tmp_path))
+
+    filled, _ = with_git_data(contract, tmp_path, head)
+
+    assert [(row.id, row.commit) for row in filled.repositories] == [
+        (".", head),
+        ("lib", lib_head),
+    ]
+
+
+def test_nested_repository_outside_the_contract_is_not_listed(tmp_path: Path) -> None:
+    head = pushed_repo(tmp_path, "a.py")
+    pushed_repo(tmp_path / "unused", "b.py")
+
+    rows, _ = repositories(tmp_path, "a.py", head=head)
+
+    assert set(rows) == {"."}
+
+
+def test_blocking_file_in_a_nested_repository_blocks_only_that_repository(
+    tmp_path: Path,
+) -> None:
+    pushed_repo(tmp_path, "a.py")
+    pushed_repo(tmp_path / "lib", "b.py")
+    write_file(tmp_path / "lib/b.py", "print('changed')\n")
+
+    rows, reasons = repositories(tmp_path, "a.py", "lib/b.py")
+
+    assert rows["."].remote_url == GITHUB
+    assert rows["lib"].remote_url is None
+    assert set(reasons) == {"lib"}
+    assert "1 " in reasons["lib"] and "b.py" in reasons["lib"]
+    assert "lib/b.py" not in reasons["lib"]
+
+
+def test_nested_worktree_with_a_git_file_is_a_repository(tmp_path: Path) -> None:
+    head = pushed_repo(tmp_path / "root", "a.py")
+    pushed_repo(tmp_path / "main", "b.py")
+    worktree = tmp_path / "root/tree"
+    git(tmp_path / "main", "worktree", "add", "-b", "feature", str(worktree))
+    assert (worktree / ".git").is_file()
+    tree_head = git(worktree, "rev-parse", "HEAD")
+
+    rows, reasons = repositories(tmp_path / "root", "a.py", "tree/b.py", head=head)
+
+    assert rows["tree"] == ContractRepository("tree", "tree", GITHUB, tree_head)
+    assert reasons == {}
+
+
+@pytest.mark.parametrize("broken", ["file", "empty-directory"])
+def test_invalid_nested_git_gives_a_row_without_url(
+    tmp_path: Path, broken: str
+) -> None:
+    pushed_repo(tmp_path, "a.py")
+    write_file(tmp_path / "lib/b.py")
+    if broken == "file":
+        (tmp_path / "lib/.git").write_text("not a gitdir\n", encoding="utf-8")
+    else:
+        (tmp_path / "lib/.git").mkdir()
+
+    contract = contract_citing(tmp_path, "a.py", "lib/b.py")
+    filled, reasons = with_git_data(
+        contract, tmp_path, git(tmp_path, "rev-parse", "HEAD")
+    )
+
+    rows = {row.id: row for row in filled.repositories}
+    assert rows["."].remote_url == GITHUB
+    assert rows["lib"].path == "lib" and rows["lib"].remote_url is None
+    assert set(reasons) == {"lib"}
+    assert {s.path: s.repository for s in filled.sources}["lib/b.py"] == "lib"
+    # Git walks past an empty .git to the outer repository, so only a file ends it.
+    if broken == "file":
+        assert rows["lib"].commit == NO_GIT_HEAD
+
+
+@pytest.mark.parametrize(
+    ("remote", "expected"),
+    [
+        ("https://tok3n@github.com/a/b.git", "https://github.com/a/b.git"),
+        ("https://user:tok3n@github.com/a/b.git", "https://github.com/a/b.git"),
+        ("https://git@github.com/a/b.git", "https://github.com/a/b.git"),
+        ("https://github.com/a/b.git?t=tok3n#tok3n", "https://github.com/a/b.git"),
+        ("https://tok#3n@github.com/a/b.git", "https://github.com/a/b.git"),
+        ("http://user:tok3n@host:8080/a/b.git", "http://host:8080/a/b.git"),
+        ("ssh://deploy:tok3n@github.com/a/b.git", "ssh://github.com/a/b.git"),
+        ("ssh://deploy@github.com:22/a/b.git", "ssh://github.com:22/a/b.git"),
+        ("ssh://git:tok3n@github.com/a/b.git", "ssh://git@github.com/a/b.git"),
+        ("ssh://git@github.com/a/b.git?t=tok3n", "ssh://git@github.com/a/b.git"),
+        ("ssh://git@[::1]:2222/a/b.git", "ssh://git@[::1]:2222/a/b.git"),
+        ("git@github.com:a/b.git", "git@github.com:a/b.git"),
+        ("tok3n@github.com:a/b.git", "github.com:a/b.git"),
+        ("deploy:tok3n@github.com:a/b.git", "github.com:a/b.git"),
+        ("git@github.com:a/b.git?t=tok3n", "git@github.com:a/b.git"),
+        ("github.com:a/b.git", "github.com:a/b.git"),
+        ("file://tok3n@/srv/b.git", "file:///srv/b.git"),
+        ("/srv/git/at@sign/b.git", "/srv/git/at@sign/b.git"),
+    ],
+)
+def test_remote_url_loses_its_credentials(
+    tmp_path: Path, remote: str, expected: str
+) -> None:
+    pushed_repo(tmp_path, "a.py", origin=remote)
+
+    rows, reasons = repositories(tmp_path, "a.py")
+
+    assert rows["."].remote_url == expected
+    assert reasons == {}
+
+
+def test_git_timeout_is_not_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = pushed_repo(tmp_path, "a.py")
+    monkeypatch.setenv("CHUNKHOUND_GIT_TIMEOUT_SECONDS", "0.00001")
+
+    rows, reasons = repositories(tmp_path, "a.py", head=head)
+
+    assert rows["."] == ContractRepository(".", ".", None, head)
+    assert "timeout" in reasons["."]
+
+
+def test_missing_git_binary_is_not_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = pushed_repo(tmp_path, "a.py")
+    monkeypatch.setenv("PATH", str(tmp_path / "nowhere"))
+
+    rows, reasons = repositories(tmp_path, "a.py", head=head)
+
+    assert rows["."] == ContractRepository(".", ".", None, head)
+    assert "git command failed" in reasons["."]
+
+
+async def test_full_run_fills_repositories_and_returns_the_reason(
+    fixture_repo, c4_llm_manager, contract_answers
+):
+    head = git(fixture_repo, "rev-parse", "HEAD")
+
+    without_origin = await build(fixture_repo, c4_llm_manager)
+
+    assert without_origin.contract is not None
+    assert without_origin.contract.repositories == [
+        ContractRepository(".", ".", None, head)
+    ]
+    assert "origin" in without_origin.repository_reasons["."]
+
+    git(fixture_repo, "remote", "add", "origin", "https://tok3n@github.com/a/b.git")
+    git(fixture_repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+    published = await build(fixture_repo, c4_llm_manager)
+
+    assert published.contract is not None
+    assert published.contract.repositories == [
+        ContractRepository(".", ".", "https://github.com/a/b.git", head)
+    ]
+    assert published.repository_reasons == {}
+
+
+async def test_full_run_points_sources_at_a_nested_repository(
+    fixture_repo, c4_llm_manager, contract_answers
+):
+    nested = "https://github.com/acme/nested.git"
+    nested_head = pushed_repo(fixture_repo / "shop", origin=nested)
+
+    result = await build(fixture_repo, c4_llm_manager)
+
+    assert result.contract is not None
+    assert {s.path: s.repository for s in result.contract.sources}[
+        "shop/orders.py"
+    ] == "shop"
+    rows = {row.id: row for row in result.contract.repositories}
+    assert rows["shop"] == ContractRepository("shop", "shop", nested, nested_head)
+    assert set(result.repository_reasons) == {"."}

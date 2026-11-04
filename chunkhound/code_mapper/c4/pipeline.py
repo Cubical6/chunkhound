@@ -18,10 +18,11 @@ from chunkhound.code_mapper.c4.assemble import (
 )
 from chunkhound.code_mapper.c4.classify import Classification, ClassifyItem, classify
 from chunkhound.code_mapper.c4.contract import (
-    ROOT_REPOSITORY,
     Contract,
     ContractCounts,
     build_contract,
+    repository_lookup,
+    with_git_data,
 )
 from chunkhound.code_mapper.c4.documented import (
     DocElement,
@@ -140,6 +141,8 @@ class C4Build:
     report_extra: list[str] = field(default_factory=list)
     contract: Contract | None = None
     contract_counts: ContractCounts | None = None
+    # Per repository id: why it has no remote URL, for the report.
+    repository_reasons: dict[str, str] = field(default_factory=dict)
 
 
 def _classification_items(draft: C4Draft) -> list[ClassifyItem]:
@@ -750,11 +753,16 @@ async def finish_c4(
         f"{unlinked.no_match} geen treffer, {unlinked.ambiguous} meerdere "
         f"treffers, {unlinked.not_allowed} niet toegestaan",
     ]
-    contract, contract_counts = (
-        build_contract(model, evidence, topics, lambda _path: ROOT_REPOSITORY)
-        if kind == "full"
-        else (None, None)
-    )
+    contract: Contract | None = None
+    contract_counts: ContractCounts | None = None
+    repository_reasons: dict[str, str] = {}
+    if kind == "full":
+        contract, contract_counts = build_contract(
+            model, evidence, topics, repository_lookup(draft.project_root)
+        )
+        contract, repository_reasons = with_git_data(
+            contract, draft.project_root, head_sha
+        )
     return C4Build(
         model,
         evidence,
@@ -763,4 +771,5 @@ async def finish_c4(
         report_extra,
         contract,
         contract_counts,
+        repository_reasons,
     )

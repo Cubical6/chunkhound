@@ -183,7 +183,7 @@ Komt vóór de nieuwe invoer, omdat de tests dan op de bestaande prompt kunnen d
 
 **Files:** `c4/contract.py`; tests in `test_contract.py`.
 
-- [ ] **Step 1: Rode tests,** op echte tijdelijke Git-repository's, met `update-ref` voor `refs/remotes/origin/main`:
+- [x] **Step 1: Rode tests,** op echte tijdelijke Git-repository's, met `update-ref` voor `refs/remotes/origin/main`:
   - commit op `origin` geeft de URL;
   - niet gepusht, gewijzigd en niet-gevolgd geven `null` met reden, die het aantal en het eerste pad noemt, ook met spaties, niet-ASCII en na een hernoeming;
   - geen Git-map geeft `NO_GIT_HEAD`;
@@ -191,8 +191,8 @@ Komt vóór de nieuwe invoer, omdat de tests dan op de bestaande prompt kunnen d
   - geneste repository krijgt een eigen regel, en haar bronnen verwijzen daarnaar;
   - `HEAD` van `.` gewijzigd tijdens de run geeft `null`;
   - tokens verdwijnen bij `https`, `http`, `ssh` en `gebruiker@host:pad`; `git@` en `ssh://git@` blijven.
-- [ ] **Step 2:** Pad → repository als invoer van `build_contract`; daarna Git-gegevens via `run_git`, zonder netwerk. Een fout is nooit fataal.
-- [ ] **Step 3:** Tests, ruff en mypy.
+- [x] **Step 2:** Pad → repository als invoer van `build_contract`; daarna Git-gegevens via `run_git`, zonder netwerk. Een fout is nooit fataal.
+- [x] **Step 3:** Tests, ruff en mypy.
 
 ### Task 10: Publicatie en namen (spec §2)
 
