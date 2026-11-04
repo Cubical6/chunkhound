@@ -142,18 +142,18 @@ Komt vóór de nieuwe invoer, omdat de tests dan op de bestaande prompt kunnen d
 
 **Files:** `c4/merge.py`, `c4/llm.py` (`_REJECTION_RULES`, `:31`); tests in `test_merge.py` (`:51`, `:58`, `:215`, `:374`), `test_pipeline.py`.
 
-- [ ] **Step 1: Rode tests,** alle via `merge_container`, niet op `normalize_merge_answer` zelf:
+- [x] **Step 1: Rode tests,** alle via `merge_container`, niet op `normalize_merge_answer` zelf:
   - `test_partial_answer_is_repaired_and_leftovers_retry_narrowly`: dekt onbekende groep, herhaalde plaatsing, dezelfde naam, ongeldige titelrij en de tellingen.
   - `test_ambiguous_existing_name_makes_its_groups_leftover`.
   - `test_answer_placing_nothing_is_rejected_and_retried_once`.
   - `test_truncated_answer_does_not_end_the_run`.
   - `test_input_refusal_goes_to_fallback_without_retry`.
   - `test_at_most_two_merge_calls_per_container`.
-- [ ] **Step 2:** `normalize_merge_answer` vervangt `check_merge_answer` en geeft plaatsingen, `leftover` en tellingen terug. Pas `_propose_components` en `_merge_titles` aan volgens §4.4; `merge.py:220` staat nu geen `proposal:`-eindpunten toe, en de smalle herkansing heeft die als `E<n>` nodig.
-- [ ] **Step 3:** In `attempt`: gebruik `translate_call_error` (`services/extraction/errors.py:78`). `UnreadableAnswerError` wordt `AnswerRejectedError`; `ProviderInputRefusedError` gaat direct naar de terugval. Voeg de nieuwe regelnaam toe aan `_REJECTION_RULES`.
-- [ ] **Step 4:** Herkansing via `RetryQueue` volgens de tabel in §4.4. De terugval geeft het tot dan toe geplaatste resultaat terug. Titels samenvoegen; bij hetzelfde paar wint de eerste.
-- [ ] **Step 5:** `MergeResult` krijgt de tellingen voor het rapport. `_known_components` geeft overrides voor onbekende groepen terug (`merge.py:143` negeert ze nu stil).
-- [ ] **Step 6:** Tests, ruff en mypy.
+- [x] **Step 2:** `normalize_merge_answer` vervangt `check_merge_answer` en geeft plaatsingen, `leftover` en tellingen terug. Pas `_propose_components` en `_merge_titles` aan volgens §4.4; `merge.py:220` staat nu geen `proposal:`-eindpunten toe, en de smalle herkansing heeft die als `E<n>` nodig.
+- [x] **Step 3:** In `attempt`: gebruik `translate_call_error` (`services/extraction/errors.py:78`). `UnreadableAnswerError` wordt `AnswerRejectedError`; `ProviderInputRefusedError` gaat direct naar de terugval. Voeg de nieuwe regelnaam toe aan `_REJECTION_RULES`.
+- [x] **Step 4:** Herkansing via `RetryQueue` volgens de tabel in §4.4. De terugval geeft het tot dan toe geplaatste resultaat terug. Titels samenvoegen; bij hetzelfde paar wint de eerste.
+- [x] **Step 5:** `MergeResult` krijgt de tellingen voor het rapport. `_known_components` geeft overrides voor onbekende groepen terug (`merge.py:143` negeert ze nu stil).
+- [x] **Step 6:** Tests, ruff en mypy.
 
 ### Task 7: Technologie en omschrijvingen (spec §5)
 

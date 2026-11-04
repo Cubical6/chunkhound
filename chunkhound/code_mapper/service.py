@@ -108,7 +108,7 @@ _RETRYABLE_POI_ERROR_SUBSTRINGS = (
 )
 
 
-def _is_retryable_poi_error(exc: Exception) -> bool:
+def _is_retryable_poi_error(exc: BaseException) -> bool:
     for chained in _iter_exception_chain(exc):
         if isinstance(chained, (asyncio.TimeoutError, TimeoutError, OSError)):
             return True

@@ -121,6 +121,7 @@ class C4Draft:
     direct_groups: dict[str, list[str]] = field(default_factory=dict)
     grouping: list[Group] = field(default_factory=list)
     merges: dict[str, MergeResult] = field(default_factory=dict)
+    unknown_overrides: list[str] = field(default_factory=list)
     prepared: bool = False
 
 
@@ -208,6 +209,11 @@ async def _prepare(draft: C4Draft, llm: C4Llm, lock: ScopeLock | None) -> None:
         container_of=draft.runtime.container_of,
         container_roots={unit.id: unit.root for unit in draft.runtime.containers},
         container_names={unit.id: unit.name for unit in draft.runtime.containers},
+    )
+    # Overrides are scope-wide, so only all groups together show which are unknown.
+    draft.unknown_overrides = sorted(
+        set(lock.overrides.placements if lock else ())
+        - {group.id for group in draft.grouping}
     )
     links = _group_links(draft)
     groups_by_container = defaultdict(list)

@@ -12,6 +12,7 @@ from pydantic import BaseModel, ValidationError
 from chunkhound.code_mapper.service import _is_retryable_poi_error
 from chunkhound.llm_manager import LLMManager
 from chunkhound.services.extraction.budget import InputLimit, resolve_input_limit
+from chunkhound.services.extraction.errors import ProviderInputRefusedError
 from chunkhound.services.extraction.store import ProviderIdentity
 
 T = TypeVar("T")
@@ -33,9 +34,7 @@ _REJECTION_RULES = frozenset(
         "invalid answer schema",
         "every candidate key must occur exactly once",
         "invalid candidate vote",
-        "every local group must be placed exactly once",
-        "ambiguous component name",
-        "unknown, duplicate or unsupported title pair",
+        "answer places no group",
         "every fingerprint must occur exactly once",
         "no proposed item has a literal quote",
         "every fragment id must occur exactly once",
@@ -71,6 +70,9 @@ class StepReport:
             raise
         except TransientStepError:
             self.outcomes[index] = "tijdelijke fout"
+            raise
+        except ProviderInputRefusedError:
+            self.outcomes[index] = "invoer geweigerd"
             raise
         except Exception:
             self.outcomes[index] = "fout"

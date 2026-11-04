@@ -26,10 +26,17 @@ from chunkhound.code_mapper.c4.model import (
     ReferenceKind,
 )
 from chunkhound.code_mapper.c4.runtime import RuntimeUnit
+from chunkhound.code_mapper.service import _is_retryable_poi_error
 from chunkhound.core.detection.language_detector import detect_language
 from chunkhound.core.types.common import ChunkType, FileId
 from chunkhound.parsers.parser_factory import ParserFactory
 from chunkhound.services.extraction.budget import fits, measure_request
+from chunkhound.services.extraction.errors import (
+    ProviderInputRefusedError,
+    TransientCallError,
+    UnreadableAnswerError,
+    translate_call_error,
+)
 
 _SYMBOL_KINDS = frozenset(
     {
@@ -72,6 +79,8 @@ class MergeResult:
     titles: dict[tuple[str, str], str] = field(default_factory=dict)
     pending_groups: list[str] = field(default_factory=list)
     failure_reason: str | None = None
+    placed_groups: int = 0
+    removed_placements: int = 0
 
 
 class _AnswerModel(BaseModel):
@@ -79,7 +88,8 @@ class _AnswerModel(BaseModel):
 
 
 class _ComponentAnswer(_AnswerModel):
-    name: str = Field(min_length=1)
+    # A blank name or title costs its row, not the whole answer.
+    name: str
     description: str | None
     groups: list[str]
 
@@ -87,7 +97,7 @@ class _ComponentAnswer(_AnswerModel):
 class _MergeTitle(_AnswerModel):
     from_id: str = Field(alias="from")
     to_id: str = Field(alias="to")
-    title: str = Field(min_length=1)
+    title: str
 
 
 class MergeAnswer(_AnswerModel):
@@ -122,22 +132,61 @@ def fallback_title(kinds: Iterable[ReferenceKind]) -> str:
     return "importeert"
 
 
-def check_merge_answer(
-    answer: MergeAnswer, groups: Sequence[Group], container: str
-) -> None:
-    """Reject lost, repeated, foreign, invented or empty group placements."""
-    placed = [group for item in answer.components for group in item.groups]
-    placed.extend(answer.direct)
-    expected = Counter(group.id for group in groups)
-    if (
-        any(group.container != container for group in groups)
-        or any(count != 1 for count in expected.values())
-        or Counter(placed) != expected
-        or any(not item.groups or not item.name.strip() for item in answer.components)
-    ):
-        raise AnswerRejectedError(
-            "merge: every local group must be placed exactly once"
-        )
+@dataclass(frozen=True)
+class _NormalizedAnswer:
+    """What one answer places, by new or existing component name."""
+
+    components: dict[str, tuple[str | None, list[str]]]
+    direct: list[str]
+    leftover: list[Group]
+    removed_placements: int
+
+
+def normalize_merge_answer(
+    answer: MergeAnswer,
+    pending: Sequence[Group],
+    known: Sequence[ProposedComponent],
+) -> _NormalizedAnswer:
+    """Repair an answer row by row; only one that places nothing is rejected.
+
+    A repeat keeps the first placement in answer order, even if that row then
+    turns out unusable: its groups become leftover and get the narrow retry.
+    """
+    waiting = {group.id for group in pending}
+    names = Counter(item.name for item in known)
+    seen: set[str] = set()
+    removed = 0
+
+    def keep(ids: Iterable[str]) -> list[str]:
+        nonlocal removed
+        kept = []
+        for group in ids:
+            if group in waiting and group not in seen:
+                seen.add(group)
+                kept.append(group)
+            else:
+                removed += 1
+        return kept
+
+    components: dict[str, tuple[str | None, list[str]]] = {}
+    for row in answer.components:
+        ids = keep(row.groups)
+        if ids and row.name.strip() and names[row.name] <= 1:
+            description, merged = components.get(row.name, (None, []))
+            components[row.name] = (
+                description or row.description,
+                [*merged, *ids],
+            )
+    direct = keep(answer.direct)
+    placed = {*direct, *(id for _, ids in components.values() for id in ids)}
+    if not placed:
+        raise AnswerRejectedError("merge: answer places no group")
+    return _NormalizedAnswer(
+        components,
+        direct,
+        [group for group in pending if group.id not in placed],
+        removed,
+    )
 
 
 def _proposal_key(container: str, groups: Iterable[str]) -> str:
@@ -208,41 +257,37 @@ def _default_merge(container: str, groups: Sequence[Group]) -> MergeResult:
         ],
         [],
         False,
+        placed_groups=len(groups),
     )
 
 
 def _unplaced(
-    known: Sequence[ProposedComponent], pending: Sequence[Group], reason: str
+    placed: MergeResult, waiting: Sequence[Group], reason: str
 ) -> MergeResult:
     """A failed step places nothing new; its groups are sent again next run."""
-    return MergeResult(
-        list(known),
-        [],
-        True,
-        pending_groups=sorted(group.id for group in pending),
+    return replace(
+        placed,
+        fallback=True,
+        pending_groups=sorted(group.id for group in waiting),
         failure_reason=reason,
     )
 
 
 def _propose_components(
-    answer: MergeAnswer, container: str, known: Sequence[ProposedComponent]
+    answer: _NormalizedAnswer, container: str, known: Sequence[ProposedComponent]
 ) -> list[ProposedComponent]:
     result = {item.key: item for item in known}
-    used_names: set[str] = set()
-    for item in answer.components:
-        matches = [cached for cached in known if cached.name == item.name]
-        if len(matches) > 1 or item.name in used_names:
-            raise AnswerRejectedError("merge: ambiguous component name")
-        used_names.add(item.name)
-        if matches:
-            cached = matches[0]
+    by_name = {item.name: item for item in known}
+    for name, (description, ids) in answer.components.items():
+        cached = by_name.get(name)
+        if cached is not None:
             result[cached.key] = replace(
-                cached, groups=tuple(sorted((*cached.groups, *item.groups)))
+                cached, groups=tuple(sorted((*cached.groups, *ids)))
             )
         else:
-            key = _proposal_key(container, item.groups)
+            key = _proposal_key(container, ids)
             result[key] = ProposedComponent(
-                key, item.name, item.description, tuple(sorted(item.groups)), ()
+                key, name, description, tuple(sorted(ids)), ()
             )
     return sorted(result.values(), key=lambda item: item.key)
 
@@ -253,17 +298,12 @@ def _merge_titles(
     container: str,
     group_links: Mapping[tuple[str, str], Counter[ReferenceKind]],
 ) -> dict[tuple[str, str], str]:
+    """An invalid row is dropped; the later titles step fills the gap."""
     owners = {group: item.key for item in result.components for group in item.groups}
     owners.update(dict.fromkeys(result.direct_groups, container))
     endpoints = {f"group:{group}": key for group, key in owners.items()}
     endpoints["container"] = container
-    endpoints.update(
-        {
-            f"component:{item.key}": item.key
-            for item in result.components
-            if not item.key.startswith("proposal:")
-        }
-    )
+    endpoints.update({f"component:{item.key}": item.key for item in result.components})
     supported = {
         (owners[left], owners[right])
         for (left, right), kinds in group_links.items()
@@ -272,16 +312,60 @@ def _merge_titles(
         and owners[left] != owners[right]
         and any(count > 0 for count in kinds.values())
     }
-    titles = {}
+    titles: dict[tuple[str, str], str] = {}
     for row in answer.titles:
-        pair = (endpoints.get(row.from_id), endpoints.get(row.to_id))
-        if pair not in supported or pair in titles or not row.title.strip():
-            raise AnswerRejectedError(
-                "merge: unknown, duplicate or unsupported title pair"
-            )
-        # Membership in supported proves both endpoints are non-null.
-        titles[(str(pair[0]), str(pair[1]))] = row.title
+        left, right = endpoints.get(row.from_id), endpoints.get(row.to_id)
+        if left is None or right is None or not row.title.strip():
+            continue
+        if (left, right) in supported:
+            titles.setdefault((left, right), row.title)
     return titles
+
+
+def _apply_answer(
+    answer: MergeAnswer,
+    normalized: _NormalizedAnswer,
+    placed: MergeResult,
+    waiting: Sequence[Group],
+    container: str,
+    group_links: Mapping[tuple[str, str], Counter[ReferenceKind]],
+) -> MergeResult:
+    """Add one answer to what is placed so far; for the same pair the first wins."""
+    value = MergeResult(
+        _propose_components(normalized, container, placed.components),
+        sorted((*placed.direct_groups, *normalized.direct)),
+        False,
+        placed_groups=placed.placed_groups + len(waiting) - len(normalized.leftover),
+        removed_placements=placed.removed_placements + normalized.removed_placements,
+    )
+    value.titles = {
+        **_merge_titles(answer, value, container, group_links),
+        **placed.titles,
+    }
+    return value
+
+
+async def _ask_merge(llm: C4Llm, prompt: str) -> MergeAnswer:
+    """One provider call, with its failures sorted into the step's failure kinds."""
+    try:
+        return await llm.call(
+            "merge",
+            MergeAnswer,
+            prompt,
+            provider="synthesis",
+            max_completion_tokens=max(8192, min(32768, len(prompt) // 4)),
+        )
+    except AnswerRejectedError:
+        raise
+    except Exception as exc:
+        translated = translate_call_error(exc, _is_retryable_poi_error)
+        if translated is None:
+            raise
+        if isinstance(translated, UnreadableAnswerError):
+            raise AnswerRejectedError(f"merge: {translated.rule}") from exc
+        if isinstance(translated, TransientCallError):
+            raise TransientStepError(str(translated)) from exc
+        raise translated from exc
 
 
 @dataclass(frozen=True)
@@ -391,6 +475,7 @@ def _file_links(
             reference.status == "counts"
             and left is not None
             and right is not None
+            and left != right
             and (isinstance(left, int) or isinstance(right, int))
         ):
             counts[left, right] += 1
@@ -469,68 +554,102 @@ async def merge_container(
         result.titles = value.titles
         result.pending_groups = value.pending_groups
         result.failure_reason = value.failure_reason
+        result.placed_groups = value.placed_groups
+        result.removed_placements = value.removed_placements
 
     if llm.trial:
         value = _default_merge(container.id, pending)
         value.components = [*known, *value.components]
         apply(value, False)
         return result
-    aliases = _merge_aliases(pending, known)
     factory = ParserFactory()
     symbols = {
         file: _file_symbols(project_root, file, factory)
         for group in pending
         for file in group.files
     }
-    prompt = _merge_prompt(aliases, groups, references, symbols)
     schema = MergeAnswer.model_json_schema()
     limit = llm.input_limit("synthesis")
-    if not fits(prompt, schema, limit, llm.estimate_tokens):
+
+    def fitted(aliases: _MergeAliases) -> str | None:
+        """Symbols go first; None means this call must not be made."""
+        for names in (symbols, None):
+            prompt = _merge_prompt(aliases, groups, references, names)
+            if fits(prompt, schema, limit, llm.estimate_tokens):
+                return prompt
+        return None
+
+    def too_large(aliases: _MergeAliases) -> str:
         prompt = _merge_prompt(aliases, groups, references, None)
-        if not fits(prompt, schema, limit, llm.estimate_tokens):
-            size = measure_request(prompt, schema, ())
-            apply(
-                _unplaced(
-                    known,
-                    pending,
-                    f"invoer te groot: {size} tekens, limiet {limit.max_chars}",
-                ),
-                False,
-            )
-            return result
-    max_tokens = max(8192, min(32768, len(prompt) // 4))
+        size = measure_request(prompt, schema, ())
+        return f"invoer te groot: {size} tekens, limiet {limit.max_chars}"
+
+    nothing_placed = MergeResult(list(known), [], False)
+    aliases = _merge_aliases(pending, known)
+    prompt = fitted(aliases)
+    if prompt is None:
+        apply(_unplaced(nothing_placed, pending, too_large(aliases)), False)
+        return result
     report = llm.report(
         "merge",
         f"container {json.dumps(container.id)}: {len(pending)} niet-geclaimde groepen",
     )
 
-    def default() -> MergeResult:
-        return _unplaced(known, pending, report.outcomes[-1].removesuffix(", terugval"))
-
-    async def attempt() -> MergeResult:
-        with report.attempt():
-            answer = aliases.translate(
-                await llm.call(
-                    "merge",
-                    MergeAnswer,
-                    prompt,
-                    provider="synthesis",
-                    max_completion_tokens=max_tokens,
+    async def call_once(
+        aliases: _MergeAliases,
+        prompt: str,
+        placed: MergeResult,
+        waiting: Sequence[Group],
+    ) -> tuple[MergeResult, list[Group]]:
+        """Return the new result and what is left; a refusal is not retried."""
+        try:
+            with report.attempt():
+                answer = aliases.translate(await _ask_merge(llm, prompt))
+                normalized = normalize_merge_answer(answer, waiting, placed.components)
+                value = _apply_answer(
+                    answer, normalized, placed, waiting, container.id, group_links
                 )
-            )
-            check_merge_answer(answer, pending, container.id)
-            value = MergeResult(
-                _propose_components(answer, container.id, known),
-                sorted(answer.direct),
-                False,
-            )
-            value.titles = _merge_titles(answer, value, container.id, group_links)
-            return value
+                return value, normalized.leftover
+        except ProviderInputRefusedError:
+            reason = report.outcomes[-1]
+            report.mark_fallback()
+            return _unplaced(placed, waiting, reason), []
+
+    def defer_last_call(
+        aliases: _MergeAliases,
+        prompt: str,
+        placed: MergeResult,
+        waiting: Sequence[Group],
+    ) -> None:
+        """The queue is drained once, so this call cannot defer again."""
+
+        async def attempt() -> MergeResult:
+            value, leftover = await call_once(aliases, prompt, placed, waiting)
+            if not leftover:
+                return value
+            report.mark_fallback()
+            return _unplaced(value, leftover, "antwoord onvolledig")
+
+        def default() -> MergeResult:
+            reason = report.outcomes[-1].removesuffix(", terugval")
+            return _unplaced(placed, waiting, reason)
+
+        retries.defer(f"merge:{container.id}", attempt, default, apply, report=report)
 
     try:
-        apply(await attempt(), False)
+        value, leftover = await call_once(aliases, prompt, nothing_placed, pending)
     except TransientStepError:
-        retries.defer(f"merge:{container.id}", attempt, default, apply, report=report)
+        defer_last_call(aliases, prompt, nothing_placed, pending)
+        return result
+    apply(value, False)
+    if not leftover:
+        return result
+    narrow_aliases = _merge_aliases(leftover, value.components)
+    narrow = fitted(narrow_aliases)
+    if narrow is None:
+        apply(_unplaced(value, leftover, too_large(narrow_aliases)), False)
+        return result
+    defer_last_call(narrow_aliases, narrow, value, leftover)
     return result
 
 

@@ -788,6 +788,90 @@ async def test_failure_then_rename_keeps_component_id(
     )
 
 
+async def test_groups_left_after_narrow_retry_stay_out_of_the_lock(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    write_sources(
+        fixture_repo,
+        {
+            "alpha/a.py": "class A: pass\n",
+            "beta/b.py": "class B: pass\n",
+            "gamma/c.py": "class C: pass\n",
+        },
+    )
+    commit(fixture_repo, "add directories")
+    calls = []
+
+    def first_group_only(prompt):
+        calls.append([row["dir"] for row in payload(prompt)["groups"]])
+        answer = merge_answer(prompt)
+        answer["components"] = answer["components"][:1]
+        return answer
+
+    def shop_id(directory):
+        return f"container:shop/{directory}"
+
+    pipeline_answers.answers["merge"] = first_group_only
+    first = await build(fixture_repo, c4_llm_manager)
+    # gamma sorts after other directories, so it waits through both calls.
+    (all_groups, narrow) = [call for call in calls if "gamma" in call]
+    placed = {all_groups[0], narrow[0]}
+    left = set(all_groups) - placed
+    assert len(placed) == 2 and "gamma" in left
+    locked = {group for c in first.lock.components.values() for group in c.groups}
+    assert {shop_id(name) for name in placed} <= locked
+    assert {shop_id(name) for name in left}.isdisjoint(locked)
+    assert {shop_id(name) for name in left}.isdisjoint(
+        first.lock.direct_groups["container:shop"]
+    )
+    markers = {e.id: e.markers for e in first.model.elements}
+    assert "fallback" in markers["container:shop"]
+    assert first.lock.transition is None
+
+    # Placed groups stay placed; the next run sends only what is left.
+    kept = {name: owner_of(first, shop_id(name)) for name in placed}
+    calls.clear()
+
+    def everything(prompt):
+        calls.append([row["dir"] for row in payload(prompt)["groups"]])
+        return merge_answer(prompt)
+
+    pipeline_answers.answers["merge"] = everything
+    second = await build(fixture_repo, c4_llm_manager, lock=first.lock)
+    assert [set(call) for call in calls if "gamma" in call] == [left]
+    assert {name: owner_of(second, shop_id(name)) for name in placed} == kept
+    assert owner_of(second, shop_id("gamma"))
+
+
+async def test_override_for_unknown_group_is_kept_for_the_report(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    first = await build(fixture_repo, c4_llm_manager)
+    # An override is scope-wide: naming another container's group is not unknown.
+    known = {
+        group: id
+        for id, component in first.lock.components.items()
+        for group in component.groups
+    }
+    assert {group.split("/")[0] for group in known} >= {
+        "container:shop",
+        "container:web",
+    }
+    overrides = dict(sorted(known.items())) | {"container:shop/gone": "component:x"}
+    first.lock.overrides.placements = overrides
+    llm = C4Llm(c4_llm_manager, concurrency=4, trial=False)
+    draft = await analyze_c4(
+        project_root=fixture_repo,
+        scope_path=fixture_repo,
+        scope_label="shop",
+        config=None,
+        llm=llm,
+        lock=first.lock,
+        retries=RetryQueue(),
+    )
+    assert draft.unknown_overrides == ["container:shop/gone"]
+
+
 async def test_recovered_merge_titles_use_final_identity_without_titles_call(
     fixture_repo, c4_llm_manager, pipeline_answers
 ):

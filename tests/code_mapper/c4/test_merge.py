@@ -7,16 +7,15 @@ from pathlib import Path
 import pytest
 
 from chunkhound.code_mapper.c4.grouping import Group
-from chunkhound.code_mapper.c4.llm import AnswerRejectedError, C4Llm, RetryQueue
+from chunkhound.code_mapper.c4.llm import C4Llm, RetryQueue
 from chunkhound.code_mapper.c4.merge import (
     MergeAnswer,
-    check_merge_answer,
     fallback_title,
     merge_container,
     relation_fingerprint,
     title_relations,
 )
-from chunkhound.code_mapper.c4.model import LockedComponent
+from chunkhound.code_mapper.c4.model import LockedComponent, Reference
 from chunkhound.code_mapper.c4.runtime import RuntimeUnit
 from chunkhound.llm_manager import LLMManager
 from chunkhound.services.extraction.budget import ENVELOPE_MARGIN_CHARS, schema_text
@@ -43,31 +42,405 @@ def component(name, groups):
     return {"name": name, "description": "Domain responsibility.", "groups": groups}
 
 
+async def merge(llm, queue, *, groups=GROUPS, **overrides):
+    return await merge_container(
+        **{
+            "container": CONTAINER,
+            "project_root": NO_FILES,
+            "references": [],
+            "groups": groups,
+            "group_links": {},
+            "existing": {},
+            "placements": {},
+            "llm": llm,
+            "retries": queue,
+            **overrides,
+        }
+    )
+
+
+def sequence(*responses):
+    """Answer each call in turn; an Exception is raised, a callable gets the prompt."""
+    remaining = iter(responses)
+
+    def respond(prompt):
+        response = next(remaining)
+        if isinstance(response, Exception):
+            raise response
+        return response(prompt) if callable(response) else response
+
+    return respond
+
+
+def data(prompt):
+    return json.loads(prompt.split("\nInput:\n", 1)[1])
+
+
+def alias_of(prompt, name):
+    return next(row["id"] for row in data(prompt)["existing"] if row["name"] == name)
+
+
+def place_first(prompt):
+    return answer(direct=[data(prompt)["groups"][0]["id"]])
+
+
 @pytest.mark.parametrize(
-    "placement",
+    ("placement", "removed"),
     [
-        answer([component("Orders", [GROUPS[0].id, "unknown"])]),
-        answer([component("Orders", [GROUPS[0].id, GROUPS[0].id])]),
-        answer([component("Orders", ["container:other/1"])]),
-        answer(),
-        answer([component("Empty", [])], [GROUPS[0].id]),
+        (answer([component("Orders", ["G1", "G99"])]), 1),
+        (answer([component("Orders", ["G1", "G1"])]), 1),
+        (answer([component("Orders", ["G1"])], ["G1"]), 1),
+        (answer([component("Empty", []), component("Orders", ["G1"])]), 0),
+        (answer([component("Ghost", ["G99"]), component("Orders", ["G1"])]), 1),
     ],
 )
-def test_merge_rejects_invalid_placement(placement):
-    with pytest.raises(AnswerRejectedError):
-        check_merge_answer(
-            MergeAnswer.model_validate(placement), GROUPS[:1], CONTAINER.id
-        )
+async def test_merge_repairs_invalid_placement(
+    c4_llm_manager, scripted, placement, removed
+):
+    scripted.answers["merge"] = placement
+    llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
+    queue = RetryQueue()
+    result = await merge(llm, queue, groups=GROUPS[:1])
+    assert [(c.name, c.groups) for c in result.components] == [
+        ("Orders", (GROUPS[0].id,))
+    ]
+    assert result.direct_groups == []
+    assert (result.placed_groups, result.removed_placements) == (1, removed)
+    assert await queue.drain() == 0
+    assert llm.calls == 1
+    assert not result.fallback
 
 
-def test_merge_rejects_foreign_container_even_with_matching_id():
+async def test_merge_refuses_foreign_input_group(c4_llm_manager):
     foreign = Group(GROUPS[0].id, "container:other", "other", "other", ("other.py",))
-    with pytest.raises(AnswerRejectedError):
-        check_merge_answer(
-            MergeAnswer.model_validate(answer(direct=[foreign.id])),
-            [foreign],
-            CONTAINER.id,
+    llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
+    with pytest.raises(ValueError, match="foreign input group"):
+        await merge(llm, RetryQueue(), groups=[foreign])
+    assert llm.calls == 0
+
+
+async def test_partial_answer_is_repaired_and_leftovers_retry_narrowly(
+    c4_llm_manager, scripted
+):
+    groups = [
+        *GROUPS,
+        Group("container:shop/4", CONTAINER.id, "search", "search", ("search/a.py",)),
+        Group("container:shop/5", CONTAINER.id, "web", "web", ("web/b.py",)),
+    ]
+    ids = [group.id for group in groups]
+    prompts = []
+
+    def first(prompt):
+        return answer(
+            [
+                component("Orders", ["G1", "G99", "G1"]),  # unknown and repeat
+                component("Orders", ["G2"]),  # same name
+                component("Storage", ["G3"]),
+                component("Ghost", ["G98"]),  # nothing remains
+                component("", ["G4"]),  # no name
+            ],
+            ["G1"],  # repeat: the component row was first
+            [
+                {"from": "group:G1", "to": "group:G3", "title": "bewaart via"},
+                {"from": "group:G1", "to": "group:G99", "title": "onbekend"},
+                {"from": "group:G2", "to": "group:G3", "title": "zelfde paar"},
+                {"from": "group:G4", "to": "group:G5", "title": "nog niet geplaatst"},
+            ],
         )
+
+    def second(prompt):
+        orders = alias_of(prompt, "Orders")
+        storage = alias_of(prompt, "Storage")
+        return answer(
+            [component("Orders", ["G1"]), component("Zoeken", ["G2"])],
+            titles=[
+                {
+                    "from": f"component:{orders}",
+                    "to": f"component:{storage}",
+                    "title": "tweede wint niet",
+                },
+                {
+                    "from": f"component:{storage}",
+                    "to": "group:G2",
+                    "title": "levert aan",
+                },
+            ],
+        )
+
+    answers = sequence(first, second)
+
+    def respond(prompt):
+        prompts.append(prompt)
+        return answers(prompt)
+
+    scripted.answers["merge"] = respond
+    llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
+    queue = RetryQueue()
+    result = await merge(
+        llm,
+        queue,
+        groups=groups,
+        group_links={
+            (ids[0], ids[2]): Counter({"call": 1}),
+            (ids[1], ids[2]): Counter({"call": 1}),
+            (ids[2], ids[4]): Counter({"import": 1}),
+        },
+        references=[
+            Reference(
+                relation=None,
+                from_file=source,
+                line=1,
+                to=target,
+                kind="import",
+                status="counts",
+            )
+            for source, target in (
+                ("orders/api.py", "orders/api.py"),
+                ("orders/api.py", "db/store.py"),
+            )
+        ],
+    )
+    assert llm.calls == 1
+    orders_key = next(c.key for c in result.components if c.name == "Orders")
+    assert await queue.drain() == 0
+    assert llm.calls == 2
+
+    # A file referring to itself is never evidence for a placement.
+    assert data(prompts[0])["file_links"] == [[0, 1, 1]]
+    # The narrow prompt holds only what is left, beside what was just chosen.
+    narrow = data(prompts[1])
+    assert [row["dir"] for row in narrow["groups"]] == ["search", "web"]
+    assert {row["name"]: row["dirs"] for row in narrow["existing"]} == {
+        "Orders": ["db", "orders"],
+        "Storage": ["common"],
+    }
+
+    by_name = {c.name: c for c in result.components}
+    assert set(by_name) == {"Orders", "Storage", "Zoeken"}
+    assert by_name["Orders"].key == orders_key
+    assert by_name["Orders"].groups == (ids[0], ids[1], ids[3])
+    assert by_name["Storage"].groups == (ids[2],)
+    assert by_name["Zoeken"].groups == (ids[4],)
+    assert result.direct_groups == []
+    assert result.titles == {
+        (orders_key, by_name["Storage"].key): "bewaart via",
+        (by_name["Storage"].key, by_name["Zoeken"].key): "levert aan",
+    }
+    assert result.placed_groups == 5
+    assert result.removed_placements == 4  # G99, G98, and two repeats of G1
+    assert result.pending_groups == []
+    assert not result.fallback
+    assert result.failure_reason is None
+
+
+async def test_ambiguous_existing_name_makes_its_groups_leftover(
+    c4_llm_manager, scripted
+):
+    groups = [
+        *GROUPS,
+        Group("container:shop/4", CONTAINER.id, "search", "search", ("search/a.py",)),
+    ]
+    locked = {
+        f"component:orders-{index}": LockedComponent(
+            name="Orders",
+            description=None,
+            container=CONTAINER.id,
+            groups=[GROUPS[index].id],
+            files=[],
+        )
+        for index in range(2)
+    }
+    # The name stays ambiguous on the narrow retry, which then places nothing.
+    scripted.answers["merge"] = sequence(
+        answer([component("Orders", ["G1"]), component("Zoeken", ["G2"])]),
+        answer([component("Orders", ["G1"])]),
+    )
+    llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
+    queue = RetryQueue()
+    result = await merge(llm, queue, groups=groups, existing=locked)
+    assert await queue.drain() == 1
+    assert llm.calls == 2
+    assert {c.name: c.groups for c in result.components if c.name != "Orders"} == {
+        "Zoeken": (groups[3].id,)
+    }
+    assert {c.key: c.groups for c in result.components if c.name == "Orders"} == {
+        "component:orders-0": (GROUPS[0].id,),
+        "component:orders-1": (GROUPS[1].id,),
+    }
+    assert result.pending_groups == [GROUPS[2].id]
+    assert result.fallback
+
+
+@pytest.mark.parametrize(
+    "nothing",
+    [
+        answer(),
+        answer([component("Empty", [])]),
+        answer([component("Orders", ["G99"])]),
+        answer([component("", ["G1"])]),
+        answer(direct=[GROUPS[0].id]),  # a real id is no alias of this call
+    ],
+)
+@pytest.mark.parametrize("recovers", [True, False])
+async def test_answer_placing_nothing_is_rejected_and_retried_once(
+    c4_llm_manager, scripted, nothing, recovers
+):
+    prompts = []
+    answers = sequence(
+        nothing, answer(direct=["G1", "G2", "G3"]) if recovers else nothing
+    )
+
+    def respond(prompt):
+        prompts.append(prompt)
+        return answers(prompt)
+
+    scripted.answers["merge"] = respond
+    llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
+    queue = RetryQueue()
+    result = await merge(llm, queue)
+    assert await queue.drain() == (0 if recovers else 1)
+    assert llm.calls == 2
+    assert prompts[0] == prompts[1]
+    if recovers:
+        assert result.direct_groups == [g.id for g in GROUPS]
+        assert not result.fallback
+    else:
+        assert result.components == result.direct_groups == []
+        assert result.pending_groups == [g.id for g in GROUPS]
+        assert result.fallback
+        assert result.failure_reason == "afgekeurd (answer places no group)"
+
+
+@pytest.mark.parametrize(
+    "unreadable",
+    [
+        RuntimeError("Structured output truncated by the provider"),
+        RuntimeError("Invalid JSON in structured output: quoted input_too_large"),
+        ValueError("Incomplete - token limit reached"),
+    ],
+)
+@pytest.mark.parametrize("recovers", [True, False])
+async def test_truncated_answer_does_not_end_the_run(
+    c4_llm_manager, scripted, unreadable, recovers
+):
+    scripted.answers["merge"] = sequence(
+        unreadable, answer(direct=["G1", "G2", "G3"]) if recovers else unreadable
+    )
+    llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
+    queue = RetryQueue()
+    result = await merge(llm, queue)
+    assert await queue.drain() == (0 if recovers else 1)
+    assert llm.calls == 2
+    assert result.fallback is not recovers
+    if not recovers:
+        assert result.pending_groups == [g.id for g in GROUPS]
+        assert result.failure_reason == "afgekeurd (invalid answer schema)"
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        RuntimeError("provider said input_too_large for secret payload"),
+        TimeoutError("input_too_large after a timeout"),
+    ],
+)
+async def test_input_refusal_goes_to_fallback_without_retry(
+    c4_llm_manager, scripted, refusal
+):
+    scripted.answers["merge"] = refusal
+    llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
+    queue = RetryQueue()
+    result = await merge(llm, queue)
+    assert await queue.drain() == 0
+    assert llm.calls == 1
+    assert result.fallback
+    assert result.components == result.direct_groups == []
+    assert result.pending_groups == [g.id for g in GROUPS]
+    assert result.failure_reason == "invoer geweigerd"
+    report = "\n".join(llm.report_lines())
+    assert "invoer geweigerd, terugval" in report
+    assert "secret" not in report
+
+    # Refused on the narrow retry: what the first call placed stays placed.
+    scripted.answers["merge"] = sequence(place_first, refusal)
+    llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
+    queue = RetryQueue()
+    result = await merge(llm, queue)
+    await queue.drain()
+    assert llm.calls == 2
+    assert result.fallback
+    assert result.direct_groups == [GROUPS[0].id]
+    assert result.pending_groups == [GROUPS[1].id, GROUPS[2].id]
+    assert result.failure_reason == "invoer geweigerd"
+
+
+@pytest.mark.parametrize(
+    ("responses", "placed", "reason"),
+    [
+        ((place_first, place_first), 2, "antwoord onvolledig"),
+        ((TimeoutError("busy"), place_first), 1, "antwoord onvolledig"),
+        ((answer(), place_first), 1, "antwoord onvolledig"),
+        ((place_first, TimeoutError("busy")), 1, "tijdelijke fout"),
+        ((place_first, answer()), 1, "afgekeurd (answer places no group)"),
+        ((TimeoutError("busy"), TimeoutError("busy")), 0, "tijdelijke fout"),
+    ],
+)
+async def test_at_most_two_merge_calls_per_container(
+    c4_llm_manager, scripted, responses, placed, reason
+):
+    # A third call would exhaust the sequence and fail the test.
+    scripted.answers["merge"] = sequence(*responses)
+    llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
+    queue = RetryQueue()
+    result = await merge(llm, queue)
+    await queue.drain()
+    assert await queue.drain() == 0
+    assert llm.calls == 2
+    assert result.fallback
+    assert result.failure_reason == reason
+    assert result.placed_groups == len(result.direct_groups) == placed
+    assert result.direct_groups == [g.id for g in GROUPS[:placed]]
+    assert result.pending_groups == [g.id for g in GROUPS[placed:]]
+
+
+async def test_narrow_retry_that_does_not_fit_makes_no_call(c4_llm_manager, scripted):
+    prompts = []
+
+    def respond(prompt):
+        prompts.append(prompt)
+        # The description makes the narrow prompt larger than the first one.
+        return answer([{"name": "Orders", "description": "x" * 5000, "groups": ["G1"]}])
+
+    scripted.answers["merge"] = respond
+
+    async def merge_within(limit):
+        config = {"provider": "fake", "model": "fake-gpt"}
+        manager = LLMManager(
+            utility_config=config,
+            synthesis_config={**config, "max_input_chars": limit},
+        )
+        llm = C4Llm(manager, concurrency=1, trial=False)
+        queue = RetryQueue()
+        result = await merge(llm, queue, groups=GROUPS)
+        await queue.drain()
+        return result
+
+    await merge_within(1_000_000)
+    assert len(prompts) == 2
+    room = len(schema_text(MergeAnswer.model_json_schema())) + ENVELOPE_MARGIN_CHARS
+    limit = len(prompts[0]) + room
+    assert len(prompts[1]) + room > limit
+
+    prompts.clear()
+    result = await merge_within(limit)
+    assert len(prompts) == 1
+    assert result.fallback
+    assert [(c.name, c.groups) for c in result.components] == [
+        ("Orders", (GROUPS[0].id,))
+    ]
+    assert result.pending_groups == [GROUPS[1].id, GROUPS[2].id]
+    assert result.failure_reason.startswith("invoer te groot")
+    assert str(limit) in result.failure_reason
 
 
 async def test_merge_direct_group_has_no_component(c4_llm_manager, scripted):
@@ -235,7 +608,7 @@ async def test_merge_titles_survive_and_only_unclaimed_groups_are_sent(
 @pytest.mark.parametrize(
     "endpoint", ["group:G99", "group:G3", "component:E1", f"group:{GROUPS[1].id}"]
 )
-async def test_merge_retries_unsupported_title_endpoints(
+async def test_merge_drops_unsupported_title_endpoints(
     c4_llm_manager, scripted, endpoint
 ):
     scripted.answers["merge"] = answer(
@@ -244,19 +617,15 @@ async def test_merge_retries_unsupported_title_endpoints(
         [{"from": "group:G1", "to": endpoint, "title": "uses"}],
     )
     queue = RetryQueue()
-    result = await merge_container(
-        container=CONTAINER,
-        project_root=NO_FILES,
-        references=[],
-        groups=GROUPS,
-        group_links={(GROUPS[0].id, GROUPS[1].id): Counter({"call": 1})},
-        existing={},
-        placements={},
-        llm=C4Llm(c4_llm_manager, concurrency=1, trial=False),
-        retries=queue,
+    llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
+    result = await merge(
+        llm, queue, group_links={(GROUPS[0].id, GROUPS[1].id): Counter({"call": 1})}
     )
-    assert await queue.drain() == 1
-    assert result.fallback and not result.titles
+    assert await queue.drain() == 0
+    assert llm.calls == 1
+    assert not result.fallback and not result.titles
+    assert {c.name for c in result.components} == {"Orders", "Storage"}
+    assert result.direct_groups == [GROUPS[2].id]
 
 
 async def test_rejected_merge_can_recover_on_delayed_retry(c4_llm_manager, scripted):
@@ -403,35 +772,33 @@ async def test_merge_attaches_new_group_to_existing_component(c4_llm_manager, sc
     assert result.titles == {("component:orders", CONTAINER.id): "importeert"}
 
 
-@pytest.mark.parametrize("mode", ["reverse", "self", "duplicate"])
-async def test_merge_rejects_unsupported_normalized_pairs(
-    c4_llm_manager, scripted, mode
-):
+@pytest.mark.parametrize("mode", ["reverse", "self", "blank", "duplicate"])
+async def test_merge_drops_unsupported_normalized_pairs(c4_llm_manager, scripted, mode):
     row = {"from": "group:G1", "to": "group:G2", "title": "uses"}
     if mode == "reverse":
         row["from"], row["to"] = row["to"], row["from"]
     elif mode == "self":
         row["to"] = row["from"]
-    titles = [row, dict(row)] if mode == "duplicate" else [row]
+    elif mode == "blank":
+        row["title"] = ""
+    titles = [row, {**row, "title": "second"}] if mode == "duplicate" else [row]
     scripted.answers["merge"] = answer(
         [component("Orders", ["G1"]), component("Storage", ["G2"])],
         ["G3"],
         titles,
     )
     queue = RetryQueue()
-    result = await merge_container(
-        container=CONTAINER,
-        project_root=NO_FILES,
-        references=[],
-        groups=GROUPS,
-        group_links={(GROUPS[0].id, GROUPS[1].id): Counter({"call": 1})},
-        existing={},
-        placements={},
-        llm=C4Llm(c4_llm_manager, concurrency=1, trial=False),
-        retries=queue,
+    llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
+    result = await merge(
+        llm, queue, group_links={(GROUPS[0].id, GROUPS[1].id): Counter({"call": 1})}
     )
-    assert await queue.drain() == 1
-    assert result.fallback and not result.titles
+    assert await queue.drain() == 0
+    assert llm.calls == 1
+    assert not result.fallback
+    keys = {c.name: c.key for c in result.components}
+    assert result.titles == (
+        {(keys["Orders"], keys["Storage"]): "uses"} if mode == "duplicate" else {}
+    )
 
 
 async def test_proposed_keys_are_stable_across_group_order(c4_llm_manager, scripted):
