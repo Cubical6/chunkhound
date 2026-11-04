@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from itertools import chain
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from pydantic import TypeAdapter
 
@@ -272,6 +272,13 @@ _FINGERPRINT_EXCLUDE = {
 }
 
 
+def _fingerprint_config(config: Config) -> dict[str, Any]:
+    data = config.model_dump(mode="json", exclude=_FINGERPRINT_EXCLUDE)
+    # The default patterns come from a set, so their order differs per process.
+    data["indexing"]["include"] = sorted(data["indexing"]["include"])
+    return data
+
+
 def _input_fingerprint(
     project_root: Path, files: list[str], config: Config | None, scope_path: Path
 ) -> str:
@@ -286,11 +293,7 @@ def _input_fingerprint(
     payload = {
         "files": hashes,
         "scope": scope_path.relative_to(project_root).as_posix(),
-        "config": (
-            config.model_dump(mode="json", exclude=_FINGERPRINT_EXCLUDE)
-            if config
-            else None
-        ),
+        "config": _fingerprint_config(config) if config else None,
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 

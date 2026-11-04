@@ -1,8 +1,10 @@
 """End-to-end C4 cost, recovery, replay, and persistence contracts."""
 
 import json
+import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -1188,6 +1190,31 @@ def test_new_limit_fields_do_not_change_input_fingerprint(tmp_path):
     assert _input_fingerprint(tmp_path, ["app.py"], plain, tmp_path) == (
         _input_fingerprint(tmp_path, ["app.py"], limited, tmp_path)
     )
+
+
+def test_input_fingerprint_is_the_same_in_every_process(tmp_path):
+    """Lock history is only reusable if another process computes the same hash."""
+    (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
+    script = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from chunkhound.code_mapper.c4.pipeline import _input_fingerprint\n"
+        "from chunkhound.core.config.config import Config\n"
+        "root = Path(sys.argv[1])\n"
+        "config = Config(target_dir=root)\n"
+        "print(_input_fingerprint(root, ['app.py'], config, root))\n"
+    )
+    hashes = {
+        subprocess.run(
+            [sys.executable, "-c", script, str(tmp_path)],
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        for seed in ("1", "2", "3")
+    }
+    assert len(hashes) == 1
 
 
 async def test_fallback_fragment_without_lock_items_blocks_lock(

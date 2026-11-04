@@ -39,7 +39,7 @@ classDiagram
 | Softwaresysteem | Precies één per `map`-run; alles binnen root en scope | C4-log rij 31 |
 | Container | Deployable met een manifest dat startpunten, binary, siteframework of Dockerfile declareert; bibliotheken horen bij de laadende container | rij 5 |
 | Opslagcontainer | Gedeclareerde opslaglocatie (configsleutel, DSN, volume), identiteit = configsleutel | rij 6 |
-| Groep | Deterministische bestandsgroep uit `TreeSpec`, herspeelbaar | rij 2, 21 |
+| Groep | Bouwsteen: de bestanden van één map binnen een container, afgeleid uit de paden, herspeelbaar | rij 2; O-MAP §4.1 |
 | Component | Vereniging van ≥1 groep binnen één container | rij 2 |
 | Extern systeem / Persoon | Element buiten het systeem, alleen met ≥1 bron | C4-log rij 21 |
 | Dependency | Pakket met ≥1 runtime-import of configuratieverwijzing; ingedeeld als bibliotheek, extern systeem of opslagdriver | rij 9, 12 |
@@ -67,7 +67,7 @@ classDiagram
 | R9 | Status _aangetroffen_ zodra ≥1 bron code of configuratie is, anders _gedocumenteerd_ | Embedding met `voyageai_provider.py` + `README.md` → _aangetroffen_ (C4-log rij 29) |
 | R10 | Een documentatiecitaat telt alleen als het letterlijk op het opgegeven bestand:regel staat | Citaat "Webdashboard" dat niet op `README.md:60` staat → afgekeurd (rij 34) |
 | R11 | Handmatige `overrides` in het lockbestand gaan voor op elke afgeleide uitkomst | override `pyarrow = opslagdriver` → geen stemming, soort opslagdriver (rij 31) |
-| R12 | Terugval en proef worden nooit opgeslagen | samenvoegstap twee keer time-out → 14 gemarkeerde componenten, lockbestand onveranderd (rij 19, 30) |
+| R12 | Terugval en proef worden nooit opgeslagen; alleen een proefrun maakt voorlopige componenten, een mislukte merge verzint er geen | samenvoegstap twee keer time-out → eerder geplaatste componenten blijven, de overige groepen staan als wachtend in het rapport en worden de volgende run opnieuw aangeboden, `base_sha` blijft staan (rij 19, 30; O-MAP §4.5) |
 
 Geschiedenis bij R3 (uitvoeringsbesluit R): behoud elk paar met ≥10% overlap aan één kant, over bestanden in beide runs na renames. Meerdere voorgangers → `merge`, anders meerdere opvolgers → `split`, anders `continuation`; het label bewijst geen overerving. Niet-geërfde nieuwe id's krijgen tevens `new` (`from_id=""`), niet-geërfde oude id's `removed` (`to_id=""`) plus tombstone `oud_id → oud_id`. Andere eindpunten zijn echte id's; bestaande tombstones blijven staan en beide kolommen reserveren id's.
 
@@ -110,6 +110,7 @@ classDiagram
     +ElementKind kind
     +str name
     +str description
+    +str technology
     +Status status
     +str parent
     +list~Marker~ markers
@@ -172,8 +173,6 @@ classDiagram
     +str base_sha
     +str system
     +dict containers
-    +TreeSpec tree_spec
-    +dict group_membership
     +dict direct_groups
     +LockedTransition transition
     +dict components
@@ -212,9 +211,9 @@ classDiagram
   LlmSteps ..> ScopeLock : alleen echte uitkomsten
 ```
 
-`ScopeLock.group_membership` bewaart per container projectrelatieve bestandspaden met `/` → lokale groep-id, ook voor groepen rechtstreeks onder de container. Grouping leest deze vorige membership naast de ongewijzigde CodeBoarding `TreeSpec` en runtime-root; bekende bestanden blijven geplaatst, nieuwe mappen krijgen nieuwe prefix-only regels. De verplichte lockvorm gebruikt schemaversie 2 (gebruikersbesluit taak 7).
+Groepen zijn een pure afleiding uit de paden (O-MAP §4.1), dus het lockbestand bewaart geen indeling meer: schemaversie 4 vervalt `tree_spec` en `group_membership`. Een lockbestand met een oudere versie wordt geweigerd met de melding het te verwijderen.
 
-Taak 13, gebruiker **"optie 1"**: schemaversie 3 bewaart daarnaast expliciete succesvolle `direct_groups` per container en optionele `transition` met `input_fingerprint`, `history` en `renames`. Een ongewijzigde uitvoering herhaalt de laatste succesvolle analysetransitie; zij maakt geen nieuwe geschiedenis. De vingerafdruk bevat werkelijke bestandsinhoud, HEAD, scope, configuratie, topics en overrides. Gewijzigde invoer berekent een nieuwe transitie; terugval/proef levert geen herbruikbare snapshot. Membership blijft volledig, zodat mislukte mergegroepen niet als succesvolle directe plaatsingen kunnen worden aangezien.
+Taak 13, gebruiker **"optie 1"**: het lockbestand bewaart expliciete succesvolle `direct_groups` per container en optionele `transition` met `input_fingerprint`, `history` en `renames`. Een ongewijzigde uitvoering herhaalt de laatste succesvolle analysetransitie; zij maakt geen nieuwe geschiedenis. De vingerafdruk bevat werkelijke bestandsinhoud, HEAD, scope, configuratie, topics en overrides. Gewijzigde invoer berekent een nieuwe transitie; terugval/proef levert geen herbruikbare snapshot. Mislukte mergegroepen staan niet in `direct_groups`, zodat ze niet als succesvolle directe plaatsingen kunnen worden aangezien.
 
 ## 3. Vertaaltabel
 
@@ -223,7 +222,7 @@ Taak 13, gebruiker **"optie 1"**: schemaversie 3 bewaart daarnaast expliciete su
 | Softwaresysteem | `Element` met `kind=system` | class | — | — | één per run |
 | Container | `RuntimeUnit` → `Element` met `kind=container` | class | — | — | `runtime.py` |
 | Opslagcontainer | `RuntimeUnit.storage` → `Element` met `kind=storage` | attribute | bool | — | |
-| Groep | `Group` | class | — | — | uit gekopieerde `clustering/names/` |
+| Groep | `Group` | class | — | — | `grouping.py`, één per map |
 | Component | `Element` met `kind=component` | class | — | — | `identity.py` (R3) |
 | Extern systeem | `Element` met `kind=external` | class | — | — | |
 | Persoon | `Element` met `kind=person` | class | — | — | alleen uit `documented.py` |
