@@ -346,6 +346,33 @@ async def test_rerun_unchanged_zero_calls_stable_output(
     assert second.lock == first.lock
 
 
+async def test_rerun_without_merge_call_keeps_technology_and_descriptions(
+    fixture_repo, c4_llm_manager, pipeline_answers, tmp_path
+):
+    write_sources(fixture_repo, {"shop/bridge.m": "@interface Bridge\n@end\n"})
+    commit(fixture_repo, "add bridge")
+
+    def rows(result):
+        return {
+            (e.kind, e.name): (e.technology, e.description)
+            for e in result.model.elements
+            if e.kind in {"container", "component"}
+        }
+
+    first = await build(fixture_repo, c4_llm_manager)
+    assert rows(first)["component", "shop"] == (
+        "Objective-C, Python",
+        "Domain responsibility.",
+    )
+    assert rows(first)["container", "shop"] == ("Python", "")
+    write_scope_lock(tmp_path / "cache", "shop", first.lock)
+    restored = read_scope_lock(tmp_path / "cache", "shop")
+    pipeline_answers.calls.clear()
+    second = await build(fixture_repo, c4_llm_manager, lock=restored)
+    assert not pipeline_answers.calls
+    assert rows(second) == rows(first)
+
+
 async def test_new_file_in_known_directory_needs_no_merge_call(
     fixture_repo, c4_llm_manager, pipeline_answers
 ):

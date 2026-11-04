@@ -55,6 +55,7 @@ class Element(_C4BaseModel):
     kind: ElementKind
     name: str
     description: str | None
+    technology: str = ""
     status: Status
     parent: str | None
     markers: list[Marker]

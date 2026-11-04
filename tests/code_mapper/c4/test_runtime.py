@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from chunkhound.code_mapper.c4.runtime import RuntimeScan, scan_runtime
 
 
@@ -268,3 +270,102 @@ def test_cdylib_alone_in_its_directory_stays_a_candidate(tmp_path: Path) -> None
     assert scan.system_name == "native"
     accepted = _scan_sources(tmp_path, sources, {"Cargo.toml": True})
     assert "Cargo.toml" in {c.manifest for c in accepted.containers}
+
+
+_DESCRIBED_PYTHON = (
+    '[project]\nname = "app"\ndescription = "Python app"\n'
+    '[project.scripts]\nch = "app:main"\n'
+)
+_DESCRIBED_NODE = '{"name":"app","description":"Node app","bin":"run.js"}'
+
+
+@pytest.mark.parametrize(
+    "sources,technology,description",
+    [
+        ({"pyproject.toml": _DESCRIBED_PYTHON}, "Python", "Python app"),
+        (
+            {
+                "Cargo.toml": '[package]\nname = "app"\ndescription = "Rust app"\n'
+                '[[bin]]\nname = "app"\n'
+            },
+            "Rust",
+            "Rust app",
+        ),
+        ({"package.json": _DESCRIBED_NODE}, "Node.js", "Node app"),
+        (
+            {"composer.json": '{"name":"app","description":"PHP app","bin":["run"]}'},
+            "PHP",
+            "PHP app",
+        ),
+        ({"pyproject.toml": _PYTHON_APP}, "Python", ""),
+        (
+            {"pyproject.toml": _DESCRIBED_PYTHON, "Cargo.toml": _CDYLIB},
+            "Python, Rust",
+            "Python app",
+        ),
+        (
+            {"package.json": _DESCRIBED_NODE, "Cargo.toml": _CDYLIB},
+            "Node.js, Rust",
+            "Node app",
+        ),
+        (
+            {
+                "Cargo.toml": '[package]\nname = "app"\ndescription.workspace = true\n'
+                '[[bin]]\nname = "app"\n'
+            },
+            "Rust",
+            "",
+        ),
+        ({"Dockerfile": "FROM scratch\n"}, "", ""),
+        ({"lib.py": "x = 1\n"}, "", ""),
+        ({"pyproject.toml": _DESCRIBED_PYTHON.split("[project.scripts]")[0]}, "", ""),
+    ],
+    ids=[
+        "pyproject",
+        "cargo",
+        "package-json",
+        "composer",
+        "no-description",
+        "cdylib-beside-pyproject",
+        "cdylib-beside-package-json",
+        "description-not-text",
+        "dockerfile-only",
+        "provisional",
+        "provisional-beside-unselected-manifest",
+    ],
+)
+def test_container_technology_and_description_come_from_its_manifest(
+    tmp_path: Path, sources: dict[str, str], technology: str, description: str
+) -> None:
+    scan = _scan_sources(tmp_path, sources)
+    assert [(c.technology, c.description) for c in scan.containers] == [
+        (technology, description)
+    ]
+
+
+def test_system_description_comes_from_the_manifest_that_named_it(
+    tmp_path: Path,
+) -> None:
+    selected = _scan_sources(
+        tmp_path / "selected", {"pyproject.toml": _DESCRIBED_PYTHON}
+    )
+    assert selected.system_description == "Python app"
+
+    unselected = _scan_sources(
+        tmp_path / "unselected",
+        {
+            "Cargo.toml": '[package]\nname = "native"\ndescription = "Native lib"\n',
+            "pyproject.toml": _PYTHON_LIB,
+            "tool/package.json": '{"name":"tool","description":"Tool","bin":"run.js"}',
+        },
+    )
+    assert unselected.system_name == "native"
+    assert unselected.system_description == "Native lib"
+    assert [c.description for c in unselected.containers] == ["Tool"]
+
+    directory = _scan_sources(
+        tmp_path / "directory",
+        {"tool/package.json": '{"name":"tool","description":"Tool","bin":"run.js"}'},
+    )
+    assert directory.system_name == "directory"
+    assert directory.system_description == ""

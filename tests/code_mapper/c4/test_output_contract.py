@@ -8,13 +8,22 @@ from pathlib import Path
 import jsonschema
 import pytest
 
+from chunkhound.code_mapper.c4.assemble import AssemblyInput, assemble
+from chunkhound.code_mapper.c4.classify import Classification
+from chunkhound.code_mapper.c4.documented import DocElement, DocumentedOutcome
+from chunkhound.code_mapper.c4.grouping import Group
+from chunkhound.code_mapper.c4.merge import ProposedComponent
 from chunkhound.code_mapper.c4.model import (
     C4Evidence,
     C4Model,
     C4PairMismatchError,
+    Citation,
     MapLock,
+    Overrides,
     load_c4_pair,
 )
+from chunkhound.code_mapper.c4.references import ReferenceScan
+from chunkhound.code_mapper.c4.runtime import RuntimeUnit, scan_runtime
 from chunkhound.code_mapper.c4.writer import compute_run_id, write_c4_pair
 
 
@@ -196,6 +205,9 @@ def test_run_id_covers_both_documents_without_previous_ids(tmp_path: Path) -> No
     evidence.references[0].line = 1
     model.elements[0].name = "Changed"
     assert compute_run_id(model, evidence) != expected
+    model.elements[0].name = "App"
+    model.elements[1].technology = "Python"
+    assert compute_run_id(model, evidence) != expected
 
 
 def test_interrupted_pair_is_rejected_and_can_be_rewritten(
@@ -228,3 +240,117 @@ def test_interrupted_pair_is_rejected_and_can_be_rewritten(
     )
     write_c4_pair(out_dir=tmp_path, scope_label="", model=model, evidence=evidence)
     assert load_c4_pair(*paths) == (model, evidence)
+
+
+def test_assembled_elements_state_technology_and_description(tmp_path: Path) -> None:
+    sources = {
+        "pyproject.toml": (
+            '[project]\nname = "shop"\ndescription = "A shop"\n'
+            'dependencies = ["duckdb", "stripe"]\n'
+            '[project.scripts]\nshop = "app.core:main"\n'
+        ),
+        "Cargo.toml": '[package]\nname = "native"\n[lib]\ncrate-type = ["cdylib"]\n',
+        "Dockerfile": "FROM scratch\nVOLUME /data\n",
+        "app/core.py": "x = 1\n",
+        "app/native.rs": "fn main() {}\n",
+        "app/bridge.m": "@interface Bridge\n@end\n",
+        "app/notes.md": "# Notes\n",
+        "guide/intro.md": "# Intro\n",
+        "guide/config.yaml": "a: 1\n",
+        "blob/data.bin": "",
+    }
+    for name, text in sources.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    runtime = scan_runtime(
+        project_root=tmp_path,
+        scope_path=tmp_path,
+        files=list(sources),
+        locked_containers={},
+        tombstones={},
+    )
+    runtime.containers.append(
+        RuntimeUnit(
+            "storage:redis",
+            "redis",
+            "",
+            ".",
+            True,
+            (),
+            (),
+            technology="redis",
+            description="Cache",
+        )
+    )
+    container = "container:shop"
+    directories = {
+        "app": ("app/bridge.m", "app/core.py", "app/native.rs", "app/notes.md"),
+        "guide": ("guide/config.yaml", "guide/intro.md"),
+        "blob": ("blob/data.bin",),
+    }
+    described = {"app": "Core logic", "guide": None, "blob": ""}
+    groups = [
+        Group(f"{container}/{name}", container, name, name, files)
+        for name, files in directories.items()
+    ]
+    citation = Citation(
+        target=None,
+        file="README.md",
+        start_line=1,
+        end_line=1,
+        source="documentation",
+        verified=True,
+    )
+
+    def vote(value: str) -> Classification:
+        return Classification(value, (value,) * 3, (), False)
+
+    elements, _, _ = assemble(
+        AssemblyInput(
+            runtime,
+            ReferenceScan([], frozenset(), {}),
+            groups,
+            {
+                name: (
+                    ProposedComponent(
+                        name, name, described[name], (f"{container}/{name}",), ()
+                    ),
+                    f"component:{name}",
+                )
+                for name in directories
+            },
+            {},
+            {
+                "duckdb": vote("storage_driver"),
+                "stripe": vote("external_system"),
+                "/data": vote("yes"),
+            },
+            DocumentedOutcome(
+                [
+                    DocElement("person", "User", citation),
+                    DocElement("container", "Dashboard", citation),
+                ],
+                [],
+                {},
+                False,
+            ),
+            {},
+            Overrides(),
+            project_root=tmp_path,
+        )
+    )
+
+    assert {e.id: (e.technology, e.description) for e in elements} == {
+        "systeem:shop": ("", "A shop"),
+        container: ("Python, Rust", "A shop"),
+        "storage:redis": ("redis", "Cache"),
+        "component:app": ("Objective-C, Python, Rust", "Core logic"),
+        "component:guide": ("Markdown, YAML", ""),
+        "component:blob": ("", ""),
+        "opslag:duckdb": ("duckdb", ""),
+        "opslag:data": ("", ""),
+        "extern:stripe": ("", None),
+        "persoon:user": ("", None),
+        "container:dashboard": ("", ""),
+    }

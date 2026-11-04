@@ -1,7 +1,9 @@
 """Assemble source-backed elements and one static relation per ordered pair."""
 
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 
 from chunkhound.code_mapper.c4.classify import Classification
 from chunkhound.code_mapper.c4.documented import DocumentedOutcome
@@ -27,6 +29,45 @@ from chunkhound.code_mapper.c4.model import (
 )
 from chunkhound.code_mapper.c4.references import ReferenceScan
 from chunkhound.code_mapper.c4.runtime import RuntimeScan
+from chunkhound.core.detection.language_detector import detect_language
+from chunkhound.core.types.common import Language
+
+# Every other language is its enum value, capitalized.
+_LANGUAGE_NAMES = {
+    Language.CPP: "C++",
+    Language.CSHARP: "C#",
+    Language.CSS: "CSS",
+    Language.HCL: "HCL",
+    Language.HTML: "HTML",
+    Language.JAVASCRIPT: "JavaScript",
+    Language.JSON: "JSON",
+    Language.JSX: "JSX",
+    Language.MATLAB: "MATLAB",
+    Language.OBJC: "Objective-C",
+    Language.PDF: "PDF",
+    Language.PHP: "PHP",
+    Language.POWERSHELL: "PowerShell",
+    Language.SCSS: "SCSS",
+    Language.SQL: "SQL",
+    Language.TOML: "TOML",
+    Language.TSX: "TSX",
+    Language.TWINCAT: "TwinCAT",
+    Language.TYPESCRIPT: "TypeScript",
+    Language.YAML: "YAML",
+}
+
+
+def _languages(project_root: Path, files: Iterable[str]) -> str:
+    """Sorted language names; languages without code count only if nothing else."""
+    found = {detect_language(project_root / file) for file in files}
+    found.discard(Language.UNKNOWN)
+    with_code = {language for language in found if language.is_programming_language}
+    return ", ".join(
+        sorted(
+            _LANGUAGE_NAMES.get(language, language.value.capitalize())
+            for language in with_code or found
+        )
+    )
 
 
 @dataclass
@@ -41,6 +82,8 @@ class AssemblyInput:
     titles: dict[str, str]
     overrides: Overrides
     fallback_containers: frozenset[str] = frozenset()
+    # Language detection reads ambiguous files (.m), so paths must resolve.
+    project_root: Path = Path()
 
 
 @dataclass(frozen=True)
@@ -72,6 +115,8 @@ class _Assembly:
         parent: str | None,
         *,
         markers: tuple[Marker, ...] = (),
+        description: str = "",
+        technology: str = "",
     ) -> None:
         if id not in self.elements:
             self.elements[id] = Element(
@@ -79,7 +124,8 @@ class _Assembly:
                 kind=kind,
                 name=name,
                 parent=parent,
-                description=None,
+                description=None if kind in {"person", "external"} else description,
+                technology=technology,
                 status="documented",
                 markers=list(markers),
                 coverage=Coverage(status="none", topics=[]),
@@ -100,7 +146,13 @@ class _Assembly:
 
     def runtime(self) -> None:
         runtime = self.inp.runtime
-        self.element(runtime.system_id, "system", runtime.system_name, None)
+        self.element(
+            runtime.system_id,
+            "system",
+            runtime.system_name,
+            None,
+            description=runtime.system_description,
+        )
         for unit in runtime.containers:
             self.element(
                 unit.id,
@@ -108,6 +160,8 @@ class _Assembly:
                 unit.name,
                 runtime.system_id,
                 markers=unit.markers,
+                description=unit.description,
+                technology=unit.technology,
             )
             # On the element only: a marked unit would lose its locked container ID.
             markers = self.elements[unit.id].markers
@@ -148,8 +202,12 @@ class _Assembly:
                 proposal.name,
                 parent,
                 markers=proposal.markers,
+                description=proposal.description or "",
+                technology=_languages(
+                    self.inp.project_root,
+                    (file for group in members for file in group.files),
+                ),
             )
-            self.elements[id].description = proposal.description
             for group in members:
                 for file in group.files:
                     self.owners[file] = id
@@ -198,7 +256,14 @@ class _Assembly:
             )
             id = element_id(kind, name)
             parent = self.inp.runtime.system_id if kind == "storage" else None
-            self.element(id, kind, name, parent, markers=classified.markers)
+            self.element(
+                id,
+                kind,
+                name,
+                parent,
+                markers=classified.markers,
+                technology=name if kind == "storage" else "",
+            )
             self.packages["package:" + name] = id
             for decl in self.inp.runtime.dependencies:
                 if decl.name == name:

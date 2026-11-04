@@ -159,9 +159,9 @@ Komt vóór de nieuwe invoer, omdat de tests dan op de bestaande prompt kunnen d
 
 **Files:** `c4/runtime.py`, `c4/model.py`, `c4/assemble.py`, `c4/schemas/`; tests in `test_output_contract.py`, `test_runtime.py`, `test_summaries.py` (`:18`), `test_merge.py` (`:21`), `test_assemble.py` (`:43`).
 
-- [ ] **Step 1: Rode tests.** Tabel uit §5: container per manifest, `cdylib` naast `pyproject.toml` geeft `Python, Rust`, component op talen, opslag uit een afhankelijkheid tegenover opslag uit configuratie; omschrijving uit het manifest voor systeem en container; omschrijving van een component uit het merge-antwoord.
-- [ ] **Step 2:** `Element.technology: str = ""`. `RuntimeUnit` en `RuntimeScan` krijgen omschrijving en technologie als velden met een standaardwaarde, omdat tests ze positioneel bouwen.
-- [ ] **Step 3:** Schema's regenereren; tests, ruff en mypy.
+- [x] **Step 1: Rode tests.** Tabel uit §5: container per manifest, `cdylib` naast `pyproject.toml` geeft `Python, Rust`, component op talen, opslag uit een afhankelijkheid tegenover opslag uit configuratie; omschrijving uit het manifest voor systeem en container; omschrijving van een component uit het merge-antwoord.
+- [x] **Step 2:** `Element.technology: str = ""`. `RuntimeUnit` en `RuntimeScan` krijgen omschrijving en technologie als velden met een standaardwaarde, omdat tests ze positioneel bouwen.
+- [x] **Step 3:** Schema's regenereren; tests, ruff en mypy.
 
 ### Task 8: Contractvertaling (spec §7, §8)
 

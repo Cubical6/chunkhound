@@ -35,6 +35,12 @@ else:
 
 _MANIFESTS = {"pyproject.toml", "package.json", "composer.json", "Cargo.toml"}
 _PLACEHOLDERS = ("{{", "}}", "{%", "${")
+_MANIFEST_TECHNOLOGY = {
+    "pyproject.toml": "Python",
+    "Cargo.toml": "Rust",
+    "package.json": "Node.js",
+    "composer.json": "PHP",
+}
 
 
 @dataclass(frozen=True)
@@ -46,6 +52,8 @@ class RuntimeUnit:
     storage: bool
     markers: tuple[Marker, ...]
     citations: tuple[Citation, ...]
+    description: str = ""
+    technology: str = ""
 
 
 @dataclass(frozen=True)
@@ -80,6 +88,7 @@ class RuntimeScan:
     storage: list[StorageCandidate]
     dependencies: list[DependencyDecl]
     container_of: dict[str, str]
+    system_description: str = ""
 
 
 def _slug(name: str) -> str:
@@ -129,6 +138,7 @@ class _Manifest:
     line: int
     starts: bool
     cdylib: bool = False
+    description: str = ""
 
 
 def _manifest(
@@ -172,7 +182,17 @@ def _manifest(
         DependencyDecl(name=dep, manifest=path, line=_dependency_line(text, dep))
         for dep in dependency_names
     ]
-    return _Manifest(path, name, _key_line(text, "name"), starts, cdylib), dependencies
+    description = package.get("description")
+    manifest = _Manifest(
+        path,
+        name,
+        _key_line(text, "name"),
+        starts,
+        cdylib,
+        # Cargo allows `description.workspace = true`: not a text of its own.
+        description if isinstance(description, str) else "",
+    )
+    return manifest, dependencies
 
 
 def _dependency_line(text: str, name: str) -> int:
@@ -340,7 +360,20 @@ def _discover(
     return manifests, dependencies, storage, dockerfiles
 
 
-def _runtime_unit(m: _Manifest, id: str, dockerfiles: list[str]) -> RuntimeUnit:
+def _technology(m: _Manifest, cdylib_roots: set[str]) -> str:
+    """The manifest's language; a hosted cdylib adds its own. No manifest: empty."""
+    filename = PurePosixPath(m.path).name
+    if filename not in _MANIFEST_TECHNOLOGY:
+        return ""
+    languages = {_MANIFEST_TECHNOLOGY[filename]}
+    if PurePosixPath(m.path).parent.as_posix() in cdylib_roots:
+        languages.add(_MANIFEST_TECHNOLOGY["Cargo.toml"])
+    return ", ".join(sorted(languages))
+
+
+def _runtime_unit(
+    m: _Manifest, id: str, dockerfiles: list[str], cdylib_roots: set[str]
+) -> RuntimeUnit:
     root = PurePosixPath(m.path).parent.as_posix()
     citations = [_citation(id, m.path, m.line)]
     citations.extend(
@@ -348,7 +381,17 @@ def _runtime_unit(m: _Manifest, id: str, dockerfiles: list[str]) -> RuntimeUnit:
         for file in dockerfiles
         if PurePosixPath(file).parent.as_posix() == root and file != m.path
     )
-    return RuntimeUnit(id, m.name, m.path, root, False, (), tuple(citations))
+    return RuntimeUnit(
+        id,
+        m.name,
+        m.path,
+        root,
+        False,
+        (),
+        tuple(citations),
+        m.description,
+        _technology(m, cdylib_roots),
+    )
 
 
 def _bind_files(files: set[str], containers: list[RuntimeUnit]) -> dict[str, str]:
@@ -363,13 +406,13 @@ def _bind_files(files: set[str], containers: list[RuntimeUnit]) -> dict[str, str
     return container_of
 
 
-def _without_hosted_cdylibs(manifests: list[_Manifest]) -> list[_Manifest]:
+def _hosted_cdylibs(manifests: list[_Manifest]) -> list[_Manifest]:
     """A cdylib runs in the process of the manifest beside it: not a unit itself."""
     per_directory = Counter(PurePosixPath(m.path).parent for m in manifests)
     return [
         m
         for m in manifests
-        if not (m.cdylib and per_directory[PurePosixPath(m.path).parent] > 1)
+        if m.cdylib and per_directory[PurePosixPath(m.path).parent] > 1
     ]
 
 
@@ -385,7 +428,9 @@ def scan_runtime(
     """Scan the supplied scope file list; never consult git or traverse beyond it."""
     file_set = set(files)
     manifests, dependencies, storage, dockerfiles = _discover(project_root, file_set)
-    manifests = _without_hosted_cdylibs(manifests)
+    hosted = _hosted_cdylibs(manifests)
+    manifests = [m for m in manifests if m not in hosted]
+    cdylib_roots = {PurePosixPath(m.path).parent.as_posix() for m in hosted}
     scope_root = scope_path.resolve().relative_to(project_root.resolve()).as_posix()
     roots_with_docker = {PurePosixPath(f).parent.as_posix() for f in dockerfiles}
     selected = [
@@ -400,14 +445,15 @@ def scan_runtime(
         for m in manifests
         if m not in selected and m.path not in accepted
     ]
-    system_name = next(
+    name_giver = next(
         (
-            m.name
+            m
             for m in (*selected, *manifests)
             if PurePosixPath(m.path).parent.as_posix() == scope_root
         ),
-        scope_path.name,
+        None,
     )
+    system_name = name_giver.name if name_giver else scope_path.name
     # A Dockerfile in a named package is evidence for that package, not a second unit.
     manifest_roots = {PurePosixPath(m.path).parent.as_posix() for m in selected}
     for dockerfile in dockerfiles:
@@ -419,7 +465,9 @@ def scan_runtime(
     ids = assign_container_ids(
         {m.path: m.name for m in selected}, locked_containers, tombstones
     )
-    containers = [_runtime_unit(m, ids[m.path], dockerfiles) for m in selected]
+    containers = [
+        _runtime_unit(m, ids[m.path], dockerfiles, cdylib_roots) for m in selected
+    ]
     if not containers:
         provisional_id = assign_container_ids(
             {"": system_name}, locked_containers, tombstones
@@ -438,4 +486,5 @@ def scan_runtime(
         storage,
         dependencies,
         container_of,
+        name_giver.description if name_giver else "",
     )

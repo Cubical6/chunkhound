@@ -678,6 +678,7 @@ async def finish_c4(
         _merged_titles(draft, identity),
         overrides,
         _failed_containers(draft),
+        draft.project_root,
     )
     elements, relations, evidence = await _titles(inp, draft, llm, lock)
     coverage = compute_coverage(

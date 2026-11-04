@@ -100,6 +100,11 @@
           ],
           "title": "Status",
           "type": "string"
+        },
+        "technology": {
+          "default": "",
+          "title": "Technology",
+          "type": "string"
         }
       },
       "required": [
