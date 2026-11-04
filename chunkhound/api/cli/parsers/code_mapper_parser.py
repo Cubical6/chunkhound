@@ -36,7 +36,9 @@ def add_map_subparser(subparsers: Any) -> argparse.ArgumentParser:
             "and write topic artifacts plus an index, a C4 model and evidence."
         ),
         epilog=(
-            "C4 files: <scope>_c4_model.json and <scope>_c4_evidence.json. "
+            "C4 files: <scope>_c4_model.json (contract for AutoDoc, full runs "
+            "only), <scope>_c4_map_model.json and <scope>_c4_map_evidence.json "
+            "(internal model and evidence). "
             "Reusable decisions and manual overrides live in "
             "<project-root>/.chunkhound/map.lock.json, independently of --out. "
             "To version the lock, add .chunkhound/* then "

@@ -134,8 +134,8 @@ def test_output_validates_against_schema(tmp_path: Path) -> None:
     model_path, evidence_path = write_c4_pair(
         out_dir=tmp_path, scope_label="", model=model, evidence=evidence
     )
-    assert model_path.name == "root_c4_model.json"
-    assert evidence_path.name == "root_c4_evidence.json"
+    assert model_path.name == "root_c4_map_model.json"
+    assert evidence_path.name == "root_c4_map_evidence.json"
     for path, name in [(model_path, "c4_model"), (evidence_path, "c4_evidence")]:
         jsonschema.validate(json.loads(path.read_text()), shipped_schema(name))
     loaded_model, loaded_evidence = load_c4_pair(model_path, evidence_path)
@@ -170,8 +170,8 @@ def test_scope_filenames_match_markdown_convention(
         out_dir=tmp_path, scope_label=scope, model=model, evidence=evidence
     )
     assert [path.name for path in paths] == [
-        f"{expected}_c4_model.json",
-        f"{expected}_c4_evidence.json",
+        f"{expected}_c4_map_model.json",
+        f"{expected}_c4_map_evidence.json",
     ]
 
 

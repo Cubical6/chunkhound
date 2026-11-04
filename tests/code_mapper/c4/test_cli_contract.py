@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import json
+import os
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ import pytest
 
 import chunkhound.api.cli.commands.code_mapper as command
 from chunkhound.api.cli.parsers.code_mapper_parser import add_map_subparser
+from chunkhound.autodoc.architecture.loader import ModelLoader
 from chunkhound.autodoc.index_loader import (
     find_index_file,
     load_topics,
@@ -151,11 +153,29 @@ def snapshot(path):
     return {p.name: p.read_bytes() for p in path.iterdir() if p.is_file()}
 
 
+CONTRACT = "__c4_model.json"
+MAP_MODEL = "__c4_map_model.json"
+MAP_EVIDENCE = "__c4_map_evidence.json"
+OLD_EVIDENCE = "__c4_evidence.json"
+
+
 def pair(out):
-    return load_c4_pair(out / "__c4_model.json", out / "__c4_evidence.json")
+    return load_c4_pair(out / MAP_MODEL, out / MAP_EVIDENCE)
 
 
-async def test_no_c4_output_matches_upstream(cli, tmp_path):
+def load_contract_quietly(out):
+    """Read the contract the way AutoDoc does; any warning fails the contract."""
+    warnings = []
+    loaded = ModelLoader.load(
+        index_path=out / "__code_mapper_index.md", log_warning=warnings.append
+    )
+    assert warnings == []
+    assert loaded is not None
+    return loaded
+
+
+@pytest.mark.parametrize("flags", [("--no-c4",), ("--no-c4", "--combined")])
+async def test_no_c4_output_is_byte_identical(cli, tmp_path, flags):
     cli.monkeypatch.setattr(c4_pipeline, "scan_references", forbidden)
     writer_inputs = {}
 
@@ -164,9 +184,7 @@ async def test_no_c4_output_matches_upstream(cli, tmp_path):
         return write_code_mapper_outputs(**kwargs)
 
     cli.monkeypatch.setattr(command, "write_code_mapper_outputs", record_writer)
-    await command.code_mapper_command(
-        parse(cli.repo, cli.out, "--no-c4", "--combined"), cli.config
-    )
+    await command.code_mapper_command(parse(cli.repo, cli.out, *flags), cli.config)
     expected = tmp_path / "expected"
     write_code_mapper_outputs(**{**writer_inputs, "out_dir": expected})
     assert not list(cli.out.glob("*_c4_*.json"))
@@ -233,6 +251,12 @@ async def test_llm_failure_contract(cli):
     assert exc.value.code == 1
     assert not failed_out.exists() or not list(failed_out.iterdir())
     assert lock_path.read_bytes() == before
+    published = snapshot(cli.out)
+    assert CONTRACT in published
+    with pytest.raises(SystemExit) as exc:
+        await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
+    assert exc.value.code == 1
+    assert snapshot(cli.out) == published
 
 
 async def test_rerun_unchanged_zero_calls_stable_output(cli):
@@ -240,6 +264,7 @@ async def test_rerun_unchanged_zero_calls_stable_output(cli):
     first = {
         name: data for name, data in snapshot(cli.out).items() if name.endswith(".json")
     }
+    assert set(first) == {CONTRACT, MAP_MODEL, MAP_EVIDENCE}
     lock_path = cli.repo / LOCK_RELATIVE_PATH
     lock = lock_path.read_bytes()
     cli.provider.calls.clear()
@@ -338,6 +363,106 @@ async def test_call_report_counts_bundled_rounds_and_retry_outcome(
     assert "PRIVATE_PROVIDER_ERROR" not in line
 
 
+async def test_full_run_writes_contract_and_map_pair(cli):
+    """A rerun over old output: contract replaced, old evidence gone, in order."""
+    cli.out.mkdir()
+    (cli.out / CONTRACT).write_text('{"run": {"schema_version": 3}}\n')
+    (cli.out / OLD_EVIDENCE).write_text('{"schema_version": 3}\n')
+    published = []
+    replace = os.replace
+
+    def record(source, destination):
+        replace(source, destination)
+        published.append((Path(destination).name, (cli.out / OLD_EVIDENCE).exists()))
+
+    cli.monkeypatch.setattr(os, "replace", record)
+    await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
+
+    publication = [
+        row
+        for row in published
+        if row[0] in {MAP_EVIDENCE, MAP_MODEL, CONTRACT, LOCK_RELATIVE_PATH.name}
+    ]
+    assert publication == [
+        (MAP_EVIDENCE, True),
+        (MAP_MODEL, True),
+        (CONTRACT, True),
+        (LOCK_RELATIVE_PATH.name, True),
+    ]
+    assert not (cli.out / OLD_EVIDENCE).exists()
+    model, evidence = pair(cli.out)
+    assert model.run.kind == "full"
+    assert model.run.schema_version == evidence.schema_version == 4
+    raw = (cli.out / CONTRACT).read_text(encoding="utf-8")
+    contract = json.loads(raw)
+    assert contract["schema_version"] == 1
+    assert raw == (
+        json.dumps(contract, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    )
+    assert load_contract_quietly(cli.out).elements
+
+
+async def test_interrupted_publication_keeps_older_contract_and_lock(cli):
+    await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
+    lock_path = cli.repo / LOCK_RELATIVE_PATH
+    contract, lock = (cli.out / CONTRACT).read_bytes(), lock_path.read_bytes()
+    pair_before = pair(cli.out)[0].run.id
+    (cli.out / OLD_EVIDENCE).write_text("{}\n")
+    (cli.repo / "shop/added.py").write_text("x = 1\n")
+    replace = os.replace
+
+    def interrupt(source, destination):
+        if Path(destination).name == CONTRACT:
+            raise OSError("interrupted")
+        replace(source, destination)
+
+    cli.monkeypatch.setattr(os, "replace", interrupt)
+    with pytest.raises(SystemExit) as exc:
+        await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
+    assert exc.value.code == 1
+    assert pair(cli.out)[0].run.id != pair_before
+    assert (cli.out / CONTRACT).read_bytes() == contract
+    assert lock_path.read_bytes() == lock
+    assert (cli.out / OLD_EVIDENCE).exists()
+
+
+async def test_trial_writes_no_contract_and_keeps_existing(cli):
+    await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
+    contract = (cli.out / CONTRACT).read_bytes()
+    (cli.out / OLD_EVIDENCE).write_text("leftover\n")
+    await command.code_mapper_command(
+        parse(cli.repo, cli.out, "--plan", "--no-markdown"), cli.config
+    )
+    assert pair(cli.out)[0].run.kind == "trial"
+    assert (cli.out / CONTRACT).read_bytes() == contract
+    assert (cli.out / OLD_EVIDENCE).read_text() == "leftover\n"
+
+    fresh = cli.out.parent / "fresh"
+    await command.code_mapper_command(
+        parse(cli.repo, fresh, "--plan", "--no-markdown"), cli.config
+    )
+    assert set(snapshot(fresh)) == {MAP_MODEL, MAP_EVIDENCE}
+
+
+@pytest.mark.parametrize(
+    ("flags", "fallback"),
+    [((), True), (("--no-markdown",), False)],
+    ids=["fallback", "no-markdown"],
+)
+async def test_fallback_and_no_markdown_write_loadable_contract(cli, flags, fallback):
+    if fallback:
+        cli.provider.answers["merge"] = TimeoutError("temporarily unavailable")
+        cli.provider.answers["documented"] = TimeoutError("temporarily unavailable")
+    await command.code_mapper_command(parse(cli.repo, cli.out, *flags), cli.config)
+    assert (pair(cli.out)[0].run.fallback_count > 0) is fallback
+    loaded = load_contract_quietly(cli.out)
+    assert loaded.elements
+    raw = (cli.out / CONTRACT).read_text(encoding="utf-8")
+    assert "fallback" not in raw
+    assert "markers" not in raw
+    assert (cli.out / "__code_mapper_index.md").exists() == (not flags)
+
+
 async def test_output_validates_against_schema(cli):
     await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
     model, evidence = pair(cli.out)
@@ -362,7 +487,7 @@ async def test_no_markdown_still_researches_topics(cli):
     )
     model, _ = pair(cli.out)
     assert model.run.kind == "full"
-    assert set(snapshot(cli.out)) == {"__c4_model.json", "__c4_evidence.json"}
+    assert set(snapshot(cli.out)) == {CONTRACT, MAP_MODEL, MAP_EVIDENCE}
     assert any(e.coverage.topics for e in model.elements)
     assert len(cli.seen) == 1
 
@@ -426,7 +551,7 @@ async def test_uncached_trial_needs_no_database_or_model(cli):
     assert not cli.provider.calls
     assert not cli.seen
     assert not (cli.repo / LOCK_RELATIVE_PATH).exists()
-    assert set(snapshot(cli.out)) == {"__c4_model.json", "__c4_evidence.json"}
+    assert set(snapshot(cli.out)) == {MAP_MODEL, MAP_EVIDENCE}
 
 
 async def test_plan_keeps_overview_and_adds_zero_call_trial(cli):
@@ -547,7 +672,7 @@ def write_files(repo, files, content="# content\n"):
 
 def modeled_files(out, label="_"):
     model, evidence = load_c4_pair(
-        out / f"{label}_c4_model.json", out / f"{label}_c4_evidence.json"
+        out / f"{label}_c4_map_model.json", out / f"{label}_c4_map_evidence.json"
     )
     return {file for files in evidence.element_files.values() for file in files}, {
         element.name for element in model.elements

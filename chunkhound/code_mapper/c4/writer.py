@@ -1,4 +1,4 @@
-"""Content-addressed C4 output, replacing evidence before the model."""
+"""C4 output: the content-addressed internal pair and the AutoDoc contract."""
 
 import hashlib
 import json
@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
+from chunkhound.code_mapper.c4.contract import Contract
 from chunkhound.code_mapper.c4.model import C4Evidence, C4Model
 from chunkhound.utils.text import safe_scope_label
 
@@ -58,8 +59,21 @@ def write_c4_pair(
     evidence.run_id = run_id
     out_dir.mkdir(parents=True, exist_ok=True)
     safe_scope = safe_scope_label(scope_label)
-    model_path = out_dir / f"{safe_scope}_c4_model.json"
-    evidence_path = out_dir / f"{safe_scope}_c4_evidence.json"
+    model_path = out_dir / f"{safe_scope}_c4_map_model.json"
+    evidence_path = out_dir / f"{safe_scope}_c4_map_evidence.json"
     _write_json_atomic(evidence_path, evidence.model_dump(mode="json", by_alias=True))
     _write_json_atomic(model_path, model.model_dump(mode="json", by_alias=True))
     return model_path, evidence_path
+
+
+def write_c4_contract(*, out_dir: Path, scope_label: str, contract: Contract) -> Path:
+    """Publish the version 1 contract under the name AutoDoc selects."""
+    path = out_dir / f"{safe_scope_label(scope_label)}_c4_model.json"
+    _write_json_atomic(path, contract.to_dict())
+    return path
+
+
+def remove_old_c4_output(*, out_dir: Path, scope_label: str) -> None:
+    """Remove the evidence file a run from before the map pair left behind."""
+    path = out_dir / f"{safe_scope_label(scope_label)}_c4_evidence.json"
+    path.unlink(missing_ok=True)

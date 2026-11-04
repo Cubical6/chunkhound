@@ -198,13 +198,13 @@ Komt vóór de nieuwe invoer, omdat de tests dan op de bestaande prompt kunnen d
 
 **Files:** `c4/writer.py`, `api/cli/commands/code_mapper.py`, `api/cli/parsers/code_mapper_parser.py`; tests in `test_output_contract.py`, `test_cli_contract.py` (`:151`, `:231`).
 
-- [ ] **Step 1: Rode tests.** Breid `test_cli_contract.py:151, 231` uit waar die het contract al dekken:
+- [x] **Step 1: Rode tests.** Breid `test_cli_contract.py:151, 231` uit waar die het contract al dekken:
   - `test_full_run_writes_contract_and_map_pair`; de oude bewijsnaam is weg.
   - `test_trial_writes_no_contract_and_keeps_existing`.
   - `test_no_c4_output_is_byte_identical`.
   - `test_fallback_and_no_markdown_write_loadable_contract`.
-- [ ] **Step 2:** Publicatievolgorde: paar, contract, lockbestand, opruimen. `_C4Run.write` schrijft `C4Build.contract`.
-- [ ] **Step 3:** Helptekst; tests, ruff en mypy.
+- [x] **Step 2:** Publicatievolgorde: paar, contract, lockbestand, opruimen. `_C4Run.write` schrijft `C4Build.contract`.
+- [x] **Step 3:** Helptekst; tests, ruff en mypy.
 
 ### Task 11: Rapport en stabiliteit (spec §10, invariant 5)
 

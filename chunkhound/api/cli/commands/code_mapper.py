@@ -42,7 +42,11 @@ from chunkhound.code_mapper.c4.pipeline import (
     analyze_c4,
     finish_c4,
 )
-from chunkhound.code_mapper.c4.writer import write_c4_pair
+from chunkhound.code_mapper.c4.writer import (
+    remove_old_c4_output,
+    write_c4_contract,
+    write_c4_pair,
+)
 from chunkhound.code_mapper.coverage import compute_unreferenced_scope_files
 from chunkhound.code_mapper.metadata import build_generation_stats_with_coverage
 from chunkhound.code_mapper.models import CodeMapperPOI
@@ -182,10 +186,18 @@ class _C4Run:
             model=self.build.model,
             evidence=self.build.evidence,
         )
-        if self.build.model.run.kind == "full" and self.build.lock is not None:
-            write_scope_lock(
-                self.scope.target_dir, self.scope.scope_label, self.build.lock
+        if self.build.model.run.kind == "full":
+            assert self.build.contract is not None
+            write_c4_contract(
+                out_dir=out_dir,
+                scope_label=self.scope.scope_label,
+                contract=self.build.contract,
             )
+            if self.build.lock is not None:
+                write_scope_lock(
+                    self.scope.target_dir, self.scope.scope_label, self.build.lock
+                )
+            remove_old_c4_output(out_dir=out_dir, scope_label=self.scope.scope_label)
         if self.build.fallback_count:
             formatter.warning(
                 f"C4: {self.build.fallback_count} elementen via terugval "
