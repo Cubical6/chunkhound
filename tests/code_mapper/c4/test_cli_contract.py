@@ -113,8 +113,7 @@ def cli(fixture_repo, c4_llm_manager, scripted, monkeypatch, tmp_path):
             "merge": lambda prompt: {
                 "components": [
                     {
-                        # Root and same-named directory groups share a name.
-                        "name": row["id"],
+                        "name": row["dir"],
                         "description": "Domain responsibility.",
                         "groups": [row["id"]],
                     }

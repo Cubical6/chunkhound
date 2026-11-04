@@ -2,10 +2,13 @@
 
 import hashlib
 import json
+import re
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import dataclass, field, replace
+from pathlib import Path, PurePosixPath
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 from chunkhound.code_mapper.c4.grouping import Group
@@ -16,8 +19,31 @@ from chunkhound.code_mapper.c4.llm import (
     TransientStepError,
     load_c4_prompt,
 )
-from chunkhound.code_mapper.c4.model import LockedComponent, Marker, ReferenceKind
+from chunkhound.code_mapper.c4.model import (
+    LockedComponent,
+    Marker,
+    Reference,
+    ReferenceKind,
+)
 from chunkhound.code_mapper.c4.runtime import RuntimeUnit
+from chunkhound.core.detection.language_detector import detect_language
+from chunkhound.core.types.common import ChunkType, FileId
+from chunkhound.parsers.parser_factory import ParserFactory
+from chunkhound.services.extraction.budget import fits, measure_request
+
+_SYMBOL_KINDS = frozenset(
+    {
+        ChunkType.CLASS,
+        ChunkType.INTERFACE,
+        ChunkType.STRUCT,
+        ChunkType.ENUM,
+        ChunkType.TRAIT,
+        ChunkType.FUNCTION,
+        ChunkType.TYPE,
+        ChunkType.TYPE_ALIAS,
+    }
+)
+_PART_SUFFIX = re.compile(r"(?:_part\d+)+$")
 
 
 @dataclass(frozen=True)
@@ -185,6 +211,19 @@ def _default_merge(container: str, groups: Sequence[Group]) -> MergeResult:
     )
 
 
+def _unplaced(
+    known: Sequence[ProposedComponent], pending: Sequence[Group], reason: str
+) -> MergeResult:
+    """A failed step places nothing new; its groups are sent again next run."""
+    return MergeResult(
+        list(known),
+        [],
+        True,
+        pending_groups=sorted(group.id for group in pending),
+        failure_reason=reason,
+    )
+
+
 def _propose_components(
     answer: MergeAnswer, container: str, known: Sequence[ProposedComponent]
 ) -> list[ProposedComponent]:
@@ -245,25 +284,162 @@ def _merge_titles(
     return titles
 
 
+@dataclass(frozen=True)
+class _MergeAliases:
+    """G<n> and E<n> hold for one call, so the model repeats no long IDs."""
+
+    groups: dict[str, Group]
+    components: dict[str, ProposedComponent]
+
+    def group_id(self, alias: str) -> str:
+        """A real ID is no alias of this call, so it stays unknown as well."""
+        group = self.groups.get(alias)
+        return group.id if group else f"unknown:{alias}"
+
+    def endpoint(self, token: str) -> str:
+        if token == "container":
+            return token
+        kind, _, alias = token.partition(":")
+        if kind == "group" and alias in self.groups:
+            return f"group:{self.groups[alias].id}"
+        if kind == "component" and alias in self.components:
+            return f"component:{self.components[alias].key}"
+        return f"unknown:{token}"
+
+    def translate(self, answer: MergeAnswer) -> MergeAnswer:
+        """Back to real IDs, so an unknown alias fails like an unknown group."""
+        return MergeAnswer(
+            components=[
+                row.model_copy(
+                    update={"groups": [self.group_id(alias) for alias in row.groups]}
+                )
+                for row in answer.components
+            ],
+            direct=[self.group_id(alias) for alias in answer.direct],
+            titles=[
+                row.model_copy(
+                    update={
+                        "from_id": self.endpoint(row.from_id),
+                        "to_id": self.endpoint(row.to_id),
+                    }
+                )
+                for row in answer.titles
+            ],
+        )
+
+
+def _merge_aliases(
+    pending: Sequence[Group], known: Sequence[ProposedComponent]
+) -> _MergeAliases:
+    ordered = sorted(pending, key=lambda group: group.id)
+    return _MergeAliases(
+        {f"G{number}": group for number, group in enumerate(ordered, 1)},
+        {f"E{number}": item for number, item in enumerate(known, 1)},
+    )
+
+
+def _group_dir(group: Group) -> str:
+    return PurePosixPath(group.files[0]).parent.as_posix()
+
+
+def _file_symbols(project_root: Path, file: str, factory: ParserFactory) -> list[str]:
+    """Approximate what a file offers; a parser failure must not drop the file."""
+    path = project_root / file
+    try:
+        language = detect_language(path)
+        if not language.is_programming_language:
+            return []
+        chunks = factory.create_parser(language).parse_file(path, FileId(0))
+    except Exception as exc:
+        logger.debug("C4 merge could not parse {}: {}", file, exc)
+        return []
+    return sorted(
+        {
+            _PART_SUFFIX.sub("", chunk.symbol)
+            for chunk in chunks
+            if chunk.chunk_type in _SYMBOL_KINDS
+            and not chunk.symbol.startswith("_")
+            and not any(mark in chunk.symbol for mark in (".", "::", "_line_"))
+        }
+    )
+
+
+def _file_links(
+    aliases: _MergeAliases,
+    groups: Sequence[Group],
+    references: Sequence[Reference],
+) -> list[list[int | str]]:
+    """Links that can steer a placement; direct groups and other containers cannot.
+
+    A number is the position of a file in the prompt's groups; E<n> is an existing
+    component, summed over all its files.
+    """
+    by_id = {group.id: group for group in groups}
+    endpoints: dict[str, int | str] = {
+        file: alias
+        for alias, item in aliases.components.items()
+        for group in item.groups
+        for file in by_id[group].files
+    }
+    pending = (file for group in aliases.groups.values() for file in group.files)
+    endpoints.update((file, position) for position, file in enumerate(pending))
+    counts: Counter[tuple[int | str, int | str]] = Counter()
+    for reference in references:
+        left = endpoints.get(reference.from_file)
+        right = endpoints.get(reference.to)
+        if (
+            reference.status == "counts"
+            and left is not None
+            and right is not None
+            and (isinstance(left, int) or isinstance(right, int))
+        ):
+            counts[left, right] += 1
+
+    def order(end: int | str) -> tuple[bool, int | str]:
+        return isinstance(end, str), end
+
+    return [
+        [left, right, counts[left, right]]
+        for left, right in sorted(
+            counts, key=lambda pair: (order(pair[0]), order(pair[1]))
+        )
+    ]
+
+
 def _merge_prompt(
-    container: RuntimeUnit,
-    pending: Sequence[Group],
-    known: Sequence[ProposedComponent],
-    group_links: Mapping[tuple[str, str], Counter[ReferenceKind]],
+    aliases: _MergeAliases,
+    groups: Sequence[Group],
+    references: Sequence[Reference],
+    symbols: Mapping[str, list[str]] | None,
 ) -> str:
+    """Without symbols, each file row holds only its name."""
+    by_id = {group.id: group for group in groups}
+
+    def file_row(file: str) -> dict[str, object]:
+        row: dict[str, object] = {"name": PurePosixPath(file).name}
+        if symbols is not None:
+            row["symbols"] = symbols[file]
+        return row
+
     payload = {
-        "container": container.id,
         "groups": [
-            asdict(group) for group in sorted(pending, key=lambda group: group.id)
+            {
+                "id": alias,
+                "dir": _group_dir(group),
+                "files": [file_row(file) for file in group.files],
+            }
+            for alias, group in aliases.groups.items()
         ],
         "existing": [
-            {"key": item.key, "name": item.name, "groups": item.groups}
-            for item in known
+            {
+                "id": alias,
+                "name": item.name,
+                "description": item.description,
+                "dirs": sorted({_group_dir(by_id[group]) for group in item.groups}),
+            }
+            for alias, item in aliases.components.items()
         ],
-        "links": [
-            {"from": left, "to": right, "kinds": dict(sorted(kinds.items()))}
-            for (left, right), kinds in sorted(group_links.items())
-        ],
+        "file_links": _file_links(aliases, groups, references),
     }
     return load_c4_prompt("merge") + "\nInput:\n" + json.dumps(payload)
 
@@ -271,6 +447,8 @@ def _merge_prompt(
 async def merge_container(
     *,
     container: RuntimeUnit,
+    project_root: Path,
+    references: Sequence[Reference],
     groups: Sequence[Group],
     group_links: Mapping[tuple[str, str], Counter[ReferenceKind]],
     existing: Mapping[str, LockedComponent],
@@ -297,24 +475,49 @@ async def merge_container(
         value.components = [*known, *value.components]
         apply(value, False)
         return result
-    prompt = _merge_prompt(container, pending, known, group_links)
+    aliases = _merge_aliases(pending, known)
+    factory = ParserFactory()
+    symbols = {
+        file: _file_symbols(project_root, file, factory)
+        for group in pending
+        for file in group.files
+    }
+    prompt = _merge_prompt(aliases, groups, references, symbols)
+    schema = MergeAnswer.model_json_schema()
+    limit = llm.input_limit("synthesis")
+    if not fits(prompt, schema, limit, llm.estimate_tokens):
+        prompt = _merge_prompt(aliases, groups, references, None)
+        if not fits(prompt, schema, limit, llm.estimate_tokens):
+            size = measure_request(prompt, schema, ())
+            apply(
+                _unplaced(
+                    known,
+                    pending,
+                    f"invoer te groot: {size} tekens, limiet {limit.max_chars}",
+                ),
+                False,
+            )
+            return result
+    max_tokens = max(8192, min(32768, len(prompt) // 4))
     report = llm.report(
         "merge",
         f"container {json.dumps(container.id)}: {len(pending)} niet-geclaimde groepen",
     )
 
     def default() -> MergeResult:
-        return MergeResult(
-            list(known),
-            [],
-            True,
-            pending_groups=sorted(group.id for group in pending),
-            failure_reason=report.outcomes[-1].removesuffix(", terugval"),
-        )
+        return _unplaced(known, pending, report.outcomes[-1].removesuffix(", terugval"))
 
     async def attempt() -> MergeResult:
         with report.attempt():
-            answer = await llm.call("merge", MergeAnswer, prompt, provider="synthesis")
+            answer = aliases.translate(
+                await llm.call(
+                    "merge",
+                    MergeAnswer,
+                    prompt,
+                    provider="synthesis",
+                    max_completion_tokens=max_tokens,
+                )
+            )
             check_merge_answer(answer, pending, container.id)
             value = MergeResult(
                 _propose_components(answer, container.id, known),

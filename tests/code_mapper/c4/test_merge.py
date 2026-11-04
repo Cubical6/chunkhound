@@ -2,6 +2,7 @@
 
 import json
 from collections import Counter
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +18,8 @@ from chunkhound.code_mapper.c4.merge import (
 )
 from chunkhound.code_mapper.c4.model import LockedComponent
 from chunkhound.code_mapper.c4.runtime import RuntimeUnit
+from chunkhound.llm_manager import LLMManager
+from chunkhound.services.extraction.budget import ENVELOPE_MARGIN_CHARS, schema_text
 
 CONTAINER = RuntimeUnit("container:shop", "shop", "pyproject.toml", ".", False, (), ())
 GROUPS = [
@@ -24,6 +27,8 @@ GROUPS = [
     Group("container:shop/2", CONTAINER.id, "db", "db", ("db/store.py",)),
     Group("container:shop/3", CONTAINER.id, "common", "common", ("common/types.py",)),
 ]
+# These groups name files that do not exist; a parser failure costs only symbols.
+NO_FILES = Path("/nonexistent")
 
 
 def answer(components=(), direct=(), titles=()):
@@ -66,10 +71,12 @@ def test_merge_rejects_foreign_container_even_with_matching_id():
 
 
 async def test_merge_direct_group_has_no_component(c4_llm_manager, scripted):
-    scripted.answers["merge"] = answer(direct=[g.id for g in GROUPS])
+    scripted.answers["merge"] = answer(direct=["G1", "G2", "G3"])
     queue = RetryQueue()
     result = await merge_container(
         container=CONTAINER,
+        project_root=NO_FILES,
+        references=[],
         groups=GROUPS,
         group_links={},
         existing={},
@@ -96,6 +103,8 @@ async def test_merge_fallback_leaves_groups_pending(c4_llm_manager, scripted):
     )
     result = await merge_container(
         container=CONTAINER,
+        project_root=NO_FILES,
+        references=[],
         groups=GROUPS,
         group_links={},
         existing={"component:orders": locked},
@@ -120,6 +129,8 @@ async def test_merge_trial_has_no_calls_or_deferred_work():
     llm = C4Llm(None, concurrency=1, trial=False)
     result = await merge_container(
         container=CONTAINER,
+        project_root=NO_FILES,
+        references=[],
         groups=GROUPS,
         group_links={},
         existing={},
@@ -153,6 +164,8 @@ async def test_known_placements_and_override_win_without_calls(c4_llm_manager):
     llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
     result = await merge_container(
         container=CONTAINER,
+        project_root=NO_FILES,
+        references=[],
         groups=GROUPS,
         group_links={},
         existing={"component:orders": locked, "component:storage": other},
@@ -182,21 +195,17 @@ async def test_merge_titles_survive_and_only_unclaimed_groups_are_sent(
     def respond(prompt):
         seen.append(json.loads(prompt.split("\nInput:\n", 1)[1]))
         return answer(
-            [component("Storage", [GROUPS[1].id])],
-            [GROUPS[2].id],
-            [
-                {
-                    "from": f"group:{GROUPS[0].id}",
-                    "to": f"group:{GROUPS[1].id}",
-                    "title": "bewaart via",
-                }
-            ],
+            [component("Storage", ["G1"])],
+            ["G2"],
+            [{"from": "component:E1", "to": "group:G1", "title": "bewaart via"}],
         )
 
     scripted.answers["merge"] = respond
     llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
     result = await merge_container(
         container=CONTAINER,
+        project_root=NO_FILES,
+        references=[],
         groups=GROUPS,
         group_links={(GROUPS[0].id, GROUPS[1].id): Counter({"call": 2})},
         existing={"component:orders": locked},
@@ -206,8 +215,13 @@ async def test_merge_titles_survive_and_only_unclaimed_groups_are_sent(
     )
     target = next(c.key for c in result.components if c.name == "Storage")
     assert result.titles == {("component:orders", target): "bewaart via"}
-    assert [g["id"] for g in seen[0]["groups"]] == [g.id for g in GROUPS[1:]]
-    assert seen[0]["existing"][0]["groups"] == [GROUPS[0].id]
+    assert [(g["id"], g["dir"]) for g in seen[0]["groups"]] == [
+        ("G1", "db"),
+        ("G2", "common"),
+    ]
+    assert seen[0]["existing"] == [
+        {"id": "E1", "name": "Orders", "description": "API", "dirs": ["orders"]}
+    ]
     # The caller removes already supplied pairs before requesting remaining titles.
     assert (
         await title_relations(
@@ -218,18 +232,22 @@ async def test_merge_titles_survive_and_only_unclaimed_groups_are_sent(
     assert scripted.calls == {"merge": 1}
 
 
-@pytest.mark.parametrize("endpoint", ["group:unknown", f"group:{GROUPS[2].id}"])
+@pytest.mark.parametrize(
+    "endpoint", ["group:G99", "group:G3", "component:E1", f"group:{GROUPS[1].id}"]
+)
 async def test_merge_retries_unsupported_title_endpoints(
     c4_llm_manager, scripted, endpoint
 ):
     scripted.answers["merge"] = answer(
-        [component("Orders", [GROUPS[0].id]), component("Storage", [GROUPS[1].id])],
-        [GROUPS[2].id],
-        [{"from": f"group:{GROUPS[0].id}", "to": endpoint, "title": "uses"}],
+        [component("Orders", ["G1"]), component("Storage", ["G2"])],
+        ["G3"],
+        [{"from": "group:G1", "to": endpoint, "title": "uses"}],
     )
     queue = RetryQueue()
     result = await merge_container(
         container=CONTAINER,
+        project_root=NO_FILES,
+        references=[],
         groups=GROUPS,
         group_links={(GROUPS[0].id, GROUPS[1].id): Counter({"call": 1})},
         existing={},
@@ -242,11 +260,16 @@ async def test_merge_retries_unsupported_title_endpoints(
 
 
 async def test_rejected_merge_can_recover_on_delayed_retry(c4_llm_manager, scripted):
-    responses = iter([answer(), answer(direct=[g.id for g in GROUPS])])
+    # A real id is not an alias of this call, so it counts as an unknown group.
+    responses = iter(
+        [answer(direct=[g.id for g in GROUPS]), answer(direct=["G1", "G2", "G3"])]
+    )
     scripted.answers["merge"] = lambda _: next(responses)
     queue = RetryQueue()
     result = await merge_container(
         container=CONTAINER,
+        project_root=NO_FILES,
+        references=[],
         groups=GROUPS,
         group_links={},
         existing={},
@@ -264,6 +287,8 @@ async def test_fatal_merge_error_propagates(c4_llm_manager, scripted):
     with pytest.raises(ValueError, match="bad config"):
         await merge_container(
             container=CONTAINER,
+            project_root=NO_FILES,
+            references=[],
             groups=GROUPS,
             group_links={},
             existing={},
@@ -355,12 +380,14 @@ async def test_merge_attaches_new_group_to_existing_component(c4_llm_manager, sc
         files=[],
     )
     scripted.answers["merge"] = answer(
-        [component("Orders", [GROUPS[1].id])],
-        [GROUPS[2].id],
-        [{"from": f"group:{GROUPS[0].id}", "to": "container", "title": "importeert"}],
+        [component("Orders", ["G1"])],
+        ["G2"],
+        [{"from": "component:E1", "to": "container", "title": "importeert"}],
     )
     result = await merge_container(
         container=CONTAINER,
+        project_root=NO_FILES,
+        references=[],
         groups=GROUPS,
         group_links={(GROUPS[0].id, GROUPS[2].id): Counter({"import": 1})},
         existing={"component:orders": locked},
@@ -380,24 +407,22 @@ async def test_merge_attaches_new_group_to_existing_component(c4_llm_manager, sc
 async def test_merge_rejects_unsupported_normalized_pairs(
     c4_llm_manager, scripted, mode
 ):
-    row = {
-        "from": f"group:{GROUPS[0].id}",
-        "to": f"group:{GROUPS[1].id}",
-        "title": "uses",
-    }
+    row = {"from": "group:G1", "to": "group:G2", "title": "uses"}
     if mode == "reverse":
         row["from"], row["to"] = row["to"], row["from"]
     elif mode == "self":
         row["to"] = row["from"]
     titles = [row, dict(row)] if mode == "duplicate" else [row]
     scripted.answers["merge"] = answer(
-        [component("Orders", [GROUPS[0].id]), component("Storage", [GROUPS[1].id])],
-        [GROUPS[2].id],
+        [component("Orders", ["G1"]), component("Storage", ["G2"])],
+        ["G3"],
         titles,
     )
     queue = RetryQueue()
     result = await merge_container(
         container=CONTAINER,
+        project_root=NO_FILES,
+        references=[],
         groups=GROUPS,
         group_links={(GROUPS[0].id, GROUPS[1].id): Counter({"call": 1})},
         existing={},
@@ -410,10 +435,12 @@ async def test_merge_rejects_unsupported_normalized_pairs(
 
 
 async def test_proposed_keys_are_stable_across_group_order(c4_llm_manager, scripted):
-    scripted.answers["merge"] = answer([component("Orders", [g.id for g in GROUPS])])
+    scripted.answers["merge"] = answer([component("Orders", ["G1", "G2", "G3"])])
     results = [
         await merge_container(
             container=CONTAINER,
+            project_root=NO_FILES,
+            references=[],
             groups=groups,
             group_links={},
             existing={},
@@ -424,3 +451,150 @@ async def test_proposed_keys_are_stable_across_group_order(c4_llm_manager, scrip
         for groups in (GROUPS, list(reversed(GROUPS)))
     ]
     assert results[0].components == results[1].components
+
+
+async def test_merge_aliases_round_trip_to_real_ids(c4_llm_manager, scripted):
+    locked = LockedComponent(
+        name="Orders",
+        description="API",
+        container=CONTAINER.id,
+        groups=[GROUPS[0].id],
+        files=[],
+    )
+    prompts = []
+
+    def respond(prompt):
+        prompts.append(prompt.split("\nInput:\n", 1)[1])
+        return answer(
+            [component("Storage", ["G1"])],
+            ["G2"],
+            [
+                {"from": "component:E1", "to": "group:G1", "title": "bewaart via"},
+                {"from": "container", "to": "component:E1", "title": "levert aan"},
+            ],
+        )
+
+    scripted.answers["merge"] = respond
+    result = await merge_container(
+        container=CONTAINER,
+        project_root=NO_FILES,
+        references=[],
+        groups=GROUPS,
+        group_links={
+            (GROUPS[0].id, GROUPS[1].id): Counter({"call": 1}),
+            (GROUPS[2].id, GROUPS[0].id): Counter({"import": 1}),
+        },
+        existing={"component:orders": locked},
+        placements={},
+        llm=C4Llm(c4_llm_manager, concurrency=1, trial=False),
+        retries=RetryQueue(),
+    )
+    storage = next(c for c in result.components if c.name == "Storage")
+    assert storage.groups == (GROUPS[1].id,)
+    assert result.direct_groups == [GROUPS[2].id]
+    assert result.titles == {
+        ("component:orders", storage.key): "bewaart via",
+        (CONTAINER.id, "component:orders"): "levert aan",
+    }
+    assert not result.fallback
+    assert "container:shop" not in prompts[0]
+
+
+async def test_oversized_prompt_makes_no_call_and_reports(
+    tmp_path, c4_llm_manager, scripted
+):
+    source = tmp_path / "orders/api.py"
+    source.parent.mkdir()
+    source.write_text("class OrderApi:\n    def run(self): return 1\n")
+    group = Group(
+        "container:shop/orders", CONTAINER.id, "orders", "orders", ("orders/api.py",)
+    )
+    room = len(schema_text(MergeAnswer.model_json_schema())) + ENVELOPE_MARGIN_CHARS
+    prompts = []
+
+    def respond(prompt):
+        prompts.append(prompt)
+        return answer(direct=["G1"])
+
+    scripted.answers["merge"] = respond
+
+    async def merge_within(limit):
+        config = {"provider": "fake", "model": "fake-gpt"}
+        manager = LLMManager(
+            utility_config=config,
+            synthesis_config={**config, "max_input_chars": limit},
+        )
+        return await merge_container(
+            container=CONTAINER,
+            project_root=tmp_path,
+            references=[],
+            groups=[group],
+            group_links={},
+            existing={},
+            placements={},
+            llm=C4Llm(manager, concurrency=1, trial=False),
+            retries=RetryQueue(),
+        )
+
+    await merge_within(1_000_000)
+    with_symbols = prompts[-1]
+    assert "OrderApi" in with_symbols
+
+    # One character too large: symbols go first and the call still happens.
+    await merge_within(len(with_symbols) + room - 1)
+    without_symbols = prompts[-1]
+    assert "OrderApi" not in without_symbols
+    assert scripted.calls["merge"] == 2
+
+    limit = len(without_symbols) + room - 1
+    result = await merge_within(limit)
+    assert scripted.calls["merge"] == 2
+    assert result.fallback
+    assert result.components == result.direct_groups == []
+    assert result.pending_groups == [group.id]
+    assert str(limit) in result.failure_reason
+    assert str(limit + 1) in result.failure_reason
+
+
+async def test_merge_sends_public_symbols_and_places_unparseable_files(
+    tmp_path, c4_llm_manager, scripted
+):
+    directory = tmp_path / "orders"
+    directory.mkdir()
+    (directory / "api.py").write_text(
+        "class OrderApi:\n    def run(self): return 1\n\n"
+        "class _Hidden:\n    def run(self): return 2\n"
+    )
+    (directory / "broken.py").write_text("class Broken(:\n  def (\n")
+    group = Group(
+        "container:shop/orders",
+        CONTAINER.id,
+        "orders",
+        "orders",
+        ("orders/api.py", "orders/broken.py", "orders/gone.py"),
+    )
+    seen = {}
+
+    def respond(prompt):
+        files = json.loads(prompt.split("\nInput:\n", 1)[1])["groups"][0]["files"]
+        seen.update({row["name"]: row["symbols"] for row in files})
+        return answer(direct=["G1"])
+
+    scripted.answers["merge"] = respond
+    result = await merge_container(
+        container=CONTAINER,
+        project_root=tmp_path,
+        references=[],
+        groups=[group],
+        group_links={},
+        existing={},
+        placements={},
+        llm=C4Llm(c4_llm_manager, concurrency=1, trial=False),
+        retries=RetryQueue(),
+    )
+    assert set(seen) == {"api.py", "broken.py", "gone.py"}
+    assert "OrderApi" in seen["api.py"]
+    assert "_Hidden" not in seen["api.py"]
+    assert seen["gone.py"] == []
+    assert result.direct_groups == [group.id]
+    assert not result.fallback

@@ -38,8 +38,7 @@ def merge_answer(prompt):
     return {
         "components": [
             {
-                # Root and same-named directory groups share a name, not an id.
-                "name": group["id"],
+                "name": group["dir"],
                 "description": "Domain responsibility.",
                 "groups": [group["id"]],
             }
@@ -385,18 +384,81 @@ async def test_new_directory_needs_one_merge_call(
     sent = []
 
     def merge(prompt):
-        sent.append([row["id"] for row in payload(prompt)["groups"]])
+        sent.append([row["dir"] for row in payload(prompt)["groups"]])
         return merge_answer(prompt)
 
     pipeline_answers.answers["merge"] = merge
     pipeline_answers.calls.clear()
     second = await build(fixture_repo, c4_llm_manager, lock=first.lock)
     assert pipeline_answers.calls["merge"] == 1
-    assert sent == [[group]]
+    assert sent == [[directory]]
     assert second.fallback_count == 0
     assert set(first.lock.components) < set(second.lock.components)
     new = set(second.lock.components) - set(first.lock.components)
     assert [second.lock.components[id].groups for id in new] == [[group]]
+
+
+async def test_new_group_can_join_existing_component(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    first = await build(fixture_repo, c4_llm_manager)
+    templates = owner_of(first, "container:shop/templates")
+    shop = owner_of(first, "container:shop/shop")
+    write_sources(
+        fixture_repo,
+        {
+            "billing/invoice.py": (
+                "from shop.storage import Storage\n"
+                "class Invoice:\n    def save(self): return Storage()\n"
+            )
+        },
+    )
+    seen = []
+
+    def join(prompt):
+        data = payload(prompt)
+        seen.append(data)
+        by_dir = {row["dirs"][0]: row for row in data["existing"]}
+        return {
+            "components": [
+                {
+                    "name": by_dir["templates"]["name"],
+                    "description": None,
+                    "groups": ["G1"],
+                }
+            ],
+            "direct": [],
+            "titles": [
+                {
+                    "from": "group:G1",
+                    "to": "component:" + by_dir["shop"]["id"],
+                    "title": "bewaart via winkel",
+                }
+            ],
+        }
+
+    pipeline_answers.answers["merge"] = join
+    pipeline_answers.calls.clear()
+    second = await build(fixture_repo, c4_llm_manager, lock=first.lock)
+    assert pipeline_answers.calls["merge"] == 1
+    assert [row["dir"] for row in seen[0]["groups"]] == ["billing"]
+    shop_alias = next(
+        row["id"] for row in seen[0]["existing"] if row["dirs"] == ["shop"]
+    )
+    assert any(link[:2] == [0, shop_alias] for link in seen[0]["file_links"])
+    assert owner_of(second, "container:shop/billing") == templates
+    assert second.lock.components[templates].groups == [
+        "container:shop/billing",
+        "container:shop/templates",
+    ]
+    assert (
+        next(
+            r
+            for r in second.model.relations
+            if r.from_id == templates and r.to_id == shop
+        ).title
+        == "bewaart via winkel"
+    )
 
 
 async def test_trial_names_root_group_after_container(
@@ -514,9 +576,10 @@ async def test_failed_merge_is_retried_next_run(
     assert owner_of(second, "container:shop/shop") in {
         e.id for e in second.model.elements if e.kind == "component"
     }
-    assert "shop/orders.py" in second.lock.components[
-        owner_of(second, "container:shop/shop")
-    ].files
+    assert (
+        "shop/orders.py"
+        in second.lock.components[owner_of(second, "container:shop/shop")].files
+    )
     assert second.fallback_count == 0
     assert second.lock.transition is not None
 
@@ -657,8 +720,11 @@ async def test_other_container_is_still_locked(
     attempted = []
 
     def merge(prompt):
-        attempted.append(payload(prompt)["container"])
-        if attempted[-1] == "container:web":
+        # The payload names no container; its directories still show which one.
+        directories = [row["dir"] for row in payload(prompt)["groups"]]
+        web = all(directory.startswith("web") for directory in directories)
+        attempted.append("container:web" if web else "container:shop")
+        if web:
             raise TimeoutError("unavailable")
         return merge_answer(prompt)
 
@@ -742,17 +808,22 @@ async def test_recovered_merge_titles_use_final_identity_without_titles_call(
 
     def recover(prompt):
         data = payload(prompt)
-        if data["container"] not in seen:
-            seen.add(data["container"])
+        directories = tuple(row["dir"] for row in data["groups"])
+        if directories not in seen:
+            seen.add(directories)
             raise TimeoutError("retry after other containers")
         answer = merge_answer(prompt)
+        owners = [row["id"] for row in data["groups"] for _ in row["files"]]
         answer["titles"] = [
             {
-                "from": "group:" + link["from"],
-                "to": "group:" + link["to"],
+                "from": "group:" + source,
+                "to": "group:" + target,
                 "title": "importeert via domein",
             }
-            for link in data["links"]
+            for source, target in sorted(
+                {(owners[left], owners[right]) for left, right, _ in data["file_links"]}
+            )
+            if source != target
         ]
         supplied.extend(answer["titles"])
         return answer

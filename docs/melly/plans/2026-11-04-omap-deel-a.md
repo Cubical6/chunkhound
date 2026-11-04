@@ -128,15 +128,15 @@ Komt vóór de nieuwe invoer, omdat de tests dan op de bestaande prompt kunnen d
 
 **Files:** `c4/merge.py` (`:266–275`), `c4/pipeline.py` (`:236–248`), `c4/llm.py`, prompt `code_mapper/prompts/c4_merge.md`; tests in `test_merge.py` (`:203–204`), `test_pipeline.py` (`:41`, `:407`, `:417`), `test_cli_contract.py` (`:109`). Deze tests lezen nu `name`, `links` of `container` uit de prompt en moeten mee veranderen.
 
-- [ ] **Step 1: Rode tests.**
+- [x] **Step 1: Rode tests.**
   - `test_merge_aliases_round_trip_to_real_ids`: plaatsingen en titels met `G<n>` en `E<n>` komen terug als echte id's.
   - `test_oversized_prompt_makes_no_call_and_reports`: past de prompt ook zonder `symbols` niet, dan geen aanroep.
   - `test_new_group_can_join_existing_component`: bij een latere run koppelt het antwoord een nieuwe map aan `E<n>`.
-- [ ] **Step 2:** `merge_container` krijgt `project_root` en de verwijzingen per bestand. Bouw de invoer volgens §4.2 met aliassen en `file_links`, inclusief `E<n>`. Laat koppelingen naar `direct_groups` en andere containers weg. `_merge_titles` blijft de volledige koppelingen gebruiken.
-- [ ] **Step 3:** `symbols` volgens §4.2; alleen voor wachtende bouwstenen; niet te parsen geeft een lege lijst.
-- [ ] **Step 4:** `C4Llm.call` geeft `max_completion_tokens` door volgens §4.3. Budgetcontrole met `fits()` en `input_limit("synthesis")`.
-- [ ] **Step 5:** Prompt: C4-definitie, runtimeregel, `description` gevraagd, zin over koppelingen aanpassen, eindpunten met aliassen.
-- [ ] **Step 6:** Tests, ruff en mypy.
+- [x] **Step 2:** `merge_container` krijgt `project_root` en de verwijzingen per bestand. Bouw de invoer volgens §4.2 met aliassen en `file_links`, inclusief `E<n>`. Laat koppelingen naar `direct_groups` en andere containers weg. `_merge_titles` blijft de volledige koppelingen gebruiken.
+- [x] **Step 3:** `symbols` volgens §4.2; alleen voor wachtende bouwstenen; niet te parsen geeft een lege lijst.
+- [x] **Step 4:** `C4Llm.call` geeft `max_completion_tokens` door volgens §4.3. Budgetcontrole met `fits()` en `input_limit("synthesis")`.
+- [x] **Step 5:** Prompt: C4-definitie, runtimeregel, `description` gevraagd, zin over koppelingen aanpassen, eindpunten met aliassen.
+- [x] **Step 6:** Tests, ruff en mypy.
 
 ### Task 6: Antwoord verwerken en herkansen (spec §4.3, §4.4)
 

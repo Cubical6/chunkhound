@@ -230,6 +230,8 @@ async def _prepare(draft: C4Draft, llm: C4Llm, lock: ScopeLock | None) -> None:
         group_ids = {group.id for group in groups}
         draft.merges[container.id] = await merge_container(
             container=container,
+            project_root=draft.project_root,
+            references=draft.references.references,
             groups=groups,
             group_links={
                 pair: kinds
