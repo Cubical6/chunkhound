@@ -38,21 +38,30 @@ class LikeC4IdAllocator:
         siblings[None].append(model.system)
         for element in model.elements:
             siblings[element.parent_id].append(element)
+        # LikeC4 resolves the first FQN segment against the unique descendants of a
+        # `view ... of X` before the roots, so nested IDs must not repeat a root ID.
+        roots = siblings.pop(None)
+        self._allocate(roots, set())
+        reserved = {self._local[element.id] for element in roots}
         for elements in siblings.values():
-            used: set[str] = set()
-            # Reserve natural names first so a suffix cannot steal another base slug.
-            bases = {_slug(element.name) for element in elements}
-            for sibling in sorted(elements, key=lambda item: item.id):
-                base = _slug(sibling.name)
-                slug = base
-                suffix = 2
-                while slug in used or (slug != base and slug in bases):
-                    slug = f"{base}-{suffix}"
-                    suffix += 1
-                used.add(slug)
-                self._local[sibling.id] = slug
+            self._allocate(elements, set(reserved))
         for element_id in self._local:
             self._build_fqn(element_id)
+
+    def _allocate(
+        self, elements: list[SoftwareSystem | Element], used: set[str]
+    ) -> None:
+        # Reserve natural names first so a suffix cannot steal another base slug.
+        bases = {_slug(element.name) for element in elements}
+        for sibling in sorted(elements, key=lambda item: item.id):
+            base = _slug(sibling.name)
+            slug = base
+            suffix = 2
+            while slug in used or (slug != base and slug in bases):
+                slug = f"{base}-{suffix}"
+                suffix += 1
+            used.add(slug)
+            self._local[sibling.id] = slug
 
     def _build_fqn(self, element_id: str) -> str:
         if element_id not in self._fqns:

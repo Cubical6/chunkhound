@@ -221,10 +221,10 @@ Komt vóór de nieuwe invoer, omdat de tests dan op de bestaande prompt kunnen d
 
 **Files:** `chunkhound/autodoc/architecture/likec4_ids.py`; test in `tests/autodoc/`.
 
-- [ ] **Step 1: Rode test (altijd):** een kind met de naam van een wortelelement krijgt een andere id; id's zonder botsing blijven gelijk.
-- [ ] **Step 2:** `LikeC4IdAllocator` wijst eerst id's toe aan wortelelementen en reserveert die voor alle geneste elementen. Een prototype staat lokaal in `.scratch/c4-processes-research/prototype.diff`; die map wordt niet door Git gevolgd en is geen vereiste.
-- [ ] **Step 3: Forktest:** installeer het meegeleverde archief in een tijdelijke map, en draai `likec4 validate` en `likec4 build` op de schrijveruitvoer van een systeem en container met dezelfde naam, en van een kind met de naam van een extern systeem of persoon. Zonder Node wordt de test overgeslagen.
-- [ ] **Step 4:** `uv run pytest tests/autodoc -q -n auto`, ruff en mypy.
+- [x] **Step 1: Rode test (altijd):** een kind met de naam van een wortelelement krijgt een andere id; id's zonder botsing blijven gelijk.
+- [x] **Step 2:** `LikeC4IdAllocator` wijst eerst id's toe aan wortelelementen en reserveert die voor alle geneste elementen. Een prototype staat lokaal in `.scratch/c4-processes-research/prototype.diff`; die map wordt niet door Git gevolgd en is geen vereiste.
+- [x] **Step 3: Forktest:** installeer het meegeleverde archief in een tijdelijke map, en draai `likec4 validate` en `likec4 build` op de schrijveruitvoer van een systeem en container met dezelfde naam, en van een kind met de naam van een extern systeem of persoon. Zonder Node wordt de test overgeslagen.
+- [x] **Step 4:** `uv run pytest tests/autodoc -q -n auto`, ruff en mypy.
 
 ### Task 13: Documenten en eindverificatie (spec §14, §15)
 
