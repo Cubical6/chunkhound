@@ -110,7 +110,7 @@ Komt vóór de nieuwe invoer, omdat de tests dan op de bestaande prompt kunnen d
 
 **Files:** `c4/merge.py`, `c4/pipeline.py`, `c4/assemble.py`; tests in `test_pipeline.py` (`:256`, `:373`), `test_merge.py` (`:86`).
 
-- [ ] **Step 1: Rode tests,** op de pipeline-route met de nep. Breid `test_pipeline.py:373` uit waar het kan:
+- [x] **Step 1: Rode tests,** op de pipeline-route met de nep. Breid `test_pipeline.py:373` uit waar het kan:
   - `test_failed_merge_invents_no_components`; herschrijf `test_merge.py:86` en `test_pipeline.py:256`.
   - `test_failed_merge_is_retried_next_run`.
   - `test_failed_merge_keeps_locked_component_with_vanished_directory`: geen tombstone, geen `removed`-rand, id behouden.
@@ -119,10 +119,10 @@ Komt vóór de nieuwe invoer, omdat de tests dan op de bestaande prompt kunnen d
   - `test_other_container_is_still_locked`.
   - `test_failed_merge_warns`: `fallback_count` en de waarschuwing.
   - `test_failure_then_rename_keeps_component_id`.
-- [ ] **Step 2:** `MergeResult` krijgt `pending_groups: list[str]` en `failure_reason: str | None`. `_default_merge` wordt alleen voor de proefrun gebruikt; de terugval geeft `known`, lege `direct_groups`, `fallback=True` en de niet-geplaatste bouwstenen.
-- [ ] **Step 3:** Assemble zet `fallback` op het container-element, niet op `unit.markers`.
-- [ ] **Step 4:** `_identify` verwijdert voor de voorwaarden uit §4.5 de tombstone en de `removed`-rand. `_build_lock` zet het oude `LockedComponent` terug en houdt `base_sha` bij een terugval.
-- [ ] **Step 5:** Tests, ruff en mypy.
+- [x] **Step 2:** `MergeResult` krijgt `pending_groups: list[str]` en `failure_reason: str | None`. `_default_merge` wordt alleen voor de proefrun gebruikt; de terugval geeft `known`, lege `direct_groups`, `fallback=True` en de niet-geplaatste bouwstenen.
+- [x] **Step 3:** Assemble zet `fallback` op het container-element, niet op `unit.markers`.
+- [x] **Step 4:** `_identify` verwijdert voor de voorwaarden uit §4.5 de tombstone en de `removed`-rand. `_build_lock` zet het oude `LockedComponent` terug en houdt `base_sha` bij een terugval.
+- [x] **Step 5:** Tests, ruff en mypy.
 
 ### Task 5: Compacte merge-invoer en prompt (spec §4.2, §4.3)
 

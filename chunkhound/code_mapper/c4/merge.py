@@ -35,12 +35,17 @@ class MergeResult:
 
     Keys are proposal-local, not final C4 IDs. Titles use these keys, or the
     container ID for directly contained groups. Identity maps them later.
+
+    Pending groups have no placement: their files stay on the container for this
+    run and nothing about them is locked, so the next run sends them again.
     """
 
     components: list[ProposedComponent]
     direct_groups: list[str]
     fallback: bool
     titles: dict[tuple[str, str], str] = field(default_factory=dict)
+    pending_groups: list[str] = field(default_factory=list)
+    failure_reason: str | None = None
 
 
 class _AnswerModel(BaseModel):
@@ -162,8 +167,8 @@ def _known_components(
     return components, pending
 
 
-def _default_merge(container: str, groups: Sequence[Group], trial: bool) -> MergeResult:
-    marker: Marker = "trial" if trial else "fallback"
+def _default_merge(container: str, groups: Sequence[Group]) -> MergeResult:
+    """Trial runs only: a real failure must not invent components."""
     return MergeResult(
         [
             ProposedComponent(
@@ -171,12 +176,12 @@ def _default_merge(container: str, groups: Sequence[Group], trial: bool) -> Merg
                 group.name,
                 None,
                 (group.id,),
-                (marker, "not_merged", "provisional"),
+                ("trial", "not_merged", "provisional"),
             )
             for group in sorted(groups, key=lambda group: group.id)
         ],
         [],
-        not trial,
+        False,
     )
 
 
@@ -284,20 +289,28 @@ async def merge_container(
         result.direct_groups = value.direct_groups
         result.fallback = value.fallback
         result.titles = value.titles
-
-    def default() -> MergeResult:
-        value = _default_merge(container.id, pending, llm.trial)
-        value.components = [*known, *value.components]
-        return value
+        result.pending_groups = value.pending_groups
+        result.failure_reason = value.failure_reason
 
     if llm.trial:
-        apply(default(), False)
+        value = _default_merge(container.id, pending)
+        value.components = [*known, *value.components]
+        apply(value, False)
         return result
     prompt = _merge_prompt(container, pending, known, group_links)
     report = llm.report(
         "merge",
         f"container {json.dumps(container.id)}: {len(pending)} niet-geclaimde groepen",
     )
+
+    def default() -> MergeResult:
+        return MergeResult(
+            list(known),
+            [],
+            True,
+            pending_groups=sorted(group.id for group in pending),
+            failure_reason=report.outcomes[-1].removesuffix(", terugval"),
+        )
 
     async def attempt() -> MergeResult:
         with report.attempt():

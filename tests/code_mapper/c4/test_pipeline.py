@@ -74,6 +74,58 @@ def pipeline_answers(scripted, monkeypatch):
     return scripted
 
 
+def head_sha(repo):
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def commit(repo, message):
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=C4 Fixture",
+            "-c",
+            "user.email=c4@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "commit",
+            "-m",
+            message,
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+
+def write_sources(repo, sources):
+    for file, source in sources.items():
+        path = repo / file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source)
+
+
+def owner_of(build_result, group):
+    return next(
+        id
+        for id, component in build_result.lock.components.items()
+        if group in component.groups
+    )
+
+
+def removed_ids(build_result):
+    return {e.from_id for e in build_result.model.history if e.kind == "removed"}
+
+
 async def build(repo, manager, *, lock=None, trial=False, **inputs):
     llm = C4Llm(manager, concurrency=4, trial=trial)
     retries = RetryQueue()
@@ -86,20 +138,13 @@ async def build(repo, manager, *, lock=None, trial=False, **inputs):
         lock=lock,
         retries=retries,
     )
-    head = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
     return await finish_c4(
         draft=draft,
         topics=inputs.get("topics", [TopicSources("orders", ("shop/orders.py",))]),
         llm=llm,
         lock=lock,
         retries=retries,
-        head_sha=head,
+        head_sha=head_sha(repo),
         kind="trial" if trial else "full",
     )
 
@@ -254,22 +299,33 @@ async def test_summary_labels_validate_before_persisting(
         assert not summary_keys.intersection(restored.summaries)
 
 
-async def test_llm_failure_contract(fixture_repo, c4_llm_manager, pipeline_answers):
+async def test_failed_merge_invents_no_components(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
     pipeline_answers.answers["merge"] = TimeoutError("temporarily unavailable")
     result = await build(fixture_repo, c4_llm_manager)
-    components = [e for e in result.model.elements if e.kind == "component"]
-    assert components and all("fallback" in e.markers for e in components)
-    assert result.fallback_count == sum(
-        "fallback" in e.markers for e in result.model.elements
+    assert not [e for e in result.model.elements if e.kind == "component"]
+    # Each failed container stays locked and owns its files for this run.
+    failed = {e.id for e in result.model.elements if "fallback" in e.markers}
+    assert failed == {"container:shop", "container:web", "container:acme-admin"}
+    assert result.fallback_count == len(failed)
+    assert failed == set(result.lock.containers.values())
+    assert {"shop/orders.py", "shop/cli.py"} <= set(
+        result.evidence.element_files["container:shop"]
     )
-    assert result.fallback_count > 0
+    assert "web/src/api.ts" in result.evidence.element_files["container:web"]
+    assert any(
+        (c.target, c.file, c.source) == ("container:shop", "shop/orders.py", "code")
+        for c in result.evidence.citations
+    )
+    # Nothing about this run's placement becomes permanent.
     assert result.lock.components == {}
     assert not any(result.lock.direct_groups.values())
     assert result.lock.transition is None
-    assert {f for e in components for f in result.evidence.element_files[e.id]} >= {
-        "shop/orders.py",
-        "web/src/api.ts",
-    }
+    # Relations of a failed container vanish on recovery, so their titles do too.
+    relations = [r for r in result.model.relations if r.status == "found"]
+    assert relations and all("fallback" in r.markers for r in relations)
+    assert not result.lock.relations
     pipeline_answers.answers["classify"] = ValueError("bad config")
     with pytest.raises(ValueError, match="bad config"):
         await build(fixture_repo, c4_llm_manager)
@@ -442,18 +498,228 @@ async def test_removed_container_identity_is_reserved(
     assert third.lock.tombstones["web/package.json"] == old_id
 
 
-async def test_failed_merge_is_attempted_again_on_next_run(
-    fixture_repo, c4_llm_manager, pipeline_answers
+async def test_failed_merge_is_retried_next_run(
+    fixture_repo, c4_llm_manager, pipeline_answers, tmp_path
 ):
     pipeline_answers.answers["merge"] = TimeoutError("unavailable")
     first = await build(fixture_repo, c4_llm_manager)
+    # Without a previous lock there is nothing to keep but the current commit.
+    assert first.lock.base_sha == head_sha(fixture_repo)
+    write_scope_lock(tmp_path / "cache", "shop", first.lock)
+    restored = read_scope_lock(tmp_path / "cache", "shop")
     pipeline_answers.answers["merge"] = merge_answer
     pipeline_answers.calls.clear()
-    second = await build(fixture_repo, c4_llm_manager, lock=first.lock)
-    assert pipeline_answers.calls["merge"] > 0
-    assert second.lock.components
+    second = await build(fixture_repo, c4_llm_manager, lock=restored)
+    assert pipeline_answers.calls["merge"] == 3
+    assert owner_of(second, "container:shop/shop") in {
+        e.id for e in second.model.elements if e.kind == "component"
+    }
+    assert "shop/orders.py" in second.lock.components[
+        owner_of(second, "container:shop/shop")
+    ].files
     assert second.fallback_count == 0
     assert second.lock.transition is not None
+
+
+async def test_failed_merge_keeps_locked_component_with_vanished_directory(
+    fixture_repo, c4_llm_manager, pipeline_answers, tmp_path
+):
+    write_sources(fixture_repo, {"legacy/old.py": "class Old: pass\n"})
+    commit(fixture_repo, "add legacy")
+    first = await build(fixture_repo, c4_llm_manager)
+    gone = owner_of(first, "container:shop/legacy")
+    living = owner_of(first, "container:shop/shop")
+    shutil.rmtree(fixture_repo / "legacy")
+    write_sources(fixture_repo, {"billing/invoice.py": "class Invoice: pass\n"})
+    commit(fixture_repo, "replace legacy with billing")
+    pipeline_answers.answers["merge"] = TimeoutError("unavailable")
+    pipeline_answers.calls.clear()
+    failed = await build(fixture_repo, c4_llm_manager, lock=first.lock)
+    assert pipeline_answers.calls["merge"] == 2
+    # The vanished component keeps its id and record, but is not in this output.
+    assert failed.lock.components[gone] == first.lock.components[gone]
+    assert gone not in failed.lock.tombstones
+    assert gone not in removed_ids(failed)
+    assert gone not in {e.id for e in failed.model.elements}
+    # A component that still has its directory appears as usual.
+    assert living in {e.id for e in failed.model.elements}
+    assert failed.lock.components[living] == first.lock.components[living]
+    # The unplaced directory is cited on the container and is not permanent.
+    assert "billing/invoice.py" in failed.evidence.element_files["container:shop"]
+    assert "container:shop/billing" not in failed.lock.direct_groups["container:shop"]
+    assert not any(
+        "container:shop/billing" in c.groups for c in failed.lock.components.values()
+    )
+    # With the merge recovered, the directory is simply gone.
+    write_scope_lock(tmp_path / "cache", "shop", failed.lock)
+    restored = read_scope_lock(tmp_path / "cache", "shop")
+    pipeline_answers.answers["merge"] = merge_answer
+    recovered = await build(fixture_repo, c4_llm_manager, lock=restored)
+    assert gone not in recovered.lock.components
+    assert recovered.lock.tombstones[gone] == gone
+    assert gone in removed_ids(recovered)
+    assert owner_of(recovered, "container:shop/billing")
+
+
+async def test_failed_merge_does_not_carry_inherited_or_living_components(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    write_sources(
+        fixture_repo,
+        {
+            "alpha/one.py": "class AlphaOne: pass\n",
+            "alpha/two.py": "class AlphaTwo: pass\n",
+            "alpha/three.py": "class AlphaThree: pass\n",
+            "beta/only.py": "class BetaOnly: pass\n",
+            "gamma/first.py": "class GammaFirst: pass\n",
+            "gamma/second.py": "class GammaSecond: pass\n",
+        },
+    )
+    commit(fixture_repo, "add alpha, beta and gamma")
+    first = await build(fixture_repo, c4_llm_manager)
+    alpha = owner_of(first, "container:shop/alpha")
+    beta = owner_of(first, "container:shop/beta")
+    gamma = owner_of(first, "container:shop/gamma")
+    # Most of beta's files are now alpha's: beta's group inherits alpha's id.
+    for name in ("one", "two", "three"):
+        (fixture_repo / "alpha" / f"{name}.py").rename(
+            fixture_repo / "beta" / f"{name}.py"
+        )
+    # Gamma's directory lives on with entirely new files: its id is not inherited.
+    shutil.rmtree(fixture_repo / "gamma")
+    write_sources(
+        fixture_repo,
+        {
+            "gamma/fresh.py": "VALUE = 1\n",
+            "billing/invoice.py": "class Invoice: pass\n",
+        },
+    )
+    commit(fixture_repo, "move alpha into beta, rewrite gamma, add billing")
+    pipeline_answers.answers["merge"] = TimeoutError("unavailable")
+    failed = await build(fixture_repo, c4_llm_manager, lock=first.lock)
+    # Inherited: the old record must not overwrite the one built in this run.
+    assert failed.lock.components[alpha].groups == ["container:shop/beta"]
+    assert set(failed.lock.components[alpha].files) >= {"beta/one.py", "beta/only.py"}
+    assert alpha not in failed.lock.tombstones
+    # Living: carrying these would give their groups two owners on the next run.
+    assert beta not in failed.lock.components
+    assert failed.lock.tombstones[beta] == beta
+    assert gamma not in failed.lock.components
+    assert failed.lock.tombstones[gamma] == gamma
+    fresh = owner_of(failed, "container:shop/gamma")
+    assert fresh != gamma
+    pipeline_answers.answers["merge"] = merge_answer
+    recovered = await build(fixture_repo, c4_llm_manager, lock=failed.lock)
+    assert recovered.fallback_count == 0
+    assert owner_of(recovered, "container:shop/beta") == alpha
+    assert owner_of(recovered, "container:shop/gamma") == fresh
+
+
+async def test_failed_merge_keeps_base_sha(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    first = await build(fixture_repo, c4_llm_manager)
+    write_sources(fixture_repo, {"billing/invoice.py": "class Invoice: pass\n"})
+    commit(fixture_repo, "add billing")
+    pipeline_answers.answers["merge"] = TimeoutError("unavailable")
+    failed = await build(fixture_repo, c4_llm_manager, lock=first.lock)
+    assert failed.model.run.head_sha == head_sha(fixture_repo) != first.lock.base_sha
+    assert failed.lock.base_sha == first.lock.base_sha
+    pipeline_answers.answers["merge"] = merge_answer
+    recovered = await build(fixture_repo, c4_llm_manager, lock=failed.lock)
+    assert recovered.lock.base_sha == head_sha(fixture_repo)
+
+
+async def test_other_container_is_still_locked(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    write_sources(
+        fixture_repo,
+        {
+            "legacy/old.py": "class Old: pass\n",
+            "web/legacy/old.ts": "export const old = 1;\n",
+        },
+    )
+    commit(fixture_repo, "add legacy directories")
+    first = await build(fixture_repo, c4_llm_manager)
+    shop_gone = owner_of(first, "container:shop/legacy")
+    web_gone = owner_of(first, "container:web/legacy")
+    shutil.rmtree(fixture_repo / "legacy")
+    shutil.rmtree(fixture_repo / "web/legacy")
+    write_sources(
+        fixture_repo,
+        {
+            "billing/invoice.py": "class Invoice: pass\n",
+            "web/lib/client.ts": "export const client = 1;\n",
+        },
+    )
+    commit(fixture_repo, "replace legacy directories")
+    attempted = []
+
+    def merge(prompt):
+        attempted.append(payload(prompt)["container"])
+        if attempted[-1] == "container:web":
+            raise TimeoutError("unavailable")
+        return merge_answer(prompt)
+
+    pipeline_answers.answers["merge"] = merge
+    result = await build(fixture_repo, c4_llm_manager, lock=first.lock)
+    assert sorted(attempted) == ["container:shop", "container:web", "container:web"]
+    markers = {e.id: e.markers for e in result.model.elements}
+    assert "fallback" in markers["container:web"]
+    assert "fallback" not in markers["container:shop"]
+    assert result.fallback_count == 1
+    assert set(result.lock.containers.values()) >= {"container:shop", "container:web"}
+    # The healthy container is updated, tombstone and removed edge included.
+    assert owner_of(result, "container:shop/billing")
+    assert shop_gone not in result.lock.components
+    assert result.lock.tombstones[shop_gone] == shop_gone
+    assert shop_gone in removed_ids(result)
+    # The failed one keeps its record and leaves its new directory unplaced.
+    assert result.lock.components[web_gone] == first.lock.components[web_gone]
+    assert web_gone not in result.lock.tombstones
+    assert web_gone not in removed_ids(result)
+    assert "web/lib/client.ts" in result.evidence.element_files["container:web"]
+    assert not any(
+        "container:web/lib" in c.groups for c in result.lock.components.values()
+    )
+    # base_sha is per scope, so one failed container holds it for all.
+    assert result.lock.base_sha == first.lock.base_sha
+    assert result.lock.transition is None
+
+
+async def test_failure_then_rename_keeps_component_id(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    write_sources(
+        fixture_repo,
+        {
+            "alpha/one.py": "class AlphaOne: pass\n",
+            "alpha/two.py": "class AlphaTwo: pass\n",
+        },
+    )
+    commit(fixture_repo, "add alpha")
+    first = await build(fixture_repo, c4_llm_manager)
+    alpha = owner_of(first, "container:shop/alpha")
+    (fixture_repo / "alpha").rename(fixture_repo / "omega")
+    commit(fixture_repo, "rename alpha to omega")
+    pipeline_answers.answers["merge"] = TimeoutError("unavailable")
+    failed = await build(fixture_repo, c4_llm_manager, lock=first.lock)
+    assert failed.lock.components[alpha] == first.lock.components[alpha]
+    assert failed.lock.base_sha == first.lock.base_sha
+    pipeline_answers.answers["merge"] = merge_answer
+    recovered = await build(fixture_repo, c4_llm_manager, lock=failed.lock)
+    assert owner_of(recovered, "container:shop/omega") == alpha
+    assert set(recovered.lock.components[alpha].files) == {
+        "omega/one.py",
+        "omega/two.py",
+    }
+    assert alpha not in recovered.lock.tombstones
+    assert alpha not in removed_ids(recovered)
+    assert any(
+        e.from_id == alpha and e.to_id == alpha and e.kind == "continuation"
+        for e in recovered.model.history
+    )
 
 
 async def test_recovered_merge_titles_use_final_identity_without_titles_call(
@@ -551,24 +817,7 @@ async def test_changed_transition_survives_json_lock_replay(
 ):
     first = await build(fixture_repo, c4_llm_manager)
     shutil.rmtree(fixture_repo / "admin")
-    subprocess.run(["git", "add", "-A"], cwd=fixture_repo, check=True)
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "user.name=C4 Fixture",
-            "-c",
-            "user.email=c4@example.invalid",
-            "-c",
-            "commit.gpgsign=false",
-            "commit",
-            "-m",
-            "remove admin runtime",
-        ],
-        cwd=fixture_repo,
-        check=True,
-        capture_output=True,
-    )
+    commit(fixture_repo, "remove admin runtime")
     changed = await build(fixture_repo, c4_llm_manager, lock=first.lock)
     assert any(edge.kind == "removed" for edge in changed.model.history)
     assert changed.model.history != first.model.history

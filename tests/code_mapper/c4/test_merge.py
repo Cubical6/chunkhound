@@ -83,30 +83,36 @@ async def test_merge_direct_group_has_no_component(c4_llm_manager, scripted):
     assert await queue.drain() == 0
 
 
-async def test_merge_fallback_marks_components(c4_llm_manager, scripted):
+async def test_merge_fallback_leaves_groups_pending(c4_llm_manager, scripted):
     scripted.answers["merge"] = TimeoutError("temporarily unavailable")
     llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
     queue = RetryQueue()
+    locked = LockedComponent(
+        name="Orders",
+        description="Orders API",
+        container=CONTAINER.id,
+        groups=[GROUPS[0].id],
+        files=[],
+    )
     result = await merge_container(
         container=CONTAINER,
         groups=GROUPS,
         group_links={},
-        existing={},
+        existing={"component:orders": locked},
         placements={},
         llm=llm,
         retries=queue,
     )
-    assert not result.components  # Deferred, not yet a fallback.
+    assert not result.fallback  # Deferred, not yet a fallback.
     assert await queue.drain() == 1
     assert llm.calls == 2
     assert result.fallback
-    assert [(c.name, c.groups, c.description) for c in result.components] == [
-        (g.name, (g.id,), None) for g in GROUPS
+    assert [(c.key, c.groups) for c in result.components] == [
+        ("component:orders", (GROUPS[0].id,))
     ]
-    assert all(
-        set(c.markers) == {"fallback", "not_merged", "provisional"}
-        for c in result.components
-    )
+    assert result.direct_groups == []
+    assert result.pending_groups == [GROUPS[1].id, GROUPS[2].id]
+    assert result.failure_reason == "tijdelijke fout"
 
 
 async def test_merge_trial_has_no_calls_or_deferred_work():

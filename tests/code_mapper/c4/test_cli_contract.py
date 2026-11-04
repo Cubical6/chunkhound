@@ -445,11 +445,15 @@ async def test_plan_keeps_overview_and_adds_zero_call_trial(cli):
     assert not (cli.repo / LOCK_RELATIVE_PATH).exists()
 
 
-async def test_transient_failure_reports_fallback_without_caching_it(cli, capsys):
+async def test_failed_merge_warns(cli, capsys):
     cli.provider.answers["merge"] = TimeoutError("temporarily unavailable")
     await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
     model, _ = pair(cli.out)
     count = model.run.fallback_count
+    assert not [e for e in model.elements if e.kind == "component"]
+    assert count == len(
+        [e for e in model.elements if e.kind == "container" and "fallback" in e.markers]
+    )
     assert count > 0
     assert (
         f"C4: {count} elementen via terugval (niet opgeslagen)"
@@ -457,6 +461,7 @@ async def test_transient_failure_reports_fallback_without_caching_it(cli, capsys
     )
     document = json.loads((cli.repo / LOCK_RELATIVE_PATH).read_text())
     assert document["scopes"]["/"]["components"] == {}
+    assert document["scopes"]["/"]["containers"]
 
 
 async def test_failed_documentation_fragment_warns_the_user(cli, capsys):

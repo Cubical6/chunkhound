@@ -320,9 +320,47 @@ async def analyze_c4(
     return draft
 
 
+def _failed_containers(draft: C4Draft) -> frozenset[str]:
+    return frozenset(id for id, merge in draft.merges.items() if merge.fallback)
+
+
+def _carry_locked_components(
+    draft: C4Draft, identity: IdentityResult, lock: ScopeLock
+) -> dict[str, LockedComponent]:
+    """Keep what a failed merge could still match to a renamed directory.
+
+    Its unplaced groups may be that component under a new name, so retiring its
+    ID now would lose it. A component with a living group is never kept: on the
+    next run that group would have two owners, which merge rejects.
+    """
+    failed = _failed_containers(draft)
+    living = {group.id for group in draft.grouping}
+    inherited = set(identity.ids.values())
+    carried = {
+        id: component
+        for id, component in lock.components.items()
+        if component.container in failed
+        and id not in inherited
+        and living.isdisjoint(component.groups)
+    }
+    for id in carried:
+        del identity.tombstones[id]
+    identity.history = [
+        edge
+        for edge in identity.history
+        if edge.kind != "removed" or edge.from_id not in carried
+    ]
+    return carried
+
+
 def _identify(
     draft: C4Draft, docs: DocumentedOutcome, lock: ScopeLock | None
-) -> tuple[IdentityResult, dict[str, tuple[ProposedComponent, str]], bool]:
+) -> tuple[
+    IdentityResult,
+    dict[str, tuple[ProposedComponent, str]],
+    bool,
+    dict[str, LockedComponent],
+]:
     groups = {g.id: g for g in draft.grouping}
     proposals = {p.key: p for merge in draft.merges.values() for p in merge.components}
     renames = detect_renames(draft.project_root, lock.base_sha if lock else "")
@@ -346,7 +384,9 @@ def _identify(
         ),
         tombstones=lock.tombstones if lock else {},
     )
+    carried: dict[str, LockedComponent] = {}
     if lock:
+        carried = _carry_locked_components(draft, identity, lock)
         current_manifests = {unit.manifest for unit in draft.runtime.containers}
         for manifest, id in lock.containers.items():
             if manifest not in current_manifests:
@@ -355,6 +395,7 @@ def _identify(
         identity,
         {key: (p, identity.ids[key]) for key, p in proposals.items()},
         renames is not None,
+        carried,
     )
 
 
@@ -532,12 +573,17 @@ def _build_lock(
     inp: AssemblyInput,
     identity: IdentityResult,
     fingerprint: str,
+    lock: ScopeLock | None,
+    carried: dict[str, LockedComponent],
 ) -> ScopeLock:
     fingerprints = _fingerprints(evidence, model.relations)
     titles = {r.id: r.title for r in model.relations}
     docs = inp.documented
     return ScopeLock(
-        base_sha=model.run.head_sha,
+        # The next run must still see renames made since the last complete merge.
+        base_sha=lock.base_sha
+        if lock and _failed_containers(draft)
+        else model.run.head_sha,
         system=draft.runtime.system_id,
         containers={
             unit.manifest: unit.id
@@ -546,7 +592,7 @@ def _build_lock(
         },
         direct_groups=_direct_groups(draft),
         transition=_transition(draft, model, inp, fingerprint),
-        components=_lock_components(inp, evidence),
+        components={**_lock_components(inp, evidence), **carried},
         tombstones=identity.tombstones,
         relations={
             r.id: LockedRelation(title=r.title, fingerprint=fingerprints[r.id])
@@ -609,7 +655,7 @@ async def finish_c4(
     if not draft.prepared:
         await _prepare(draft, llm, lock)
         await retries.drain()
-    identity, components, renames = _identify(draft, docs, lock)
+    identity, components, renames, carried = _identify(draft, docs, lock)
     overrides = lock.overrides if lock else Overrides()
     fingerprint = _final_fingerprint(draft, topics, docs, head_sha, overrides)
     renames = _replay_history(identity, renames, fingerprint, lock)
@@ -623,6 +669,7 @@ async def finish_c4(
         docs,
         _merged_titles(draft, identity),
         overrides,
+        _failed_containers(draft),
     )
     elements, relations, evidence = await _titles(inp, draft, llm, lock)
     coverage = compute_coverage(
@@ -673,7 +720,9 @@ async def finish_c4(
     updated = (
         None
         if llm.trial
-        else _build_lock(draft, model, evidence, inp, identity, fingerprint)
+        else _build_lock(
+            draft, model, evidence, inp, identity, fingerprint, lock, carried
+        )
     )
     if not llm.trial:
         prune_documented_cache(draft.project_root)

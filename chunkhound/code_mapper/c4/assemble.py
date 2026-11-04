@@ -40,6 +40,7 @@ class AssemblyInput:
     documented: DocumentedOutcome
     titles: dict[str, str]
     overrides: Overrides
+    fallback_containers: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,11 @@ class _Assembly:
                 runtime.system_id,
                 markers=unit.markers,
             )
+            # On the element only: a marked unit would lose its locked container ID.
+            markers = self.elements[unit.id].markers
+            if unit.id in self.inp.fallback_containers and "fallback" not in markers:
+                markers.append("fallback")
+                markers.sort()
             for citation in unit.citations:
                 self.citations.extend(
                     [
