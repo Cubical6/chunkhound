@@ -673,3 +673,51 @@ Contracttests op de bestaande routes:
 - **Componentnamen en -indeling:** de misleidende titels uit de steekproef blijven bestaan (§17.8). Dat is de volgende stap na deze.
 - **Providers zonder pakket of documentrelatie:** die blijven weg; dat is §17.2.
 - **Protocollen, processen en deel B:** ongewijzigd.
+
+## 19. Engels en strengere documentstap
+
+**Aanleiding.** In run 3 (`e2b7d693`) zijn 14 relatietitels en 9 omschrijvingen Pools. Ze komen uit één cachebundel over `site/src/pages/docs/configuration.md`, terwijl de bron Engels is. De prompt vroeg Nederlands, de validatie (`_DocumentedGoal.validate`) toetst geen taal, en het lockbestand houdt de uitkomst vast zolang documenten en versie gelijk zijn. Daarnaast toetst de validatie bij een relatie niet of de eindpunten in het citaat staan. De gebruiker kiest Engels voor alle uitvoer en vaste teksten van de kaart, een nieuw lockbestand, geen automatische taalcontrole, en een herbouwde LikeC4-fork. Dit vervangt de keuze voor Nederlandse titels en terugvaltitels uit het plan van de structuuranalyse en de Nederlandse omschrijving in §18.2.
+
+### 19.1 Engels
+
+- **Prompts:** `c4_documented`, `c4_merge`, `c4_summaries` en `c4_titles` vragen Engels voor titels, namen, labels en omschrijvingen. `c4_classify` levert geen tekst.
+- **Terugvaltitels:** `inherits from`, `calls`, `imports`; ook in de verbodsregel van `c4_titles`.
+- **Id-prefixen:** `system:`, `container:`, `storage:`, `external:`, `person:`, `component:`.
+- **Status:** `found` en `documented`, in het contract, het model van AutoDoc, de LikeC4-tag `documented` en de legenda.
+- **Vaste teksten:** rapportregels en foutmeldingen van `map` en de C4-stappen, en de teksten van `likec4_writer` (`+N relations`, `sources`).
+- **LikeC4-fork:** de kop boven de bronlinks in het detailpaneel wordt `sources`. De fork krijgt versie `1.60.0-chunkhound.2`, zodat een npm-cache het oude archief niet hergebruikt.
+
+### 19.2 Versies
+
+- **Lockversie 5** (`SCHEMA_VERSION`). Een lockbestand met versie 4 geeft de bestaande melding "Delete it and run `chunkhound map` again". Daarmee vervallen alle opgeslagen classificaties, merges, titels, labels en documentuitkomsten, ook die met Nederlandse tekst of Nederlandse id's. Bewijs en kaartmodel volgen dezelfde versie.
+- **Contractversie 2** (`CONTRACT_VERSION`). Het model van AutoDoc aanvaardt alleen versie 2; een oud contract met Nederlandse statussen geeft een duidelijke versiemelding in plaats van een fout op een onbekende status.
+
+### 19.3 Documentstap
+
+- **Eindpunten in het citaat:** een relatie wordt alleen aanvaard als elk eindpunt gelijk is aan de systeemnaam, of letterlijk in de geciteerde regels staat. Dat is dezelfde regel als voor de term van een element. De systeemnaam blijft vrij, omdat de prompt die voorschrijft voor elk onderdeel van het systeem. Een fragment waarvan geen enkel voorstel overblijft, wordt zoals nu afgekeurd.
+- `_VALIDATOR_VERSION` wordt 2, zodat cache en lockvermelding opnieuw worden bepaald.
+- **Geen taalcontrole** (keuze van de gebruiker). Een antwoord in een andere taal kan dus weer in het lockbestand belanden; `overrides` of een nieuwe versie van de stap is dan de uitweg.
+
+### 19.4 Run en acceptatie
+
+Het oude lockbestand moet weg; de volgende run roept dus classificatie, merge, titels, labels en de documentstap opnieuw aan. Die run vraagt aparte goedkeuring.
+
+**Controles:**
+
+1. geen Nederlandse of andere niet-Engelse tekst in het contract (handmatige steekproef van titels, namen en omschrijvingen);
+2. alle id's met Engelse prefixen, statussen `found` en `documented`;
+3. elke documentrelatie heeft haar eindpunten, of de systeemnaam, in het citaat;
+4. `ModelLoader` en de LikeC4-build zonder waarschuwing, en het detailpaneel toont `sources`.
+
+### 19.5 Testen
+
+Bestaande contracttests volgen de nieuwe prefixen, statussen en teksten. Nieuw:
+
+1. Een documentrelatie met een eindpunt dat niet in het citaat staat, wordt niet aanvaard; de systeemnaam als eindpunt wel.
+2. Een lockbestand met versie 4 wordt geweigerd met de melding om het te verwijderen.
+3. AutoDoc weigert een contract met versie 1.
+
+### 19.6 Bewust niet
+
+- **Taalcontrole:** zie §19.3.
+- **Personen samenvoegen, componentnamen en -indeling, deel B:** ongewijzigd (punten 3 tot en met 5 van de review van run 3).
