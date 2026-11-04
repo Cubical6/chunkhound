@@ -1,7 +1,7 @@
 # Spec: `chunkhound map` levert de C4-structuur
 
 - Datum: 2026-10-27 · Branch: `Cubical6/map-structuur-design` (basis `829ec586`)
-- **Status:** opgeleverd 2026-10-29 (`51a87488`); historie, de code is leidend
+- **Status:** opgeleverd 2026-10-29 (`51a87488`); historie, de code is leidend. [O-MAP deel A](2026-11-03-omap-producent-design.md) vervangt de bouwstenen, bestandsnamen en lockvelden; die plekken zijn hieronder gemarkeerd met "Vervangen".
 - Besluitenlog: [2026-10-27-map-structuuranalyse.md](../decisions/2026-10-27-map-structuuranalyse.md) (rij 1–40; "rij N" hieronder)
 - Bindend kader: AutoDoc-C4-log `autodoc-c4-design/docs/melly/decisions/2026-10-27-autodoc-c4-map.md` rij 11–32 ("C4-log rij N")
 - Model: [map-structuuranalyse.md](../models/map-structuuranalyse.md)
@@ -23,7 +23,7 @@
 
 ## 2. Domeinmodel
 
-Zie [model §1](../models/map-structuuranalyse.md#1-domeinmodel): 15 begrippen, regels R1–R12 met voorbeelden. Kern: relaties alleen uit statische verwijzingen (R1); componenten als vereniging van deterministische groepen (R2); identiteit via wederzijdse meerderheid 0,5 met tombstones (R3); id = soort + term (R4); containers volgen runtime-grenzen (R5); dependency-soort uit 3 stemmen (R6); volledig bewijs (R7).
+Zie [model §1](../models/map-structuuranalyse.md#1-domeinmodel): 15 begrippen, regels R1–R12 met voorbeelden. Kern: relaties alleen uit statische verwijzingen (R1); componenten als vereniging van deterministische groepen (R2); identiteit via wederzijdse meerderheid 0,5 met tombstones (R3); id = soort + term (R4); containers volgen runtime-grenzen (R5); dependency-soort uit 3 stemmen (R6); volledig bewijs (R7). **Vervangen:** een groep is nu één bouwsteen per map ([O-MAP deel A §4.1](2026-11-03-omap-producent-design.md#41-één-bouwsteen-per-map)).
 
 **Open issues**
 
@@ -47,7 +47,7 @@ Nieuw subpakket `chunkhound/code_mapper/c4/` naast de bestaande topicstroom (rij
 |---|---|---|
 | `references.py` | Statische verwijzingen per bestand | 32 |
 | `runtime.py` | Containers, opslagkandidaten, bestand → container | 22, 32 |
-| `grouping.py` | `TreeSpec` eerste run, daarna `replay` | 21, 32 |
+| `grouping.py` | `TreeSpec` eerste run, daarna `replay`. **Vervangen:** één bouwsteen per map, zonder `TreeSpec` en `replay` ([O-MAP deel A §4.1](2026-11-03-omap-producent-design.md#41-één-bouwsteen-per-map)) | 21, 32 |
 | `classify.py` | Stemrondes voor dependencies en twijfelgevallen | 12, 22, 33 |
 | `merge.py` | Samenvoegen, namen, omschrijvingen, titels (`merge`, `titles`) | 25, 27, 33 |
 | `documented.py` | Elementen en relaties uit documentatie | 34 |
@@ -58,7 +58,7 @@ Nieuw subpakket `chunkhound/code_mapper/c4/` naast de bestaande topicstroom (rij
 | `model.py` | Pydantic-modellen van model, bewijs en lockbestand; `load_c4_pair()` valideert schema en gelijke `run.id`, anders een duidelijke fout | 35, 39 |
 | `writer.py` | `run.id` berekenen, beide JSON-bestanden schrijven | 31, 39 |
 | `schemas/` | Meegeleverde JSON Schema's | 35 |
-| `codeboarding/` | Gekopieerde MIT-code met kop en `LICENSE`: `source_inspector.py`, bron-terugval van `hierarchy_builder.py`, `clustering/names/` (CodeBoarding `13adc4a0`) | 20, 21 |
+| `codeboarding/` | Gekopieerde MIT-code met kop en `LICENSE`: `source_inspector.py`, bron-terugval van `hierarchy_builder.py`, `clustering/names/` (CodeBoarding `13adc4a0`). **Vervangen:** `clustering/names/` is verwijderd; `source_inspector.py`, `hierarchy_fallback.py`, `models.py`, `config.py` en `LICENSE` blijven ([O-MAP deel A §14](2026-11-03-omap-producent-design.md#14-code-en-documenten)) | 20, 21 |
 
 **Volgorde** ([model §5](../models/map-structuuranalyse.md#5-sequencediagrammen)): lockbestand lezen → topics en C4-tak parallel → `documented` (heeft de door topics geciteerde documenten nodig) → identiteit, dekking, `summaries` → schrijven → lockbestand. Herpogingen komen na de rest (rij 19, 30).
 
@@ -80,7 +80,7 @@ Parser `chunkhound/api/cli/parsers/code_mapper_parser.py`; commando `chunkhound/
 | `--plan --no-markdown` | Ook geen HyDE; 0 aanroepen; geen database nodig | 28, 32 |
 
 - De databasecontrole (`commands/code_mapper.py:196-201`) blijft voor de volledige run en `--no-markdown` (topics); de C4-tak zelf leest van schijf (rij 32).
-- Uitvoer in `--out`: `<safe_scope>_c4_model.json` en `<safe_scope>_c4_evidence.json`; `safe_scope` via `chunkhound/utils/text.py:4-7`, scopelabel via `chunkhound/code_mapper/orchestrator.py:49-58`. Beide bestanden krijgen dezelfde `run.id` = sha256 over de inhoud van model en bewijs zonder `run.id`, zodat een ongewijzigde herhaalrun dezelfde sleutel geeft. Schrijven via tijdelijk bestand + `os.replace`: eerst het bewijs, dan het model. Een crash tussen die twee laat een paar met verschillende `run.id` achter; `load_c4_pair()` weigert dat met een fout die zegt `map` opnieuw te draaien (rij 31, 39).
+- Uitvoer in `--out`: `<safe_scope>_c4_model.json` en `<safe_scope>_c4_evidence.json`; `safe_scope` via `chunkhound/utils/text.py:4-7`, scopelabel via `chunkhound/code_mapper/orchestrator.py:49-58`. Beide bestanden krijgen dezelfde `run.id` = sha256 over de inhoud van model en bewijs zonder `run.id`, zodat een ongewijzigde herhaalrun dezelfde sleutel geeft. Schrijven via tijdelijk bestand + `os.replace`: eerst het bewijs, dan het model. Een crash tussen die twee laat een paar met verschillende `run.id` achter; `load_c4_pair()` weigert dat met een fout die zegt `map` opnieuw te draaien (rij 31, 39). **Vervangen:** het paar heet nu `<safe_scope>_c4_map_model.json` en `<safe_scope>_c4_map_evidence.json`; `<safe_scope>_c4_model.json` is het contract versie 1 voor AutoDoc, alleen bij een volledige run. Volgorde: paar, contract, lockbestand ([O-MAP deel A §2](2026-11-03-omap-producent-design.md#2-bestanden)).
 - Extra melding bij terugval: `C4: K elementen via terugval (niet opgeslagen)`; exitcodes verder ongewijzigd (rij 31).
 
 ## 7. Statische analyse en groepen
@@ -94,7 +94,7 @@ Parser `chunkhound/api/cli/parsers/code_mapper_parser.py`; commando `chunkhound/
 - **Containers** (rij 5, 22): standaardvelden per ecosysteem (PEP 621 `[project.scripts]`, `bin` in `package.json`/`composer.json`, Cargo `[[bin]]`/`src/main.rs`) en Dockerfiles zonder taalmodel; sjablonen met plaatshouders tellen niet; meerdere startpunten in één pakket = één container. Een bestand hoort bij de container van de dichtstbijzijnde manifestmap. Zonder herkende container is de scope één container met marker `provisional`.
 - **Bestanden buiten runtime-roots:** groepeer alleen bestanden met een `container_of`-toewijzing. Bij uitsluitend geneste containers ontstaat geen extra root-container voor overgebleven bestanden; alle statische verwijzingen blijven wel in het bewijs, met `relation=None` waar geldige toegewezen eindpunten ontbreken (coordinator ruling T).
 - **Opslag** (rij 6, 22): kandidaten op type (`Path`-velden, `VOLUME`, compose `volumes:`), niet op naam; geen framework- of namenlijst.
-- **Groepen** (rij 21): eerste run `TreeSpec` per container via de gekopieerde `clustering/names/` met ChunkHounds bestanden als eenheden en tellende verwijzingen tussen verschillende bestanden van dezelfde container als koppelingen; daarna `replay`. Posities zijn relatief aan de expliciet door runtime geleverde container-root; bestandsidentiteiten en membershippaden zijn projectrelatief met `/`. Bewaar per container bestand → lokale groep-id als `group_membership` in ChunkHounds lock, niet in de gekopieerde `TreeSpec`. Bekende bestanden behouden hun groep, ook bij term-/fallbackplaatsing. Nieuwe bestanden onder gevestigde prefixen blijven zonder taalmodel in die groep. Gebruik `Partition.new_scopes` plus werkelijk niet-geplaatste bestanden en vorige membership om nieuwe mappen te herkennen: een nieuwe map wordt ook bij root-fallback een nieuwe groep, met prefix-only regels zonder herstemming van bekende bestanden en verse monotone id's. Herhaalde replay maakt die groepen niet opnieuw aan; niet-geclaimde groepen gaan naar `merge` (gebruikersbesluit taak 7, 2026-10-28).
+- **Groepen** (rij 21): eerste run `TreeSpec` per container via de gekopieerde `clustering/names/` met ChunkHounds bestanden als eenheden en tellende verwijzingen tussen verschillende bestanden van dezelfde container als koppelingen; daarna `replay`. Posities zijn relatief aan de expliciet door runtime geleverde container-root; bestandsidentiteiten en membershippaden zijn projectrelatief met `/`. Bewaar per container bestand → lokale groep-id als `group_membership` in ChunkHounds lock, niet in de gekopieerde `TreeSpec`. Bekende bestanden behouden hun groep, ook bij term-/fallbackplaatsing. Nieuwe bestanden onder gevestigde prefixen blijven zonder taalmodel in die groep. Gebruik `Partition.new_scopes` plus werkelijk niet-geplaatste bestanden en vorige membership om nieuwe mappen te herkennen: een nieuwe map wordt ook bij root-fallback een nieuwe groep, met prefix-only regels zonder herstemming van bekende bestanden en verse monotone id's. Herhaalde replay maakt die groepen niet opnieuw aan; niet-geclaimde groepen gaan naar `merge` (gebruikersbesluit taak 7, 2026-10-28). **Vervangen:** per container is elke map één bouwsteen; `TreeSpec`, `replay`, `group_membership` en `clustering/names/` vervallen ([O-MAP deel A §4.1](2026-11-03-omap-producent-design.md#41-één-bouwsteen-per-map), stabiliteit in [§6](2026-11-03-omap-producent-design.md#6-lockbestand)).
 
 ## 8. Taalmodelstappen
 
@@ -117,7 +117,7 @@ Alle aanroepen via `complete_structured_typed` (`chunkhound/interfaces/llm_provi
 | Stap | Terugval (marker `fallback`) |
 |---|---|
 | `classify` | Bibliotheek, `not_classified` |
-| `merge` | Elke groep een eigen component, naam uit prefix, geen omschrijving, `not_merged`, id `provisional` |
+| `merge` | Elke groep een eigen component, naam uit prefix, geen omschrijving, `not_merged`, id `provisional`. **Vervangen:** er worden geen componenten verzonnen; de bestanden staan direct onder de container, die `fallback` krijgt, en de bouwstenen blijven wachtend. Alleen de proefrun houdt één voorlopige component per bouwsteen ([O-MAP deel A §4.5](2026-11-03-omap-producent-design.md#45-mislukte-of-onvolledige-merge-stap)) |
 | `titles` | Titel uit de soort verwijzing: "importeert", "roept aan", "erft van" |
 | `documented` | Laatst opgeslagen uitkomst als die er is, anders geen documentatie-elementen |
 | `summaries` | Label deterministisch uit de onderliggende titels |
@@ -143,12 +143,16 @@ Pydantic-modellen (`model.py`) → `model_json_schema()` ([docs](https://docs.py
 
 | Bestand | Inhoud |
 |---|---|
-| `_c4_model.json` | `run` (`id`, `kind`, `schema_version`, `head_sha` via `orchestrator.py:37`, `scope`, `fallback_count`, `renames`); `elements` (`id`, `kind`, `name`, `description`, `status`, `parent`, `markers`, `coverage{status, topics}`); `relations` (`id`, `from`, `to`, `title`, `status`, `reference_counts`, `markers`); `merged` (`id`, `from`, `to`, `view`, `label`, `underlying`, `markers`); `history` |
-| `_c4_evidence.json` | `schema_version`; `run_id` (gelijk aan `run.id` van het model); `references` (`relation` of `null`, `from`, `line`, `to`, `kind`, `status`); `citations` (`target` element-/relatie-id of `null`, `file`, `start_line`, `end_line`, `source` `code`\|`configuration`\|`documentation`\|`topic`, `verified`); `element_files` (per element de implementatiebestanden; per container ook de bestanden rechtstreeks eronder) |
+| `_c4_map_model.json` (was `_c4_model.json`) | `run` (`id`, `kind`, `schema_version`, `head_sha` via `orchestrator.py:37`, `scope`, `fallback_count`, `renames`); `elements` (`id`, `kind`, `name`, `description`, `status`, `parent`, `markers`, `coverage{status, topics}`); `relations` (`id`, `from`, `to`, `title`, `status`, `reference_counts`, `markers`); `merged` (`id`, `from`, `to`, `view`, `label`, `underlying`, `markers`); `history` |
+| `_c4_map_evidence.json` (was `_c4_evidence.json`) | `schema_version`; `run_id` (gelijk aan `run.id` van het model); `references` (`relation` of `null`, `from`, `line`, `to`, `kind`, `status`); `citations` (`target` element-/relatie-id of `null`, `file`, `start_line`, `end_line`, `source` `code`\|`configuration`\|`documentation`\|`topic`, `verified`); `element_files` (per element de implementatiebestanden; per container ook de bestanden rechtstreeks eronder) |
+
+**Vervangen:** de namen in de tabel zijn bijgewerkt. `elements` hebben nu ook `technology`, en `_c4_model.json` is nu het neutrale contract `schema_version: 1` voor AutoDoc, niet het interne model ([O-MAP deel A §2](2026-11-03-omap-producent-design.md#2-bestanden), [§5](2026-11-03-omap-producent-design.md#5-technologie-en-omschrijvingen)).
 
 Markers: `fallback`, `trial`, `disputed`, `undescribed`, `imports_only`, `provisional`, `not_merged`, `not_classified`.
 
 **Lockbestand** `<target_dir>/.chunkhound/map.lock.json` (`target_dir`: `orchestrator.py:116`), los van `--out` en van de database-locatie (rij 26). Eén sectie per scopelabel met `base_sha`, `system` (id), `containers` (relatief manifestpad → id, rij 40), `tree_spec`, `components`, `tombstones`, `relations` (met vingerafdruk), `classifications`, `documented` (hashes + uitkomst, rij 34), `summaries` (labels, rij 35) en `overrides` (handgeschreven, nooit overschreven, gaan voor) (rij 31). Gesorteerde sleutels, relatieve paden met `/`, geen tijdstempels. Geschreven via `os.replace` na een volledige run met exitcode 0; terugvalitems weggelaten; nooit bij `--plan` of exitcode 1. Geen bestandsvergrendeling. Committen is de keuze van de gebruiker via `.chunkhound/*` + `!.chunkhound/map.lock.json` in `.gitignore`; `map` wijzigt `.gitignore` niet (rij 18, 26).
+
+**Vervangen:** `SCHEMA_VERSION` is nu 4. `tree_spec` en `group_membership` vervallen, ook in de opsomming hierboven; `direct_groups` en `transition` uit schema 3 blijven. Een ouder lockbestand geeft een `LockfileError` en moet worden verwijderd ([O-MAP deel A §6](2026-11-03-omap-producent-design.md#6-lockbestand)). Historie:
 
 `ScopeLock.group_membership` is verplicht: `{container_id: {project_relative_file: local_rule_id}}`, voor alle actuele groepen inclusief groepen zonder component. `tree_spec` blijft per container een gewone `TreeSpec.to_dict()` zonder extra metadata. De runvolgorde geeft vorige membership aan grouping en bewaart de geretourneerde actuele membership samen met de bomen. De gewijzigde verplichte lockvorm verhoogt `SCHEMA_VERSION` naar 2; geen compatibiliteitsshim voor deze nog niet uitgebrachte API.
 

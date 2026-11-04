@@ -716,6 +716,26 @@ The `algorithm` setting controls how ChunkHound explores your codebase to answer
 
 Gap detection parameters (`min_gaps`, `max_gaps`, `gap_similarity_threshold`) only affect v2 and v3. They are silently ignored for v1.
 
+## C4 Map Sources
+
+The `c4` section controls which files the C4 analysis of `chunkhound map` uses as sources. Only that analysis reads it: the index, research and map topics still see these files. It has no environment variables or CLI flags.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `exclude` | `string[]` | `[]` | Glob patterns from the project root. They apply to code and documentation sources. |
+| `exclude_test_code` | `boolean` | `true` | Leave out test directories (`tests`, `test`, `__tests__`, `fixtures`, `__fixtures__`, `testdata`) and files named `test_*`, `*_test.*`, `*.test.*`, `*.spec.*` or `conftest.py`. |
+
+```json
+{
+  "c4": {
+    "exclude": ["docs/internal/**"],
+    "exclude_test_code": true
+  }
+}
+```
+
+Files in hidden directories and changelog-style files (such as `CHANGELOG.md` or `RELEASES.md`) are never documentation sources, whatever these options say. A `c4.exclude` list from a higher-priority source replaces the list from a lower one.
+
 ## Environment Variables
 
 Most environment variables use the `CHUNKHOUND_` prefix with `__` (double underscore) as the section delimiter. The LLM section uses a single underscore (`CHUNKHOUND_LLM_*`).

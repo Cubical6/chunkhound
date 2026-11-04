@@ -353,9 +353,19 @@ also publishes `/architecture/`, an overview mini-map, direct topic targets and
 architecture search results. Missing or invalid models warn and leave a normal
 documentation site with no React/LikeC4 dependencies. Map sites ship a local
 LikeC4 archive and fonts; invalid published DSL makes the build fail explicitly.
-This sidecar is a separate producer input: AutoDoc does not infer its neutral
-model from Markdown. The automatic mapping example below is not a promise that
-every mapper version emits a C4 sidecar.
+AutoDoc reads this sidecar and does not infer the model from Markdown.
+
+`chunkhound map` writes the C4 files beside its topics, unless `--no-c4` is set:
+
+| File | What it is | Written by |
+|---|---|---|
+| `<scope>_c4_model.json` | Version-1 contract that AutoDoc reads | Full runs only |
+| `<scope>_c4_map_model.json` | Internal model with markers, coverage and history | Full and `--plan` runs |
+| `<scope>_c4_map_evidence.json` | Internal evidence: references, citations and files per element | Full and `--plan` runs |
+
+A `--plan` run leaves an existing contract untouched. The `c4` section of
+`.chunkhound.json` chooses which files the C4 analysis uses, with `exclude` and
+`exclude_test_code`; see [C4 Map Sources](/docs/configuration/#c4-map-sources).
 
 Architecture source links point to the recorded commit of each source's own
 repository, with inclusive line ranges, for recognized `github.com`,

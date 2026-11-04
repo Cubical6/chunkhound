@@ -228,8 +228,8 @@ Komt vóór de nieuwe invoer, omdat de tests dan op de bestaande prompt kunnen d
 
 ### Task 13: Documenten en eindverificatie (spec §14, §15)
 
-- [ ] **Step 1:** `docs/melly/specs/2026-10-27-map-structuuranalyse-design.md` r. 26, 50, 61, 83, 97, 120, 146–147, 153; `docs/melly/models/map-structuuranalyse.md` r. 269; AutoDoc-spec r. 23, 25 en een nieuwe rij in het AutoDoc-besluitenlog; `site/src/pages/docs/cli-reference.md:356–358`; `site/src/pages/docs/changelog.md:25`; `CHANGELOG.md`.
-- [ ] **Step 2:** Lokaal `.chunkhound.json` met de sectie `c4`, niet gevolgd door Git. Controleer met `select_scope_files` zonder provider dat `docs/melly/**` en `.superpowers/**` wegvallen.
+- [x] **Step 1:** `docs/melly/specs/2026-10-27-map-structuuranalyse-design.md` r. 26, 50, 61, 83, 97, 120, 146–147, 153; `docs/melly/models/map-structuuranalyse.md` r. 269; AutoDoc-spec r. 23, 25 en een nieuwe rij in het AutoDoc-besluitenlog; `site/src/pages/docs/cli-reference.md:356–358`; `site/src/pages/docs/changelog.md:25`; `CHANGELOG.md`.
+- [x] **Step 2:** Lokaal `.chunkhound.json` met de sectie `c4`, niet gevolgd door Git. Controleer met `select_scope_files` zonder provider dat `docs/melly/**` en `.superpowers/**` wegvallen.
 - [ ] **Step 3:** Ruff op de gewijzigde bestanden, mypy, smoke tests, en de volledige suite met de `TMPDIR`-regel. Vergelijk fouten met de nulmeting en draai elke nieuwe fout los.
 - [ ] **Step 4:** Rapporteer aan de gebruiker. De acceptatie met provider uit spec §15 vraagt aparte goedkeuring en een verwijderd lockbestand. Niet zelf uitvoeren.
 

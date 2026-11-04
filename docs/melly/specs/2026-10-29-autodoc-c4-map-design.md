@@ -20,9 +20,9 @@ De uitvoering sluit aan op de afzonderlijk goedgekeurde Astro 7.4.2/Vite 8.3.5-u
 
 Zie [model §1: begrippen, regels en voorbeelden](../models/autodoc-c4-map.md#1-domeinmodel). De lokale regels R1–R11 verwijzen naar het besluitenlog, niet naar dossier-id's.
 
-Eén geïndexeerde root/scope levert één softwaresysteem, eventueel met meerdere geneste repositories. Aangetroffen containers en componenten hebben expliciete implementatiebestanden; een bestand hoort bij hoogstens één component en gedeelde code mag rechtstreeks bij een container horen. Personen en externe systemen vereisen eveneens onderbouwing. Een component is het diepste getekende niveau, niet automatisch een directory.
+Eén geïndexeerde root/scope levert één softwaresysteem, eventueel met meerdere geneste repositories. Aangetroffen componenten hebben expliciete implementatiebestanden. Een aangetroffen container heeft alleen zijn directe bestanden in `files`, dus die lijst mag leeg zijn: bij opslag en bij een container waarin alles in componenten zit ([O-MAP deel A §12, punt 8](2026-11-03-omap-producent-design.md#12-afwijkingen-en-punten-ter-bevestiging)). Een bestand hoort bij hoogstens één component en gedeelde code mag rechtstreeks bij een container horen. Personen en externe systemen vereisen eveneens onderbouwing. Een component is het diepste getekende niveau, niet automatisch een directory.
 
-Code of configuratie als bron geeft status `aangetroffen`; uitsluitend documentatie geeft `gedocumenteerd`. Alleen gedocumenteerde interne onderdelen mogen zonder implementatiebestanden bestaan, maar hebben geen directe topicdekking. Topicdekking is bestandsoverlap, geen architectuurrelatie. Samengevoegde pijlen houden alle onderliggende relaties met hun afzonderlijke bronnen en status; zij krijgen geen eigen status.
+Code of configuratie als bron geeft status `aangetroffen`; uitsluitend documentatie geeft `gedocumenteerd`. Gedocumenteerde interne onderdelen mogen zonder implementatiebestanden bestaan; een aangetroffen container zonder directe bestanden blijft onderbouwd door zijn bronnen. Beide hebben geen directe topicdekking. Topicdekking is bestandsoverlap, geen architectuurrelatie. Samengevoegde pijlen houden alle onderliggende relaties met hun afzonderlijke bronnen en status; zij krijgen geen eigen status.
 
 Open issues, gelijk aan model §1:
 

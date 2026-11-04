@@ -266,6 +266,6 @@ sequenceDiagram
   CLI->>C4: identity, topic_coverage, summaries
   C4->>C4: vergelijk invoervingerafdruk; hergebruik laatste succesvolle history/renames indien gelijk
   C4->>LLM: summaries (alleen nieuwe labels)
-  CLI->>W: Markdown, _c4_model.json + _c4_evidence.json (samen)
+  CLI->>W: Markdown, _c4_map_model.json + _c4_map_evidence.json (samen), daarna _c4_model.json (contract, alleen volledige run)
   CLI->>Lock: os.replace na volledige run met exitcode 0; terugvalitems weggelaten
 ```
