@@ -23,7 +23,7 @@ Deel A levert een werkende kaart met echte componenten. **Containers blijven per
 **Invarianten**
 1. Het contract laadt in `ModelLoader` zonder één waarschuwing.
 2. Het contract bevat geen gegeven dat niet uit het interne paar of de maprun volgt. Er wordt niets verzonnen.
-3. Het interne paar blijft volledig. Weglaten geldt alleen voor het contract, en elke weglating wordt geteld.
+3. Het interne paar blijft volledig. Weglaten geldt alleen voor het contract, en elke weglating wordt geteld. Uitzondering: `drop` en `merge` uit het lockbestand (§20) halen elementen, relaties en hun citaten bewust ook uit het interne paar; de referenties zelf blijven staan.
 4. Met `--no-c4` blijft de uitvoer byte-gelijk.
 5. Een tweede volledige run op dezelfde bestanden doet geen merge-aanroep, ook als `--out` in de repository staat. Zijn research en topics gelijk gebleven en was de eerste run schoon, dan is het contract ook byte-gelijk. Elke volledige run doet wel opnieuw research, dus topics kunnen verschillen.
 
@@ -771,31 +771,44 @@ Voorbeeld in de scope van `.chunkhound/map.lock.json`:
 
 - **Schema:** `map_lock.schema.json` wordt opnieuw gemaakt met `scripts/generate_c4_schemas.py`; `test_shipped_schema_matches_model` bewaakt dat.
 - **Lockversie blijft 5.** Een bestaand lockbestand blijft geldig; niets hoeft te worden verwijderd of opnieuw geclassificeerd. Een oudere ChunkHound weigert een lockbestand met `drop` of `merge`, omdat het schema geen extra velden toestaat; dat is aanvaard, want het is een nieuwe functie.
-- **Herspelen:** de invoervingerafdruk bevat `overrides.model_dump()` (`pipeline.py:576`). Door de twee nieuwe velden verandert die één keer en wordt de laatste overgang niet hergebruikt. Dat kost geen aanroep; alleen de geschiedenis van id-wijzigingen wordt opnieuw bepaald. Een latere wijziging van `drop` of `merge` werkt op dezelfde manier.
+- **Herspelen:** de invoervingerafdruk bevat `overrides.model_dump()` (`pipeline.py:576`). Door de twee nieuwe velden verandert die één keer en wordt de laatste overgang niet hergebruikt. Het ongeldig worden van de vingerafdruk zelf kost geen aanroep; alleen de geschiedenis van id-wijzigingen wordt opnieuw bepaald. Een latere wijziging van `drop` of `merge` maakt de vingerafdruk ook ongeldig, en kan daarnaast titels voor nieuwe relaties en nieuwe samenvattende labels vragen. Een volgende run met ongewijzigde invoer hergebruikt alles.
 - **Bewaren:** `write_scope_lock` neemt `overrides` ongewijzigd over (`lockfile.py:58`); een run schrijft `drop` en `merge` nooit zelf.
 - **Naast `classifications`:** die blijft de route om een kandidaat uit de code als `library` te classificeren. Voor een extern systeem uit de code werken beide; `drop` werkt op het element, `classifications` op de kandidaat.
 
 ### 20.2 Nabewerking
 
-Nieuwe module `chunkhound/code_mapper/c4/curation.py` met één pure functie. Ze draait in de assemblage, na `documented_relations()` en vóór de overrides `names`, `descriptions` en `titles` (`assemble.py:450-459`). Ze krijgt de elementen, relaties, citaten, referenties, bestanden per element, `inp.titles` en de overrides, en geeft hetzelfde terug plus de overgeslagen vermeldingen. De code die de kaart opbouwt, verandert niet.
+Nieuwe module `chunkhound/code_mapper/c4/curation.py` met één pure functie. Ze draait in de assemblage, na `documented_relations()` en vóór de overrides `names`, `descriptions` en `titles` (`assemble.py:450-459`), en dus vóór het ontdubbelen van citaten (`assemble.py:460`). Ze krijgt de elementen, relaties, citaten, referenties, bestanden per element, `inp.titles` en de overrides, en geeft hetzelfde terug plus de overgeslagen vermeldingen. De code die de kaart opbouwt, verandert niet. Het resultaat hangt niet af van de volgorde van de vermeldingen in het lockbestand.
 
-1. **Toetsen (R16).** Een vermelding wordt overgeslagen, met een reden, als:
+1. **Toetsen (R16)** tegen de kaart zoals de assemblage die opleverde, in twee rondes.
+
+   Eerst per vermelding. Overgeslagen, met een reden, als:
    - het id niet op de kaart staat;
    - het element geen extern systeem of persoon is;
    - bij `merge`: bron en doel van een andere soort zijn, of hetzelfde element;
-   - het id ook in `drop` staat (`drop` gaat voor);
-   - het doel van een `merge` zelf de bron van een andere `merge` is (keten: bij `a -> b` en `b -> c` wordt alleen `b -> c` uitgevoerd).
+   - bij `merge`: bron of doel ook in `drop` staat (`drop` gaat voor).
 
-   Daarna rekent de nabewerking alleen met geldige vermeldingen.
+   Daarna, alleen tussen de `merge`-vermeldingen die de eerste ronde doorstaan: overgeslagen als het doel zelf de bron van zo'n vermelding is. Bij `a -> b` en `b -> c` wordt alleen `b -> c` uitgevoerd; bij een kring (`a -> b`, `b -> a`) geen van beide. Een vermelding die al in de eerste ronde afvalt, telt hier niet mee: bij `a -> b` en `b -> onbekend` wordt `a -> b` uitgevoerd.
 
-2. **`drop` (R13).** Het element verdwijnt, en elke relatie die het raakt ook. Citaten die naar het element of naar zo'n relatie wijzen, verdwijnen uit het bewijs, net als zijn bestanden per element. Een codereferentie, zoals een import van `httpx`, blijft als feit in het bewijs, maar zonder relatie, zoals nu bij een bibliotheek (`assemble.py:279-295`). Een documentrelatie naar een weggehaald element telt niet als niet-gekoppeld; ze verdwijnt met het element.
+   Dubbele id's in `drop` tellen één keer. De geldige vermeldingen worden tegelijk toegepast. Rapportregels staan gesorteerd: eerst `drop`, dan `merge`, elk op bron-id.
+
+2. **`drop` (R13).**
+   - Het element verdwijnt, en elke relatie die het raakt ook.
+   - Citaten met het element of zo'n relatie als `target` verdwijnen, net als de sleutel van het element in de bestanden per element.
+   - Een referentie blijft als feit in het bewijs, met ongewijzigd `to`; alleen `relation` wordt leeg als die relatie verdween. Zo staat nu ook een bibliotheek in het bewijs (`assemble.py:279-295`).
+   - Een documentrelatie naar een weggehaald element verdwijnt met het element en telt niet als niet-gekoppeld. De tellingen van niet-gekoppelde documentrelaties uit de assemblage blijven ongewijzigd; de nabewerking voegt er niets aan toe.
 3. **`merge` (R14).**
-   - Citaten, referenties, bestanden en relaties van de bron gaan naar het doel. Het id van een relatie wordt `<van>-><naar>` met het doel-id.
-   - Een relatie die daardoor naar zichzelf wijst, vervalt met haar citaten.
-   - Relaties die daardoor hetzelfde id krijgen, vallen samen: status `found` als één ervan `found` was, `reference_counts` opgeteld, markeringen samengevoegd.
-   - Titel van de samengevoegde relatie: met codereferenties uit `titles` op de nieuwe vingerafdruk, anders `fallback_title`; een relatie die alleen uit documentatie komt, houdt de titel van de relatie die al naar het doel wees, en anders de eerste op bron-id.
+   - Relaties van de bron gaan naar het doel. Het id van een relatie wordt `<van>-><naar>` met het doel-id.
+   - Citaten: `target` gelijk aan het bron-id wordt het doel-id; `target` gelijk aan een omgezette relatie wordt het nieuwe relatie-id.
+   - Referenties: `to` blijft het oorspronkelijke pakket of bestand; alleen `relation` krijgt het nieuwe relatie-id. Zo rekent `_fingerprints` (`pipeline.py:440-451`) in beide `assemble()`-rondes van `_titles` met dezelfde gegevens.
+   - Bestanden per element: die van de bron komen gesorteerd en zonder dubbelen bij het doel; de sleutel van de bron verdwijnt.
+   - Een relatie die daardoor naar zichzelf wijst, vervalt; haar citaten verdwijnen en haar referenties krijgen een lege `relation`.
+   - Relaties die daardoor hetzelfde id krijgen, vallen samen: status `found` als één ervan `found` was, `reference_counts` opgeteld, markeringen samengevoegd en gesorteerd.
+   - Titel van de samengevoegde relatie: met codereferenties uit `titles` op de nieuwe vingerafdruk, anders `fallback_title`. Een relatie zonder codereferenties houdt de titel van de relatie die al dit id had, en anders die van de oorspronkelijke relatie met het kleinste id.
    - Het doel houdt zijn naam, omschrijving en id; de markeringen van de bron, zoals `fallback`, komen erbij.
+   - Bron en doel mogen elk uit de code of uit de documentatie komen.
 4. **Status opnieuw bepalen:** `found` met een citaat uit code of configuratie, anders `documented` (dezelfde regel als `statuses()`, `assemble.py:369-374`).
+
+Het contract volgt daarna de bestaande regels: een element dat na `drop` geen relatie meer heeft, valt weg en wordt geteld (§17.2), en een samengevoegde relatie kan als dubbele directe relatie van de kaart gaan (`relations_off_the_map`, `model.py:188-222`).
 
 **Titelstap.** `_pending_titles` werkt op het resultaat (`pipeline.py:462-497`). Een samengevoegde relatie met codereferenties krijgt een nieuwe vingerafdruk, haalt haar titel uit het lockbestand of vraagt er één keer om; de tweede `assemble()`-ronde in `_titles` (`pipeline.py:500-524`) vindt die titel via dezelfde vingerafdruk.
 
@@ -816,7 +829,7 @@ excluded even when the text says what it does.
 
 - De eerste twee zinnen zijn R15a, de zin over voorbeelden R15b, de laatste zin R15c. De tabelregel (regel 35-36) blijft: concrete providers uit een tabel blijven elk een element.
 - `c4_classify.md` verandert niet; "A general HTTP client or parser that names no service stays library" (regel 11-12) dekt `httpx` als kandidaat uit de code al.
-- **Versie:** de stapversie is een hash over instructies, schema en `_VALIDATOR_VERSION` (`documented.py:297-300`), dus de gewijzigde prompt geeft vanzelf een nieuwe versie. `_VALIDATOR_VERSION` blijft 3. Samen met de regel voor hele woorden (§19.3) roept de volgende run de documentstap één keer opnieuw aan, ongeveer 3 aanroepen.
+- **Versie:** de stapversie is een hash over instructies, schema en `_VALIDATOR_VERSION` (`documented.py:297-300`), dus de gewijzigde prompt geeft vanzelf een nieuwe versie. `_VALIDATOR_VERSION` blijft 3. Samen met de regel voor hele woorden (§19.3) roept de volgende run de documentstap één keer opnieuw aan, naar schatting 3 aanroepen; bundeling en fouten kunnen dat aantal veranderen.
 - De tekst van de prompt krijgt geen test; de werking blijkt uit §20.6.
 
 ### 20.4 Rapport en fouten
@@ -840,13 +853,14 @@ excluded even when the text says what it does.
 
 ### 20.5 Testen
 
-Contracttests op de bestaande routes:
+Contracttests op de bestaande routes, via de publieke uitvoer (kaartmodel, bewijs, contract, rapport), niet via hulpfuncties:
 
-1. `test_assemble.py`: na `drop` staat het element niet in elementen, relaties of citaten; een codereferentie ernaar blijft in het bewijs zonder relatie.
-2. `test_assemble.py`: een bron uit de code (`found`) samengevoegd met een doel uit de documentatie (`documented`) geeft een `found` doel met zijn eigen naam en één relatie met opgetelde `reference_counts`; een relatie die naar zichzelf zou wijzen, vervalt; een `names`-override voor de bron heeft geen effect.
-3. `test_assemble.py`: elk geval van R16 geeft de verwachte uitkomst en reden in `AssemblyNotes.ignored_overrides`: onbekend id, container, verschillende soorten, keten (alleen `b -> c`) en `drop` vóór `merge`.
-4. `test_pipeline.py`: een volledige run met de bestaande fixture; een samengevoegd element staat niet in het contract, de samengevoegde relatie krijgt een titel uit de titelstap, de regel `C4-overrides: …` verschijnt, en een tweede run met dezelfde invoer doet geen extra aanroep.
-5. `test_lockfile.py`: `drop` en `merge` overleven het opnieuw schrijven, als uitbreiding van `test_override_section_is_never_rewritten`.
+1. `test_assemble.py`: na `drop` staat het element niet in elementen, relaties of citaten; een codereferentie ernaar blijft in het bewijs met haar oorspronkelijke `to` en zonder relatie.
+2. `test_assemble.py`, voor een extern systeem uit de code met een doel uit de documentatie en voor twee personen uit de documentatie: het doel wordt `found` als de bron een codecitaat had en houdt zijn naam; relaties vallen samen met opgetelde `reference_counts` en samengevoegde markeringen; een relatie zonder codereferenties houdt de titel volgens §20.2; een relatie die naar zichzelf zou wijzen, vervalt; een `names`-override voor de bron heeft geen effect.
+3. `test_assemble.py`: elk geval van R16 geeft de verwachte uitkomst en reden in `AssemblyNotes.ignored_overrides`: onbekend id, container, verschillende soorten, keten (alleen `b -> c`), kring, `a -> b` naast `b -> onbekend`, en `drop` vóór `merge`. Een andere volgorde van dezelfde vermeldingen geeft dezelfde uitvoer.
+4. `test_pipeline.py`: een volledige run met de bestaande fixture. Het samengevoegde element staat niet in het contract; de omgezette relatie staat erin met haar bronnen; ze krijgt een titel uit de titelstap; de regel `C4-overrides: …` verschijnt; een tweede run met dezelfde invoer doet geen aanroep en hergebruikt de titel.
+5. `test_pipeline.py`: een proefrun met dezelfde overrides toont de rapportregels, doet geen aanroep en laat het lockbestand ongewijzigd.
+6. `test_lockfile.py`: `drop` en `merge` overleven het opnieuw schrijven (uitbreiding van `test_override_section_is_never_rewritten`); `drop` als tekst geeft een fout bij het laden.
 
 ### 20.6 Run en acceptatie
 
@@ -864,6 +878,6 @@ Run 5 vraagt aparte goedkeuring. Controles:
 
 - **Automatisch samenvoegen** via de classificatie: verandert het uitvoerformaat en de opgeslagen classificaties, en hangt weer van het model af.
 - **Een lijst met namen** (§18.5): blijft uitgesloten.
-- **`drop` of `merge` voor containers, opslag en componenten:** daarvoor bestaat `overrides.placements`.
+- **`drop` of `merge` voor containers, opslag en componenten:** buiten deze stap. `overrides.placements` corrigeert alleen de plaatsing van groepen.
 - **De weergave van ongeveer 20 providers** in het contextdiagram: een open punt voor AutoDoc/LikeC4, niet voor het model.
 - **Zes externe systemen met dezelfde omschrijving, misleidende componentnamen, deel B en de volledige testsuite:** buiten deze stap.

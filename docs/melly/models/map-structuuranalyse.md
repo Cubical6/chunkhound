@@ -64,7 +64,7 @@ classDiagram
 | R4 | Id = soort + genormaliseerde letterlijke term; een _gedocumenteerd_ element houdt zijn id als het _aangetroffen_ wordt | "Ontwikkelaar met AI-assistent" (`README.md:60`) → `persoon:ontwikkelaar-met-ai-assistent` (rij 4) |
 | R5 | Containers volgen runtime-grenzen; sjablonen tellen niet | `pyproject.toml` → `container:chunkhound`; `chunkhound/autodoc/assets/package.json` (`{{PACKAGE_NAME}}`) → geen container (rij 5) |
 | R6 | Een nieuwe dependency krijgt haar soort uit 3 stemmen: 3–0 soort; 2–1 meerderheid + _omstreden_; 1–1–1 bibliotheek + gemarkeerd | `pyarrow` → bibliotheek, _omstreden (1× opslagdriver)_ (rij 12) |
-| R7 | Elke statische verwijzing en elk citaat staat onafgekapt in het bewijs | 12 imports + 9 citaten → 21 regels in het bewijs (rij 8) |
+| R7 | Elke statische verwijzing en elk citaat staat onafgekapt in het bewijs; alleen `drop` en `merge` (R13, R14) halen citaten van weggehaalde elementen en relaties bewust weg, de verwijzingen blijven | 12 imports + 9 citaten → 21 regels in het bewijs (rij 8) |
 | R8 | Type-only en ongebruikte (niet-re-export) imports geven geen pijl | `service.py:30-31` onder `TYPE_CHECKING` → geen pijl; `core/git_diff/__init__.py:1` re-export → telt (rij 7, 11) |
 | R9 | Status _aangetroffen_ zodra ≥1 bron code of configuratie is, anders _gedocumenteerd_ | Embedding met `voyageai_provider.py` + `README.md` → _aangetroffen_ (C4-log rij 29) |
 | R10 | Een documentatiecitaat telt alleen als het letterlijk op het opgegeven bestand:regel staat | Citaat "Webdashboard" dat niet op `README.md:60` staat → afgekeurd (rij 34) |
