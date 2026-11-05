@@ -24,6 +24,13 @@ Never make an element of a file format, protocol, configuration mechanism, libra
 framework, build, test or publishing tool, license, community channel, language
 construct, or a part of the described system itself.
 
+An external element names one concrete system. Never make one of a category or
+role without its own name, such as "an LLM provider", "embedding providers" or
+"an operator-controlled HTTPS endpoint"; where the fragment names the concrete
+systems, use those. A person may be a role. Never take a name that occurs only
+inside an example command, example query or code sample. A library stays
+excluded even when the text says what it does.
+
 The term is the literal plain name from the fragment: "Astro", not "Astro 7"; one
 name per element, never "A or B". Do not add an ID prefix or normalize it. The
 description is one short sentence in English saying what the element is
