@@ -808,7 +808,7 @@ Nieuwe module `chunkhound/code_mapper/c4/curation.py` met één pure functie. Ze
    - Bron en doel mogen elk uit de code of uit de documentatie komen.
 4. **Status opnieuw bepalen:** `found` met een citaat uit code of configuratie, anders `documented` (dezelfde regel als `statuses()`, `assemble.py:369-374`).
 
-Het contract volgt daarna de bestaande regels: een element dat na `drop` geen relatie meer heeft, valt weg en wordt geteld (§17.2), en een samengevoegde relatie kan als dubbele directe relatie van de kaart gaan (`relations_off_the_map`, `model.py:188-222`).
+Het contract volgt daarna de bestaande regels: een extern systeem of persoon dat na `drop` of `merge` geen relatie met het systeem meer heeft, valt weg en wordt geteld (§17.2), en een samengevoegde relatie kan als dubbele directe relatie van de kaart gaan (`relations_off_the_map`, `model.py:188-222`).
 
 **Titelstap.** `_pending_titles` werkt op het resultaat (`pipeline.py:462-497`). Een samengevoegde relatie met codereferenties krijgt een nieuwe vingerafdruk, haalt haar titel uit het lockbestand of vraagt er één keer om; de tweede `assemble()`-ronde in `_titles` (`pipeline.py:500-524`) vindt die titel via dezelfde vingerafdruk.
 
@@ -856,11 +856,11 @@ excluded even when the text says what it does.
 Contracttests op de bestaande routes, via de publieke uitvoer (kaartmodel, bewijs, contract, rapport), niet via hulpfuncties:
 
 1. `test_assemble.py`: na `drop` staat het element niet in elementen, relaties of citaten; een codereferentie ernaar blijft in het bewijs met haar oorspronkelijke `to` en zonder relatie.
-2. `test_assemble.py`, voor een extern systeem uit de code met een doel uit de documentatie en voor twee personen uit de documentatie: het doel wordt `found` als de bron een codecitaat had en houdt zijn naam; relaties vallen samen met opgetelde `reference_counts` en samengevoegde markeringen; een relatie zonder codereferenties houdt de titel volgens §20.2; een relatie die naar zichzelf zou wijzen, vervalt; een `names`-override voor de bron heeft geen effect.
+2. `test_assemble.py`, voor een extern systeem uit de code met een doel uit de documentatie, voor een bron uit de documentatie met een doel uit de code, en voor twee personen uit de documentatie: het doel wordt `found` als bron of doel een codecitaat had en houdt zijn naam; relaties vallen samen met opgetelde `reference_counts` en samengevoegde markeringen; een relatie zonder codereferenties houdt de titel volgens §20.2; een relatie die naar zichzelf zou wijzen, vervalt; een `names`-override voor de bron heeft geen effect.
 3. `test_assemble.py`: elk geval van R16 geeft de verwachte uitkomst en reden in `AssemblyNotes.ignored_overrides`: onbekend id, container, verschillende soorten, keten (alleen `b -> c`), kring, `a -> b` naast `b -> onbekend`, en `drop` vóór `merge`. Een andere volgorde van dezelfde vermeldingen geeft dezelfde uitvoer.
-4. `test_pipeline.py`: een volledige run met de bestaande fixture. Het samengevoegde element staat niet in het contract; de omgezette relatie staat erin met haar bronnen; ze krijgt een titel uit de titelstap; de regel `C4-overrides: …` verschijnt; een tweede run met dezelfde invoer doet geen aanroep en hergebruikt de titel.
-5. `test_pipeline.py`: een proefrun met dezelfde overrides toont de rapportregels, doet geen aanroep en laat het lockbestand ongewijzigd.
-6. `test_lockfile.py`: `drop` en `merge` overleven het opnieuw schrijven (uitbreiding van `test_override_section_is_never_rewritten`); `drop` als tekst geeft een fout bij het laden.
+4. `test_pipeline.py`: een volledige run met de bestaande fixture. Het samengevoegde element staat niet in het contract; de omgezette relatie staat erin met haar bronnen; ze krijgt een titel uit de titelstap; een persoon die door `drop` zijn enige relatie verliest, staat niet in het contract en wel in `persons_without_relation`; een samengevoegde relatie die een bestaande directe relatie dubbelt, telt in `redundant_direct_relations`; de regel `C4-overrides: …` verschijnt; een tweede run met dezelfde invoer doet geen aanroep en hergebruikt de titel.
+5. `test_pipeline.py`: een proefrun met dezelfde overrides toont de rapportregels, doet geen aanroep, schrijft geen contract en laat het lockbestand ongewijzigd.
+6. `test_lockfile.py`: `drop` en `merge` overleven het opnieuw schrijven (uitbreiding van `test_override_section_is_never_rewritten`); `drop` als tekst en een `merge`-waarde die geen tekst is, geven elk een fout bij het laden.
 
 ### 20.6 Run en acceptatie
 
@@ -869,7 +869,7 @@ Run 5 vraagt aparte goedkeuring. Controles:
 1. geen element voor een algemene categorie (`llm`, `llm-provider`, `embedding`, `embedding-provider(s)`), voor `stripe` of voor `operator-controlled-https-endpoint`; wel `duckduckgo` als de documenten die dienst noemen;
 2. geen `httpx` uit de documentatie;
 3. concrete providers uit de tabel staan er nog, met een relatie (§18.5, controle 3);
-4. wat toch doorkomt, gaat als voorstel voor `drop`/`merge` in het lockbestand; na een tweede run klopt de kaart, zonder extra aanroep behalve voor nieuwe titels;
+4. wat toch doorkomt, gaat als voorstel voor `drop`/`merge` in het lockbestand; na een tweede run klopt de kaart, zonder extra aanroep behalve voor titels en samenvattende labels die nog niet in het lockbestand staan;
 5. `ModelLoader` en de LikeC4-build zonder waarschuwing.
 
 **Onzeker:** R15 verkleint de ruis maar haalt die niet gegarandeerd weg; R13 en R14 vangen de rest op. Samenvoegen gebeurt niet automatisch: `ai-agent`/`ai-assistant` en `operator`/`operators` ruim je met `merge` op.
