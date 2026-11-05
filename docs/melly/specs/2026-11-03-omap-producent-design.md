@@ -1,7 +1,7 @@
 # Spec deel A: `map` levert een C4-kaart voor AutoDoc (O-MAP)
 
 - Datum: 2026-11-04 · Branch: `c4/shared-extraction-layer` (HEAD bij start `cfb59235`)
-- **Status:** goedgekeurd op 2026-11-04, inclusief de punten uit §12 en de wijzigingen in §3.1 en §16 na de planreview; plan goedgekeurd; geen providerrun goedgekeurd. §17 goedgekeurd op 2026-11-04, inclusief één providerrun en de eenmalige ingreep in het lockbestand. §18 goedgekeurd op 2026-11-04, inclusief één providerrun. §20: ontwerpsecties goedgekeurd op 2026-11-05; spec-review en goedkeuring van de spec volgen; geen providerrun goedgekeurd
+- **Status:** goedgekeurd op 2026-11-04, inclusief de punten uit §12 en de wijzigingen in §3.1 en §16 na de planreview; plan goedgekeurd; geen providerrun goedgekeurd. §17 goedgekeurd op 2026-11-04, inclusief één providerrun en de eenmalige ingreep in het lockbestand. §18 goedgekeurd op 2026-11-04, inclusief één providerrun. §20 goedgekeurd op 2026-11-05 na spec-review; plan volgt; geen providerrun goedgekeurd
 - Besluitenlog: [2026-10-27-map-structuuranalyse.md](../decisions/2026-10-27-map-structuuranalyse.md), de rijen "O-MAP", "Bronselectie", "Groepsindeling", "C4-toets" en "Bouwstenen en reikwijdte" (hieronder "besluit: …")
 - Consument: [AutoDoc-spec](2026-10-29-autodoc-c4-map-design.md) en `chunkhound/autodoc/architecture/`
 - Vervolg: [deel B, containers per proces](2026-11-04-c4-processen-design.md)
