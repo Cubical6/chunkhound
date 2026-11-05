@@ -1,7 +1,7 @@
 # Spec deel A: `map` levert een C4-kaart voor AutoDoc (O-MAP)
 
 - Datum: 2026-11-04 · Branch: `c4/shared-extraction-layer` (HEAD bij start `cfb59235`)
-- **Status:** goedgekeurd op 2026-11-04, inclusief de punten uit §12 en de wijzigingen in §3.1 en §16 na de planreview; plan goedgekeurd; geen providerrun goedgekeurd. §17 goedgekeurd op 2026-11-04, inclusief één providerrun en de eenmalige ingreep in het lockbestand. §18 goedgekeurd op 2026-11-04, inclusief één providerrun
+- **Status:** goedgekeurd op 2026-11-04, inclusief de punten uit §12 en de wijzigingen in §3.1 en §16 na de planreview; plan goedgekeurd; geen providerrun goedgekeurd. §17 goedgekeurd op 2026-11-04, inclusief één providerrun en de eenmalige ingreep in het lockbestand. §18 goedgekeurd op 2026-11-04, inclusief één providerrun. §20: ontwerpsecties goedgekeurd op 2026-11-05; spec-review en goedkeuring van de spec volgen; geen providerrun goedgekeurd
 - Besluitenlog: [2026-10-27-map-structuuranalyse.md](../decisions/2026-10-27-map-structuuranalyse.md), de rijen "O-MAP", "Bronselectie", "Groepsindeling", "C4-toets" en "Bouwstenen en reikwijdte" (hieronder "besluit: …")
 - Consument: [AutoDoc-spec](2026-10-29-autodoc-c4-map-design.md) en `chunkhound/autodoc/architecture/`
 - Vervolg: [deel B, containers per proces](2026-11-04-c4-processen-design.md)
@@ -723,3 +723,147 @@ Bestaande contracttests volgen de nieuwe prefixen, statussen en teksten. Nieuw:
 
 - **Taalcontrole:** zie §19.3.
 - **Personen samenvoegen, componentnamen en -indeling, deel B:** ongewijzigd (punten 3 tot en met 5 van de review van run 3).
+
+## 20. Ruis onder externe systemen en personen
+
+**Aanleiding.** Run 4 (`.scratch/omap-a4/map`, besluit rij 153) levert 33 externe systemen. Een deel daarvan is geen concreet systeem:
+
+| Soort ruis                                | Elementen                                                                       | Bron                                                                                                    |
+| ----------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Bibliotheek uit de documentatie           | `httpx`                                                                         | `site/src/pages/docs/configuration.md:307-314`, "per-phase `httpx` timeout"                             |
+| Algemene categorie, geen concreet systeem | `llm`, `llm-provider`, `embedding`, `embedding-provider`, `embedding-providers` | o.a. `operations/README.md:26-28`, `README.md:148-155`, `chunkhound/providers/embeddings/README.md:1-3` |
+| Voorbeeldtekst, geen afhankelijkheid      | `stripe`                                                                        | `README.md:117-123`, `chunkhound websearch "Stripe webhook retry schedule"`                             |
+| Importnaam van een SDK naast de dienst    | `google` (`found`) naast `gemini` (`documented`)                                | `chunkhound/providers/llm/gemini_llm_provider.py:20-21`, `configuration.md:502`                         |
+| Rol als extern systeem                    | `operator-controlled-https-endpoint`                                            | documentatie                                                                                            |
+
+Daarnaast staan dezelfde rol of hetzelfde systeem soms twee keer op de kaart: `operator`/`operators`, `ai-agent`/`ai-assistant`.
+
+De bestaande uitweg is beperkt. `overrides.classifications` werkt alleen op de sleutel van een kandidaat uit de code (`classify.py:76`). Voor een element uit de documentatie kun je alleen de naam of omschrijving overschrijven (`assemble.py:452-455`). §18.5 sloot een lijst met namen uit en noemde `overrides` de uitweg; die uitweg bestaat voor documentelementen dus nog niet. De gebruiker kiest: de prompt aanscherpen én een override om een element weg te halen of samen te voegen; beide alleen voor externe systemen en personen; een categorieregel alleen voor externe systemen (personen mogen een rol zijn); en de nabewerking als aparte stap na de assemblage.
+
+**Regels.** In het modelbestand staan al R1-R12, dus de nieuwe regels heten daar R13-R16 (in het ontwerpgesprek R7-R10):
+
+| #    | Regel                                                                                                                                                                                                                      | Voorbeeld → verwachte uitkomst                                                                                                                         |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R13  | `drop` haalt een extern systeem of persoon weg uit kaartmodel, bewijs en contract, met alle relaties die het raakt                                                                                                         | `"drop": ["external:httpx"]` → geen `external:httpx`, geen relatie `chunkhound -> httpx`; de run slaagt                                                |
+| R14  | `merge` voegt een extern systeem of persoon samen met een doel van dezelfde soort. Het doel houdt naam, omschrijving en id; citaten en relaties gaan mee, dubbele relaties vallen samen en de status wordt opnieuw bepaald | `"merge": {"external:google": "external:gemini"}` → alleen `external:gemini`, status `found`, met het citaat uit `gemini_llm_provider.py:20`           |
+| R15a | Een extern systeem is nooit een categorie of rol zonder eigen naam; personen mogen een rol zijn                                                                                                                            | "requires an embedding provider" → geen `embedding-provider`; `operator` als persoon blijft                                                            |
+| R15b | Geen naam die alleen in een voorbeeldcommando, voorbeeldvraag of voorbeeldcode staat                                                                                                                                       | `chunkhound websearch "Stripe webhook retry schedule"` → geen `stripe`. Tegenvoorbeeld: "DuckDuckGo provides web search results" → `duckduckgo` blijft |
+| R15c | Een bibliotheek blijft verboden, ook als de tekst terloops vertelt wat ze doet                                                                                                                                             | "per-phase `httpx` timeout" → geen `httpx`                                                                                                             |
+| R16  | Een ongeldige `drop` of `merge` wordt overgeslagen met een rapportregel en de run gaat door; een fout in de structuur is een fout bij het laden van het lockbestand; `drop` gaat voor `merge`                              | zie §20.4                                                                                                                                              |
+
+### 20.1 Lockbestand
+
+`Overrides` (`model.py:153-159`) krijgt twee velden, beide standaard leeg:
+
+```python
+drop: list[str] = Field(default_factory=list)        # element-ids
+merge: dict[str, str] = Field(default_factory=dict)  # bron-id -> doel-id
+```
+
+Voorbeeld in de scope van `.chunkhound/map.lock.json`:
+
+```json
+"overrides": {
+  "drop": ["external:httpx"],
+  "merge": {"external:google": "external:gemini", "person:operators": "person:operator"}
+}
+```
+
+- **Schema:** `map_lock.schema.json` wordt opnieuw gemaakt met `scripts/generate_c4_schemas.py`; `test_shipped_schema_matches_model` bewaakt dat.
+- **Lockversie blijft 5.** Een bestaand lockbestand blijft geldig; niets hoeft te worden verwijderd of opnieuw geclassificeerd. Een oudere ChunkHound weigert een lockbestand met `drop` of `merge`, omdat het schema geen extra velden toestaat; dat is aanvaard, want het is een nieuwe functie.
+- **Herspelen:** de invoervingerafdruk bevat `overrides.model_dump()` (`pipeline.py:576`). Door de twee nieuwe velden verandert die één keer en wordt de laatste overgang niet hergebruikt. Dat kost geen aanroep; alleen de geschiedenis van id-wijzigingen wordt opnieuw bepaald. Een latere wijziging van `drop` of `merge` werkt op dezelfde manier.
+- **Bewaren:** `write_scope_lock` neemt `overrides` ongewijzigd over (`lockfile.py:58`); een run schrijft `drop` en `merge` nooit zelf.
+- **Naast `classifications`:** die blijft de route om een kandidaat uit de code als `library` te classificeren. Voor een extern systeem uit de code werken beide; `drop` werkt op het element, `classifications` op de kandidaat.
+
+### 20.2 Nabewerking
+
+Nieuwe module `chunkhound/code_mapper/c4/curation.py` met één pure functie. Ze draait in de assemblage, na `documented_relations()` en vóór de overrides `names`, `descriptions` en `titles` (`assemble.py:450-459`). Ze krijgt de elementen, relaties, citaten, referenties, bestanden per element, `inp.titles` en de overrides, en geeft hetzelfde terug plus de overgeslagen vermeldingen. De code die de kaart opbouwt, verandert niet.
+
+1. **Toetsen (R16).** Een vermelding wordt overgeslagen, met een reden, als:
+   - het id niet op de kaart staat;
+   - het element geen extern systeem of persoon is;
+   - bij `merge`: bron en doel van een andere soort zijn, of hetzelfde element;
+   - het id ook in `drop` staat (`drop` gaat voor);
+   - het doel van een `merge` zelf de bron van een andere `merge` is (keten: bij `a -> b` en `b -> c` wordt alleen `b -> c` uitgevoerd).
+
+   Daarna rekent de nabewerking alleen met geldige vermeldingen.
+
+2. **`drop` (R13).** Het element verdwijnt, en elke relatie die het raakt ook. Citaten die naar het element of naar zo'n relatie wijzen, verdwijnen uit het bewijs, net als zijn bestanden per element. Een codereferentie, zoals een import van `httpx`, blijft als feit in het bewijs, maar zonder relatie, zoals nu bij een bibliotheek (`assemble.py:279-295`). Een documentrelatie naar een weggehaald element telt niet als niet-gekoppeld; ze verdwijnt met het element.
+3. **`merge` (R14).**
+   - Citaten, referenties, bestanden en relaties van de bron gaan naar het doel. Het id van een relatie wordt `<van>-><naar>` met het doel-id.
+   - Een relatie die daardoor naar zichzelf wijst, vervalt met haar citaten.
+   - Relaties die daardoor hetzelfde id krijgen, vallen samen: status `found` als één ervan `found` was, `reference_counts` opgeteld, markeringen samengevoegd.
+   - Titel van de samengevoegde relatie: met codereferenties uit `titles` op de nieuwe vingerafdruk, anders `fallback_title`; een relatie die alleen uit documentatie komt, houdt de titel van de relatie die al naar het doel wees, en anders de eerste op bron-id.
+   - Het doel houdt zijn naam, omschrijving en id; de markeringen van de bron, zoals `fallback`, komen erbij.
+4. **Status opnieuw bepalen:** `found` met een citaat uit code of configuratie, anders `documented` (dezelfde regel als `statuses()`, `assemble.py:369-374`).
+
+**Titelstap.** `_pending_titles` werkt op het resultaat (`pipeline.py:462-497`). Een samengevoegde relatie met codereferenties krijgt een nieuwe vingerafdruk, haalt haar titel uit het lockbestand of vraagt er één keer om; de tweede `assemble()`-ronde in `_titles` (`pipeline.py:500-524`) vindt die titel via dezelfde vingerafdruk.
+
+**Voorbeeld, run 4 met `merge: {"external:google": "external:gemini"}`:** `external:google` verdwijnt; `external:gemini` krijgt het codecitaat uit `gemini_llm_provider.py:20-21` en wordt `found`; `chunkhound -> google` (`found`) en `chunkhound -> gemini` (`documented`) worden één relatie `chunkhound -> gemini` met status `found`.
+
+### 20.3 Prompt `c4_documented.md`
+
+Direct na het verbod op regel 23-25 komt:
+
+```text
+An external element names one concrete system. Never make one of a category or
+role without its own name, such as "an LLM provider", "embedding providers" or
+"an operator-controlled HTTPS endpoint"; where the fragment names the concrete
+systems, use those. A person may be a role. Never take a name that occurs only
+inside an example command, example query or code sample. A library stays
+excluded even when the text says what it does.
+```
+
+- De eerste twee zinnen zijn R15a, de zin over voorbeelden R15b, de laatste zin R15c. De tabelregel (regel 35-36) blijft: concrete providers uit een tabel blijven elk een element.
+- `c4_classify.md` verandert niet; "A general HTTP client or parser that names no service stays library" (regel 11-12) dekt `httpx` als kandidaat uit de code al.
+- **Versie:** de stapversie is een hash over instructies, schema en `_VALIDATOR_VERSION` (`documented.py:297-300`), dus de gewijzigde prompt geeft vanzelf een nieuwe versie. `_VALIDATOR_VERSION` blijft 3. Samen met de regel voor hele woorden (§19.3) roept de volgende run de documentstap één keer opnieuw aan, ongeveer 3 aanroepen.
+- De tekst van de prompt krijgt geen test; de werking blijkt uit §20.6.
+
+### 20.4 Rapport en fouten
+
+- `assemble_with_unlinked` heet `assemble_with_notes` en geeft als vierde waarde `AssemblyNotes(unlinked: UnlinkedCounts, ignored_overrides: tuple[str, ...])`. De aanroep in `pipeline.py:844` en de tests volgen; er komt geen alias.
+- Per overgeslagen vermelding één rapportregel in `report_extra`, direct na de regel over niet-gekoppelde documentrelaties (`pipeline.py:845-852`), in de vorm van de bestaande regel voor een onbekende groep (`pipeline.py:700-703`):
+
+  ```text
+  C4-overrides: drop ignored for external:foo (not on the map)
+  C4-overrides: drop ignored for container:chunkhound (not an external system or person)
+  C4-overrides: merge ignored for person:operator -> external:github (different kinds)
+  C4-overrides: merge ignored for external:a -> external:b (target is merged itself)
+  C4-overrides: merge ignored for external:google -> external:gemini (dropped)
+  ```
+
+  Een proefrun toont ze ook, want de nabewerking roept geen model aan.
+
+- Een ongeldige vermelding breekt de run niet af (R16). Een fout in de structuur, zoals `drop` als tekst of een `merge`-waarde die geen tekst is, is een fout bij het laden van het lockbestand, zoals nu bij elk ongeldig lockbestand.
+- Een naam, omschrijving of titel uit de overrides voor een id dat na de nabewerking niet meer bestaat, valt stil weg, zoals nu bij een onbekend id.
+- Contract en AutoDoc veranderen niet: het contract volgt uit de elementen en relaties na de nabewerking.
+
+### 20.5 Testen
+
+Contracttests op de bestaande routes:
+
+1. `test_assemble.py`: na `drop` staat het element niet in elementen, relaties of citaten; een codereferentie ernaar blijft in het bewijs zonder relatie.
+2. `test_assemble.py`: een bron uit de code (`found`) samengevoegd met een doel uit de documentatie (`documented`) geeft een `found` doel met zijn eigen naam en één relatie met opgetelde `reference_counts`; een relatie die naar zichzelf zou wijzen, vervalt; een `names`-override voor de bron heeft geen effect.
+3. `test_assemble.py`: elk geval van R16 geeft de verwachte uitkomst en reden in `AssemblyNotes.ignored_overrides`: onbekend id, container, verschillende soorten, keten (alleen `b -> c`) en `drop` vóór `merge`.
+4. `test_pipeline.py`: een volledige run met de bestaande fixture; een samengevoegd element staat niet in het contract, de samengevoegde relatie krijgt een titel uit de titelstap, de regel `C4-overrides: …` verschijnt, en een tweede run met dezelfde invoer doet geen extra aanroep.
+5. `test_lockfile.py`: `drop` en `merge` overleven het opnieuw schrijven, als uitbreiding van `test_override_section_is_never_rewritten`.
+
+### 20.6 Run en acceptatie
+
+Run 5 vraagt aparte goedkeuring. Controles:
+
+1. geen element voor een algemene categorie (`llm`, `llm-provider`, `embedding`, `embedding-provider(s)`), voor `stripe` of voor `operator-controlled-https-endpoint`; wel `duckduckgo` als de documenten die dienst noemen;
+2. geen `httpx` uit de documentatie;
+3. concrete providers uit de tabel staan er nog, met een relatie (§18.5, controle 3);
+4. wat toch doorkomt, gaat als voorstel voor `drop`/`merge` in het lockbestand; na een tweede run klopt de kaart, zonder extra aanroep behalve voor nieuwe titels;
+5. `ModelLoader` en de LikeC4-build zonder waarschuwing.
+
+**Onzeker:** R15 verkleint de ruis maar haalt die niet gegarandeerd weg; R13 en R14 vangen de rest op. Samenvoegen gebeurt niet automatisch: `ai-agent`/`ai-assistant` en `operator`/`operators` ruim je met `merge` op.
+
+### 20.7 Bewust niet
+
+- **Automatisch samenvoegen** via de classificatie: verandert het uitvoerformaat en de opgeslagen classificaties, en hangt weer van het model af.
+- **Een lijst met namen** (§18.5): blijft uitgesloten.
+- **`drop` of `merge` voor containers, opslag en componenten:** daarvoor bestaat `overrides.placements`.
+- **De weergave van ongeveer 20 providers** in het contextdiagram: een open punt voor AutoDoc/LikeC4, niet voor het model.
+- **Zes externe systemen met dezelfde omschrijving, misleidende componentnamen, deel B en de volledige testsuite:** buiten deze stap.

@@ -50,6 +50,8 @@ classDiagram
 | Status | _aangetroffen_ of _gedocumenteerd_ | C4-log rij 29 |
 | Topic / Dekking | HyDE-topic; dekking via gedeelde geciteerde bestanden | rij 23; C4-log rij 12 |
 | Lockbestand / Regel | Opgeslagen indeling, identiteit, soorten, titels, correcties | rij 18, 26, 31 |
+| Override | Handgeschreven regel in `overrides` van het lockbestand; `drop` (lijst van element-ids) haalt een extern systeem of persoon weg, `merge` (bron-id → doel-id) voegt het samen met een doel van dezelfde soort | O-MAP §20 |
+| Documentterm | `person` of `external` uit de documentstap, met een geverifieerd citaat waarin de term als heel woord staat | rij 154; O-MAP §19.3 |
 | Run | _volledig_ of _proef_ (`--plan`) | rij 28 |
 
 ### Regels met voorbeeld
@@ -68,6 +70,10 @@ classDiagram
 | R10 | Een documentatiecitaat telt alleen als het letterlijk op het opgegeven bestand:regel staat | Citaat "Webdashboard" dat niet op `README.md:60` staat → afgekeurd (rij 34) |
 | R11 | Handmatige `overrides` in het lockbestand gaan voor op elke afgeleide uitkomst | override `pyarrow = opslagdriver` → geen stemming, soort opslagdriver (rij 31) |
 | R12 | Terugval en proef worden nooit opgeslagen; alleen een proefrun maakt voorlopige componenten, een mislukte merge verzint er geen | samenvoegstap twee keer time-out → eerder geplaatste componenten blijven, de overige groepen staan als wachtend in het rapport en worden de volgende run opnieuw aangeboden, `base_sha` blijft staan (rij 19, 30; O-MAP §4.5) |
+| R13 | `drop` haalt een extern systeem of persoon weg uit kaartmodel, bewijs en contract, met alle relaties die het raakt; een codereferentie blijft in het bewijs zonder relatie | `"drop": ["external:httpx"]` → geen `external:httpx`, geen relatie `chunkhound -> httpx`; de run slaagt (O-MAP §20) |
+| R14 | `merge` voegt een extern systeem of persoon samen met een doel van dezelfde soort; het doel houdt naam, omschrijving en id, citaten en relaties gaan mee, dubbele relaties vallen samen, de status volgt R9 | `"merge": {"external:google": "external:gemini"}` → alleen `external:gemini`, _aangetroffen_ via `gemini_llm_provider.py:20` (O-MAP §20) |
+| R15 | De documentstap maakt (a) geen extern systeem van een categorie of rol zonder eigen naam, personen mogen een rol zijn; (b) geen element van een naam die alleen in een voorbeeld staat; (c) geen element van een bibliotheek, ook niet als de tekst zegt wat ze doet | "requires an embedding provider" → geen element; `chunkhound websearch "Stripe webhook retry schedule"` → geen `stripe`, maar "DuckDuckGo provides web search results" → `duckduckgo`; "per-phase `httpx` timeout" → geen `httpx` (O-MAP §20.3) |
+| R16 | Een ongeldige `drop` of `merge` (onbekend id, andere soort, keten, samen met `drop`) wordt overgeslagen met een rapportregel; `drop` gaat voor `merge`; een fout in de structuur is een fout bij het laden van het lockbestand | `"drop": ["container:chunkhound"]` → `C4-overrides: drop ignored for container:chunkhound (not an external system or person)`; bij `a -> b` en `b -> c` alleen `b -> c` (O-MAP §20.4) |
 
 Geschiedenis bij R3 (uitvoeringsbesluit R): behoud elk paar met ≥10% overlap aan één kant, over bestanden in beide runs na renames. Meerdere voorgangers → `merge`, anders meerdere opvolgers → `split`, anders `continuation`; het label bewijst geen overerving. Niet-geërfde nieuwe id's krijgen tevens `new` (`from_id=""`), niet-geërfde oude id's `removed` (`to_id=""`) plus tombstone `oud_id → oud_id`. Andere eindpunten zijn echte id's; bestaande tombstones blijven staan en beide kolommen reserveren id's.
 
@@ -234,6 +240,7 @@ Taak 13, gebruiker **"optie 1"**: het lockbestand bewaart expliciete succesvolle
 | Status | `Status` | enum | `found` \| `documented` | — | R9 |
 | Topic / Dekking | `Element.coverage` | attribute | — | — | `topic_coverage.py` |
 | Lockbestand / Regel | `ScopeLock` | class | — | — | `.chunkhound/map.lock.json` |
+| Override | `Overrides.drop`, `Overrides.merge`; nabewerking in `curation.py`, overgeslagen vermeldingen in `AssemblyNotes.ignored_overrides` | attribute | `list[str]`, `dict[str, str]` | — | R13, R14, R16 |
 | Run | `RunInfo` | class | — | — | `kind` `full` \| `trial`; `id` = sha256 over model en bewijs zonder id, gedeeld met `C4Evidence.run_id` (rij 39) |
 | Opgeheven id | `ScopeLock.tombstones` | attribute | — | — | R3 |
 | Markering | `Marker` | enum | `fallback`, `trial`, `disputed`, `undescribed`, `imports_only`, `provisional`, `not_merged`, `not_classified` | — | rij 19, 35 |
