@@ -6,7 +6,7 @@ from chunkhound.code_mapper.c4.assemble import (
     AssemblyInput,
     UnlinkedCounts,
     assemble,
-    assemble_with_unlinked,
+    assemble_with_notes,
 )
 from chunkhound.code_mapper.c4.classify import Classification
 from chunkhound.code_mapper.c4.documented import (
@@ -16,7 +16,7 @@ from chunkhound.code_mapper.c4.documented import (
     TopicSources,
 )
 from chunkhound.code_mapper.c4.grouping import Group
-from chunkhound.code_mapper.c4.merge import ProposedComponent
+from chunkhound.code_mapper.c4.merge import ProposedComponent, relation_fingerprint
 from chunkhound.code_mapper.c4.model import Citation, Overrides, Reference
 from chunkhound.code_mapper.c4.references import ReferenceScan
 from chunkhound.code_mapper.c4.runtime import (
@@ -262,7 +262,8 @@ def test_unlinked_documented_relations_are_counted_by_reason():
         DocRelation("A", "B", "feeds", citation(line=7)),
     ]
     elements, relations, evidence = assemble(inp)
-    *_, unlinked = assemble_with_unlinked(inp)
+    *_, notes = assemble_with_notes(inp)
+    unlinked = notes.unlinked
 
     assert unlinked == UnlinkedCounts(no_match=1, ambiguous=1, not_allowed=1)
     kept = [
@@ -283,7 +284,8 @@ def test_documented_relation_with_shared_name_links_to_container():
         DocRelation("User", "App", "uses", citation(line=5)),
         DocRelation("App", "User", "notifies", citation(line=6)),
     ]
-    _, relations, evidence, unlinked = assemble_with_unlinked(inp)
+    _, relations, evidence, notes = assemble_with_notes(inp)
+    unlinked = notes.unlinked
 
     assert unlinked == UnlinkedCounts()
     assert {"person:user->container:app", "container:app->person:user"} <= {
@@ -313,7 +315,8 @@ def test_documented_own_name_joins_that_element_and_links_its_relations():
     inp.documented.relations = [
         DocRelation("APP", "Stripe", "betaalt via", citation(line=12))
     ]
-    elements, relations, evidence, unlinked = assemble_with_unlinked(inp)
+    elements, relations, evidence, notes = assemble_with_notes(inp)
+    unlinked = notes.unlinked
     ids = {element.id for element in elements}
     assert {"external:app", "component:app", "external:duckdb"}.isdisjoint(ids)
     assert {"person:app", "external:stripe"} <= ids
@@ -353,7 +356,7 @@ def test_other_shared_names_stay_ambiguous():
             inp.runtime, containers=[*inp.runtime.containers, *extra_units]
         )
         inp.documented.relations = [DocRelation("User", "App", "uses", citation())]
-        return assemble_with_unlinked(inp)[3].ambiguous
+        return assemble_with_notes(inp)[3].unlinked.ambiguous
 
     second_container = RuntimeUnit(
         "container:app-2", "App", "web/package.json", "web", False, (), ()
@@ -370,4 +373,266 @@ def test_other_shared_names_stay_ambiguous():
     system_and_component.documented.relations = [
         DocRelation("User", "B", "uses", citation())
     ]
-    assert assemble_with_unlinked(system_and_component)[3].ambiguous == 1
+    assert assemble_with_notes(system_and_component)[3].unlinked.ambiguous == 1
+
+
+def test_drop_removes_element_relations_and_citations_but_keeps_references():
+    baseline = assemble(assembly_input())
+    inp = assembly_input()
+    inp.documented.relations = [
+        DocRelation("User", "stripe", "pays with", citation(line=8))
+    ]
+    inp.overrides = Overrides(drop=["external:stripe", "external:stripe"])
+    elements, relations, evidence, notes = assemble_with_notes(inp)
+    assert "external:stripe" not in {e.id for e in elements}
+    assert "external:stripe" not in evidence.element_files
+    removed = {
+        "external:stripe",
+        "component:a->external:stripe",
+        "person:user->external:stripe",
+    }
+    assert removed.isdisjoint(r.id for r in relations)
+    assert removed.isdisjoint(c.target for c in evidence.citations)
+    reference = next(r for r in evidence.references if r.line == 2)
+    assert reference.to == "package:stripe"
+    assert reference.relation is None
+    assert notes.ignored_overrides == ()
+    assert notes.unlinked == UnlinkedCounts()
+    assert next(r for r in relations if r.to_id == "storage:sqlite") == next(
+        r for r in baseline[1] if r.to_id == "storage:sqlite"
+    )
+
+
+def test_merge_moves_sources_and_collapses_relations():
+    inp = assembly_input()
+    inp.documented.elements.append(
+        DocElement("external", "Payments", citation(line=7), "Takes payments.")
+    )
+    inp.documented.relations = [
+        DocRelation("A", "Payments", "pays via", citation(line=8))
+    ]
+    inp.references.references.append(
+        Reference(
+            relation=None,
+            from_file="a.py",
+            line=8,
+            to="package:openai",
+            kind="call",
+            status="counts",
+        )
+    )
+    inp.references.external_sites["openai"] = [("a.py", 8)]
+    inp.classifications["openai"] = Classification(
+        "external_system", ("external_system",) * 3, ("disputed",), False
+    )
+    fingerprint = relation_fingerprint(
+        "component:a",
+        "external:payments",
+        [("import", "package:stripe"), ("call", "package:openai")],
+    )
+    inp.titles[fingerprint] = "charges cards"
+    inp.overrides = Overrides(
+        merge={
+            "external:stripe": "external:payments",
+            "external:openai": "external:payments",
+        },
+        names={"external:stripe": "Ignored"},
+    )
+    before = assemble(replace(inp, overrides=Overrides()))
+    elements, relations, evidence, notes = assemble_with_notes(inp)
+    assert {e.id for e in elements if e.kind == "external"} == {"external:payments"}
+    target = next(e for e in elements if e.id == "external:payments")
+    assert (target.name, target.description, target.status, target.markers) == (
+        "Payments",
+        "Takes payments.",
+        "found",
+        ["disputed"],
+    )
+    relation = next(r for r in relations if r.to_id == target.id)
+    assert (
+        relation.id,
+        relation.status,
+        relation.reference_counts,
+        relation.markers,
+        relation.title,
+    ) == (
+        "component:a->external:payments",
+        "found",
+        {"import": 1, "call": 1},
+        ["disputed"],
+        "charges cards",
+    )
+    assert citation("a.py", 2, "code", target.id) in evidence.citations
+    assert (
+        citation("pyproject.toml", 9, "configuration", target.id) in evidence.citations
+    )
+    assert citation(line=8, target=relation.id) in evidence.citations
+    for line, package in [(2, "package:stripe"), (8, "package:openai")]:
+        ref = next(r for r in evidence.references if r.line == line)
+        assert (ref.to, ref.relation) == (package, relation.id)
+    assert {"external:stripe", "external:openai"}.isdisjoint(evidence.element_files)
+    assert notes.ignored_overrides == ()
+    assert next(r for r in relations if r.to_id == "storage:sqlite") == next(
+        r for r in before[1] if r.to_id == "storage:sqlite"
+    )
+    # Reassembly is pure and fingerprints use original package targets.
+    assert assemble_with_notes(inp) == (elements, relations, evidence, notes)
+    assert inp.references.references[-1].relation is None
+    assert inp.overrides.merge["external:stripe"] == target.id
+    inp.titles[relation.id] = "id title wins"
+    assert (
+        next(r for r in assemble(inp)[1] if r.id == relation.id).title
+        == "id title wins"
+    )
+    inp.overrides.titles[relation.id] = "manual title wins"
+    assert (
+        next(r for r in assemble(inp)[1] if r.id == relation.id).title
+        == "manual title wins"
+    )
+
+    inp = assembly_input()
+    inp.documented.elements.append(
+        DocElement("external", "Stripe API", citation(line=7))
+    )
+    inp.documented.relations = [
+        DocRelation("User", "Stripe API", "pays with", citation(line=8)),
+        DocRelation("Stripe API", "stripe", "wraps", citation(line=9)),
+    ]
+    inp.overrides = Overrides(merge={"external:stripe-api": "external:stripe"})
+    elements, relations, evidence, _ = assemble_with_notes(inp)
+    relation = next(r for r in relations if r.from_id == "person:user")
+    assert (relation.id, relation.title, relation.status) == (
+        "person:user->external:stripe",
+        "pays with",
+        "documented",
+    )
+    assert "external:stripe->external:stripe" not in {r.id for r in relations}
+    assert all(
+        c.target != "external:stripe->external:stripe" for c in evidence.citations
+    )
+    assert citation(line=9) not in evidence.citations
+    assert all(c.file != "README.md" or c.start_line != 9 for c in evidence.citations)
+    assert next(e for e in elements if e.id == "external:stripe").name == "stripe"
+
+    inp = assembly_input()
+    inp.documented.elements.append(DocElement("person", "Users", citation(line=7)))
+    inp.documented.relations = [
+        DocRelation("User", "App", "uses", citation(line=5)),
+        DocRelation("Users", "App", "works in", citation(line=6)),
+    ]
+    inp.overrides = Overrides(merge={"person:users": "person:user"})
+    elements, relations, evidence, _ = assemble_with_notes(inp)
+    person_relations = [r for r in relations if r.from_id == "person:user"]
+    assert [(r.id, r.title) for r in person_relations] == [
+        ("person:user->container:app", "uses")
+    ]
+    assert all(
+        citation(line=n, target=person_relations[0].id) in evidence.citations
+        for n in (5, 6)
+    )
+    assert "person:users" not in {e.id for e in elements}
+
+
+def test_curation_ignores_invalid_entries_with_a_reason():
+    inp = assembly_input()
+    inp.documented.elements.extend(
+        [
+            DocElement("external", "Payments", citation(line=7)),
+            DocElement("external", "Billing", citation(line=8)),
+        ]
+    )
+    cases = [
+        (
+            Overrides(
+                drop=["external:gone", "container:app"],
+                merge={
+                    "person:user": "external:stripe",
+                    "external:stripe": "external:stripe",
+                    "external:payments": "external:billing",
+                    "external:billing": "external:stripe",
+                },
+            ),
+            (
+                "C4-overrides: drop ignored for container:app "
+                "(not an external system or person)",
+                "C4-overrides: drop ignored for external:gone (not on the map)",
+                "C4-overrides: merge ignored for external:payments -> external:billing "
+                "(target is merged itself)",
+                "C4-overrides: merge ignored for external:stripe -> external:stripe "
+                "(same element)",
+                "C4-overrides: merge ignored for person:user -> external:stripe "
+                "(different kinds)",
+            ),
+            {"external:stripe", "external:payments"},
+        ),
+        (
+            Overrides(
+                merge={
+                    "external:payments": "external:billing",
+                    "external:billing": "external:payments",
+                }
+            ),
+            (
+                "C4-overrides: merge ignored for external:billing -> external:payments "
+                "(target is merged itself)",
+                "C4-overrides: merge ignored for external:payments -> external:billing "
+                "(target is merged itself)",
+            ),
+            {"external:stripe", "external:payments", "external:billing"},
+        ),
+        (
+            Overrides(
+                merge={
+                    "external:payments": "external:stripe",
+                    "external:billing": "external:gone",
+                }
+            ),
+            (
+                "C4-overrides: merge ignored for external:billing -> external:gone "
+                "(not on the map)",
+            ),
+            {"external:stripe", "external:billing"},
+        ),
+        (
+            Overrides(
+                drop=["external:stripe"], merge={"external:payments": "external:stripe"}
+            ),
+            (
+                "C4-overrides: merge ignored for external:payments -> external:stripe "
+                "(dropped)",
+            ),
+            {"external:payments", "external:billing"},
+        ),
+        (
+            Overrides(
+                drop=["external:gone", "external:gone"],
+                merge={
+                    "external:gone": "container:app",
+                    "container:app": "external:gone",
+                    "external:stripe": "container:app",
+                    "external:payments": "external:stripe",
+                },
+            ),
+            (
+                "C4-overrides: drop ignored for external:gone (not on the map)",
+                "C4-overrides: merge ignored for container:app -> external:gone "
+                "(not on the map)",
+                "C4-overrides: merge ignored for external:gone -> container:app "
+                "(not on the map)",
+                "C4-overrides: merge ignored for external:stripe -> container:app "
+                "(not an external system or person)",
+            ),
+            {"external:stripe", "external:billing"},
+        ),
+    ]
+    for overrides, ignored, external_ids in cases:
+        result = assemble_with_notes(replace(inp, overrides=overrides))
+        assert result[3].ignored_overrides == ignored
+        assert {e.id for e in result[0] if e.kind == "external"} == external_ids
+        reversed_overrides = overrides.model_copy(
+            update={
+                "drop": list(reversed(overrides.drop)),
+                "merge": dict(reversed(list(overrides.merge.items()))),
+            }
+        )
+        assert assemble_with_notes(replace(inp, overrides=reversed_overrides)) == result

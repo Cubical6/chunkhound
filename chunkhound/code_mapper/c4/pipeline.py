@@ -14,7 +14,7 @@ from pydantic import TypeAdapter
 from chunkhound.code_mapper.c4.assemble import (
     AssemblyInput,
     assemble,
-    assemble_with_unlinked,
+    assemble_with_notes,
 )
 from chunkhound.code_mapper.c4.classify import Classification, ClassifyItem, classify
 from chunkhound.code_mapper.c4.contract import (
@@ -841,7 +841,7 @@ async def finish_c4(
     )
     if not llm.trial:
         prune_documented_cache(draft.project_root)
-    unlinked = assemble_with_unlinked(inp)[3]
+    unlinked = assemble_with_notes(inp)[3].unlinked
     report_extra = [
         *documented_report_lines(docs),
         "C4 documentation relationships not linked: "

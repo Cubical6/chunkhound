@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from chunkhound.code_mapper.c4.classify import Classification
+from chunkhound.code_mapper.c4.curation import CurationState, curate
 from chunkhound.code_mapper.c4.documented import DocElement, DocumentedOutcome
 from chunkhound.code_mapper.c4.grouping import Group
 from chunkhound.code_mapper.c4.identity import element_id
@@ -94,6 +95,14 @@ class UnlinkedCounts:
     no_match: int = 0
     ambiguous: int = 0
     not_allowed: int = 0
+
+
+@dataclass(frozen=True)
+class AssemblyNotes:
+    """Non-fatal documentation and override outcomes for the run report."""
+
+    unlinked: UnlinkedCounts
+    ignored_overrides: tuple[str, ...]
 
 
 class _Assembly:
@@ -428,13 +437,13 @@ class _Assembly:
 
 
 def assemble(inp: AssemblyInput) -> tuple[list[Element], list[Relation], C4Evidence]:
-    elements, relations, evidence, _ = assemble_with_unlinked(inp)
+    elements, relations, evidence, _ = assemble_with_notes(inp)
     return elements, relations, evidence
 
 
-def assemble_with_unlinked(
+def assemble_with_notes(
     inp: AssemblyInput,
-) -> tuple[list[Element], list[Relation], C4Evidence, UnlinkedCounts]:
+) -> tuple[list[Element], list[Relation], C4Evidence, AssemblyNotes]:
     """Consume finalized retry outcomes; writer assigns the shared run ID later.
 
     element_files rolls component files up to their container/system; directly
@@ -448,20 +457,31 @@ def assemble_with_unlinked(
     state.statuses()
     references = state.static_relations()
     state.documented_relations()
-    for element in state.elements.values():
+    curated = curate(
+        CurationState(
+            elements=state.elements,
+            relations=state.relations,
+            citations=state.citations,
+            references=references,
+            files=state.files,
+        ),
+        inp.titles,
+        inp.overrides,
+    )
+    for element in curated.elements.values():
         element.name = inp.overrides.names.get(element.id, element.name)
         element.description = inp.overrides.descriptions.get(
             element.id, element.description
         )
-        if state.files[element.id]:
+        if curated.files[element.id]:
             element.coverage = Coverage(status="not_computed", topics=[])
-    for relation in state.relations.values():
+    for relation in curated.relations.values():
         relation.title = inp.overrides.titles.get(relation.id, relation.title)
-    citations = {tuple(c.model_dump().values()): c for c in state.citations}
+    citations = {tuple(c.model_dump().values()): c for c in curated.citations}
     evidence = C4Evidence(
         schema_version=SCHEMA_VERSION,
         run_id="",
-        references=references,
+        references=curated.references,
         citations=sorted(
             citations.values(),
             key=lambda c: (
@@ -474,16 +494,19 @@ def assemble_with_unlinked(
             ),
         ),
         element_files={
-            id: sorted(set(files)) for id, files in sorted(state.files.items())
+            id: sorted(set(files)) for id, files in sorted(curated.files.items())
         },
     )
     return (
-        [state.elements[id] for id in sorted(state.elements)],
-        [state.relations[id] for id in sorted(state.relations)],
+        [curated.elements[id] for id in sorted(curated.elements)],
+        [curated.relations[id] for id in sorted(curated.relations)],
         evidence,
-        UnlinkedCounts(
-            no_match=state.unlinked["no_match"],
-            ambiguous=state.unlinked["ambiguous"],
-            not_allowed=state.unlinked["not_allowed"],
+        AssemblyNotes(
+            unlinked=UnlinkedCounts(
+                no_match=state.unlinked["no_match"],
+                ambiguous=state.unlinked["ambiguous"],
+                not_allowed=state.unlinked["not_allowed"],
+            ),
+            ignored_overrides=curated.ignored_overrides,
         ),
     )
