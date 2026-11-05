@@ -30,7 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **C4 template exclusion** — A Dockerfile beside a package with a placeholder name no longer promotes that template directory to a runtime container.
 - **C4 scoped replay** — Fresh reference-resolution outcomes now invalidate transition replay when imports change between project files and external packages, including dirty target creation or removal outside the selected scope. Genuinely unchanged results still replay with identical JSON and no model calls.
-- **C4 documented term provenance** — Documented element terms must occur literally within their own verified citation span, with whitespace tolerance but no case folding or inferred names. Cached documentation is revalidated before reuse, trial output or fallback, so earlier unsupported names cannot reappear through successful-transition replay; valid literal elements remain reusable without model calls.
+- **C4 documented term provenance** — Documented element terms and relation endpoints must occur literally, as whole words, within their own verified citation span, with whitespace tolerance but no case folding or inferred names: `Go` no longer matches inside "Google". Cached documentation is revalidated before reuse, trial output or fallback, so earlier unsupported names cannot reappear through successful-transition replay; valid literal elements remain reusable without model calls. The stricter rule changes the step version, so the next run asks the documentation step again.
+
 ## [6.1.0] - 2026-10-20
 
 ### Added

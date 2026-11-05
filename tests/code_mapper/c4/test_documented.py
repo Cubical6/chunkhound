@@ -16,7 +16,7 @@ from chunkhound.code_mapper.c4.documented import (
     doc_files_for,
     extract_documented,
     report_lines,
-    verify_quote,
+    verify_term,
 )
 from chunkhound.code_mapper.c4.llm import C4Llm, RetryQueue
 from chunkhound.code_mapper.c4.model import Citation, LockedDocumented
@@ -226,6 +226,40 @@ async def test_relation_endpoints_must_be_cited_or_the_system(
     assert await retries.drain() == 0
 
 
+async def test_terms_and_endpoints_count_only_as_whole_words(
+    fixture_repo, c4_llm_manager, scripted
+):
+    payload = answer()
+    payload["elements"] = [
+        dict(kind="person", term=term, description="", citation=citation())
+        for term in ("beheerder", "beheer")
+    ]
+    payload["relations"] = [
+        dict(
+            from_term="beheerder",
+            to_term=to_term,
+            title="gebruikt",
+            citation=citation(),
+        )
+        for to_term in ("Stripe", "Strip")
+    ]
+    scripted.answers["documented"] = payload
+    retries = RetryQueue()
+    result = await extract_documented(
+        project_root=fixture_repo,
+        system_name="shop",
+        doc_files=["README.md"],
+        locked=None,
+        llm=C4Llm(c4_llm_manager, concurrency=1, trial=False),
+        retries=retries,
+    )
+    # "beheer" and "Strip" occur in the quote only inside a longer word.
+    assert [item.term for item in result.elements] == ["beheerder"]
+    assert [item.to_term for item in result.relations] == ["Stripe"]
+    assert not result.fallback
+    assert await retries.drain() == 0
+
+
 async def test_documented_reuses_on_same_hashes(fixture_repo, c4_llm_manager, scripted):
     llm = C4Llm(c4_llm_manager, concurrency=1, trial=False)
     first = await extract_documented(
@@ -421,21 +455,23 @@ def test_changelog_and_hidden_directories_are_no_documentation_source(tmp_path):
     )
 
 
-def test_verify_quote_normalizes_whitespace_but_respects_lines(tmp_path):
+def test_verify_term_normalizes_whitespace_but_respects_lines_and_words(tmp_path):
     (tmp_path / "README.md").write_text(
         "Heading\nEen  beheerder\n gebruikt Stripe.\n", encoding="utf-8"
     )
-    assert verify_quote(tmp_path, "README.md", 2, 3, "Een beheerder gebruikt\tStripe.")
-    for start, end, quote in (
+    assert verify_term(tmp_path, "README.md", 2, 3, "Een beheerder gebruikt\tStripe.")
+    for start, end, term in (
         (1, 1, "Een beheerder"),
         (2, 2, "gebruikt Stripe."),
+        (3, 3, "Strip"),
+        (2, 2, "beheer"),
         (0, 3, "Heading"),
         (3, 2, "Stripe."),
         (1, 4, "Heading"),
         (1, 3, " \t"),
     ):
-        assert not verify_quote(tmp_path, "README.md", start, end, quote)
-    assert not verify_quote(tmp_path, "missing.md", 1, 1, "Heading")
+        assert not verify_term(tmp_path, "README.md", start, end, term)
+    assert not verify_term(tmp_path, "missing.md", 1, 1, "Heading")
 
 
 def test_documented_sources_stay_inside_the_project(tmp_path):
@@ -444,7 +480,7 @@ def test_documented_sources_stay_inside_the_project(tmp_path):
     (tmp_path / "outside.md").write_text(QUOTE, encoding="utf-8")
     (root / "linked.md").symlink_to(tmp_path / "outside.md")
     for file in ("../outside.md", "linked.md", str(tmp_path / "outside.md")):
-        assert not verify_quote(root, file, 1, 1, QUOTE)
+        assert not verify_term(root, file, 1, 1, QUOTE)
     assert (
         doc_files_for(
             root,

@@ -3,6 +3,7 @@
 import hashlib
 import json
 import math
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -51,7 +52,7 @@ from chunkhound.services.extraction.sources import SourceVersion, read_source
 from chunkhound.services.extraction.store import ExtractionStore
 
 EXTRACTION_CACHE = Path(".chunkhound/extraction")
-_VALIDATOR_VERSION = 2
+_VALIDATOR_VERSION = 3
 # History, not architecture: compared with the start of the lowercase file name.
 _HISTORY_DOCUMENTS = (
     "changelog",
@@ -179,22 +180,18 @@ def doc_files_for(
     )
 
 
-def verify_quote(
-    project_root: Path, file: str, start_line: int, end_line: int, quote: str
+def verify_term(
+    project_root: Path, file: str, start_line: int, end_line: int, term: str
 ) -> bool:
-    """Whitespace may differ, but the entire quote must occur in this line span."""
+    """True when the term stands as a whole word in this line span of the file."""
     path = _project_file(project_root, file)
-    if path is None or start_line < 1 or end_line < start_line:
+    if path is None:
         return False
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeError):
         return False
-    if end_line > len(lines):
-        return False
-    normalized = " ".join(quote.split())
-    span = " ".join(" ".join(lines[start_line - 1 : end_line]).split())
-    return bool(normalized) and normalized in span
+    return _term_in_lines(lines, start_line, end_line, term)
 
 
 def _previous_outcome(
@@ -211,7 +208,7 @@ def _previous_outcome(
             item
             for item in TypeAdapter(list[DocElement]).validate_python(locked.elements)
             # Older locks retain the citation span, but not the original quote.
-            if verify_quote(
+            if verify_term(
                 project_root,
                 item.citation.file,
                 item.citation.start_line,
@@ -261,15 +258,31 @@ class _Checked:
     relations: tuple[tuple[DocRelation, str], ...]
 
 
+def _span_text(lines: Sequence[str], start_line: int, end_line: int) -> str | None:
+    """The cited lines with whitespace collapsed, or None outside the source."""
+    if start_line < 1 or end_line < start_line or end_line > len(lines):
+        return None
+    return " ".join(" ".join(lines[start_line - 1 : end_line]).split())
+
+
 def _quote_in_lines(
     lines: Sequence[str], start_line: int, end_line: int, quote: str
 ) -> bool:
-    """Same rule as verify_quote, on lines already read for this run."""
-    if start_line < 1 or end_line < start_line or end_line > len(lines):
-        return False
+    """Whitespace may differ, but the entire quote must occur in this line span."""
+    span = _span_text(lines, start_line, end_line)
     normalized = " ".join(quote.split())
-    span = " ".join(" ".join(lines[start_line - 1 : end_line]).split())
-    return bool(normalized) and normalized in span
+    return span is not None and bool(normalized) and normalized in span
+
+
+def _term_in_lines(
+    lines: Sequence[str], start_line: int, end_line: int, term: str
+) -> bool:
+    """Like a quote, but only as a whole word: `Go` does not occur in "Google"."""
+    span = _span_text(lines, start_line, end_line)
+    normalized = " ".join(term.split())
+    if span is None or not normalized:
+        return False
+    return re.search(rf"(?<!\w){re.escape(normalized)}(?!\w)", span) is not None
 
 
 class _DocumentedGoal:
@@ -316,7 +329,7 @@ class _DocumentedGoal:
             )
 
         def stated(citation: Citation, term: str) -> bool:
-            return _quote_in_lines(lines, citation.start_line, citation.end_line, term)
+            return _term_in_lines(lines, citation.start_line, citation.end_line, term)
 
         elements = tuple(
             (
@@ -498,7 +511,7 @@ def _fall_back(
 
         for element in elements:
             c = element.citation
-            if inside(c) and _quote_in_lines(
+            if inside(c) and _term_in_lines(
                 fragment.source.lines, c.start_line, c.end_line, element.term
             ):
                 kept_elements.append(element)
