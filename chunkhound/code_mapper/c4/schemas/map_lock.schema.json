@@ -228,11 +228,25 @@
           "title": "Descriptions",
           "type": "object"
         },
+        "drop": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Drop",
+          "type": "array"
+        },
         "labels": {
           "additionalProperties": {
             "type": "string"
           },
           "title": "Labels",
+          "type": "object"
+        },
+        "merge": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Merge",
           "type": "object"
         },
         "names": {

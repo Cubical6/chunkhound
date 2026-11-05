@@ -157,6 +157,8 @@ class Overrides(_C4BaseModel):
     descriptions: dict[str, str] = Field(default_factory=dict)
     titles: dict[str, str] = Field(default_factory=dict)
     labels: dict[str, str] = Field(default_factory=dict)
+    drop: list[str] = Field(default_factory=list)
+    merge: dict[str, str] = Field(default_factory=dict)
 
 
 class LockedTransition(_C4BaseModel):

@@ -138,6 +138,12 @@ def test_lock_sections_are_independent_per_scope(tmp_path: Path) -> None:
     assert read_scope_lock(tmp_path, "missing") is None
 
 
+def lockfile_with_overrides(overrides: dict[str, object]) -> str:
+    scope = sample_lock().model_dump(mode="json", by_alias=True)
+    scope["overrides"] = overrides
+    return json.dumps({"version": 5, "scopes": {"/": scope}})
+
+
 @pytest.mark.parametrize(
     "content",
     [
@@ -146,6 +152,8 @@ def test_lock_sections_are_independent_per_scope(tmp_path: Path) -> None:
         '{"version": 99, "scopes": {}}',
         '{"version": 5, "scopes": {"/": {}}}',
         '{"version": 5, "scopes": {"/": {"tree_spec": {}}}}',
+        lockfile_with_overrides({"drop": "external:httpx"}),
+        lockfile_with_overrides({"merge": {"external:google": 1}}),
     ],
 )
 def test_corrupt_lockfile_is_reported_not_overwritten(
@@ -167,6 +175,8 @@ def test_override_section_is_never_rewritten(tmp_path: Path) -> None:
     manual = {
         "names": {"component:api": "Public API"},
         "labels": {"arrow:api-service": "Manual label"},
+        "drop": ["external:httpx"],
+        "merge": {"external:google": "external:gemini"},
     }
     document["scopes"]["/"]["overrides"] = manual
     path.write_text(json.dumps(document))
@@ -175,6 +185,10 @@ def test_override_section_is_never_rewritten(tmp_path: Path) -> None:
     write_scope_lock(tmp_path, "/", lock)
     assert json.loads(path.read_text())["scopes"]["/"]["overrides"] == manual
     assert read_scope_lock(tmp_path, "/").overrides.names == manual["names"]
+    assert read_scope_lock(tmp_path, "/").overrides.drop == ["external:httpx"]
+    assert read_scope_lock(tmp_path, "/").overrides.merge == {
+        "external:google": "external:gemini"
+    }
     assert read_scope_lock(tmp_path, "/").base_sha == "new"
 
 
