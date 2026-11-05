@@ -695,7 +695,8 @@ Contracttests op de bestaande routes:
 ### 19.3 Documentstap
 
 - **Eindpunten in het citaat:** een relatie wordt alleen aanvaard als elk eindpunt gelijk is aan de systeemnaam, of letterlijk in de geciteerde regels staat. Dat is dezelfde regel als voor de term van een element. De systeemnaam blijft vrij, omdat de prompt die voorschrijft voor elk onderdeel van het systeem. Een fragment waarvan geen enkel voorstel overblijft, wordt zoals nu afgekeurd.
-- `_VALIDATOR_VERSION` wordt 2, zodat cache en lockvermelding opnieuw worden bepaald.
+- **Hele woorden** (na de review van run 4): een elementterm of eindpunt telt alleen als het als heel woord in de geciteerde regels staat, dus `Go` niet in "Google" en `AI` niet in "MAIN". Witruimte mag verschillen; hoofdletters niet. Het citaat zelf blijft een gewone letterlijke deelreeks. De regel geldt ook voor elementen uit een teruggevallen fragment en uit een eerder lockbestand.
+- `_VALIDATOR_VERSION` wordt 2, en met de regel voor hele woorden 3, zodat cache en lockvermelding opnieuw worden bepaald.
 - **Geen taalcontrole** (keuze van de gebruiker). Een antwoord in een andere taal kan dus weer in het lockbestand belanden; `overrides` of een nieuwe versie van de stap is dan de uitweg.
 
 ### 19.4 Run en acceptatie
@@ -716,6 +717,7 @@ Bestaande contracttests volgen de nieuwe prefixen, statussen en teksten. Nieuw:
 1. Een documentrelatie met een eindpunt dat niet in het citaat staat, wordt niet aanvaard; de systeemnaam als eindpunt wel.
 2. Een lockbestand met versie 4 wordt geweigerd met de melding om het te verwijderen.
 3. AutoDoc weigert een contract met versie 1.
+4. Een elementterm of eindpunt dat alleen als deel van een woord in het citaat staat, wordt niet aanvaard.
 
 ### 19.6 Bewust niet
 
