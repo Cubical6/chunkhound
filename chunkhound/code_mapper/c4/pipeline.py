@@ -841,12 +841,13 @@ async def finish_c4(
     )
     if not llm.trial:
         prune_documented_cache(draft.project_root)
-    unlinked = assemble_with_notes(inp)[3].unlinked
+    notes = assemble_with_notes(inp)[3]
     report_extra = [
         *documented_report_lines(docs),
         "C4 documentation relationships not linked: "
-        f"{unlinked.no_match} no match, {unlinked.ambiguous} multiple "
-        f"matches, {unlinked.not_allowed} not allowed",
+        f"{notes.unlinked.no_match} no match, {notes.unlinked.ambiguous} multiple "
+        f"matches, {notes.unlinked.not_allowed} not allowed",
+        *notes.ignored_overrides,
         _source_line(draft),
         *_merge_lines(draft, llm.trial),
     ]

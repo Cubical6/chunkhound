@@ -151,6 +151,146 @@ async def build(repo, manager, *, lock=None, trial=False, **inputs):
     )
 
 
+async def curation_baseline(repo, manager, answers):
+    quote = "Een beheerder gebruikt Mollie; acme/admin betaalt via Stripe."
+    write_sources(
+        repo,
+        {
+            "README.md": f"# Shop\n\n{quote}\n",
+            "notify.py": "import httpx\n\n\ndef ping() -> None:\n"
+            "    httpx.get('https://n.invalid')\n",
+        },
+    )
+    commit(repo, "add curation sources")
+    citation = {
+        "file": "README.md",
+        "start_line": 3,
+        "end_line": 3,
+        "quote": quote,
+    }
+    answers.answers["documented"] = {
+        "elements": [
+            {"kind": kind, "term": term, "description": "", "citation": citation}
+            for kind, term in (
+                ("person", "beheerder"),
+                ("external", "Mollie"),
+                ("external", "Stripe"),
+            )
+        ],
+        "relations": [
+            {
+                "from_term": source,
+                "to_term": target,
+                "title": title,
+                "citation": citation,
+            }
+            for source, target, title in (
+                ("beheerder", "Mollie", "uses"),
+                ("acme/admin", "Stripe", "pays via"),
+            )
+        ],
+    }
+
+    def direct_root_answer(prompt):
+        answer = merge_answer(prompt)
+        roots = {g["id"] for g in payload(prompt)["groups"] if g["dir"] == "."}
+        answer["components"] = [
+            component
+            for component in answer["components"]
+            if not roots.intersection(component["groups"])
+        ]
+        answer["direct"] = sorted(roots)
+        return answer
+
+    answers.answers["merge"] = direct_root_answer
+    first = await build(repo, manager)
+    payments = next(
+        id
+        for id, files in first.evidence.element_files.items()
+        if id.startswith("component:") and "shop/payments.py" in files
+    )
+    statuses = {relation.id: relation.status for relation in first.model.relations}
+    assert statuses[f"{payments}->external:requests"] == "found"
+    assert statuses["container:shop->external:httpx"] == "found"
+    assert statuses["container:acme-admin->external:stripe"] == "documented"
+    assert statuses["person:beheerder->external:mollie"] == "documented"
+    assert first.contract_counts.externals_without_relation == ("Mollie",)
+    assert first.contract_counts.persons_without_relation == ("beheerder",)
+    first.lock.overrides.drop = ["external:mollie", "external:gone"]
+    first.lock.overrides.merge = {
+        "external:requests": "external:stripe",
+        "external:httpx": "external:stripe",
+    }
+    return first, payments
+
+
+async def test_drop_and_merge_reach_the_contract_and_replay(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    first, payments = await curation_baseline(
+        fixture_repo, c4_llm_manager, pipeline_answers
+    )
+    original_overrides = first.lock.overrides.model_copy(deep=True)
+    pipeline_answers.calls.clear()
+    result = await build(fixture_repo, c4_llm_manager, lock=first.lock)
+    ids = {element.id for element in result.contract.elements}
+    assert not {
+        "external:requests",
+        "external:httpx",
+        "external:mollie",
+        "person:beheerder",
+    }.intersection(ids)
+    assert "external:stripe" in ids
+    relation_id = f"{payments}->external:stripe"
+    relation = next(r for r in result.contract.relations if r.id == relation_id)
+    assert any(
+        source.kind == "code" and source.id in relation.sources
+        for source in result.contract.sources
+    )
+    assert relation.title == "gebruikt via API"
+    assert pipeline_answers.calls["titles"] >= 1
+    assert result.contract_counts.persons_without_relation == ("beheerder",)
+    assert "Mollie" not in result.contract_counts.externals_without_relation
+    assert result.contract_counts.redundant_direct_relations == 1
+    report_index = next(
+        index
+        for index, line in enumerate(result.report_extra)
+        if line.startswith("C4 documentation relationships not linked: ")
+    )
+    assert result.report_extra[report_index + 1] == (
+        "C4-overrides: drop ignored for external:gone (not on the map)"
+    )
+    assert result.lock.overrides == original_overrides
+    pipeline_answers.calls.clear()
+    replay = await build(fixture_repo, c4_llm_manager, lock=result.lock)
+    assert not pipeline_answers.calls
+    assert replay.model == result.model
+    assert next(
+        r.title for r in replay.contract.relations if r.id == relation_id
+    ) == relation.title
+
+
+async def test_trial_run_reports_ignored_overrides_without_calls(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    first, _payments = await curation_baseline(
+        fixture_repo, c4_llm_manager, pipeline_answers
+    )
+    lock = first.lock
+    original = lock.model_copy(deep=True)
+    pipeline_answers.calls.clear()
+    result = await build(fixture_repo, c4_llm_manager, lock=lock, trial=True)
+    assert not pipeline_answers.calls
+    assert result.contract is None
+    assert result.lock is None
+    assert (
+        "C4-overrides: drop ignored for external:gone (not on the map)"
+        in result.report_extra
+    )
+    assert lock == original
+    assert "external:requests" not in {element.id for element in result.model.elements}
+
+
 @pytest.mark.parametrize("origin", ["answer", "cache", "trial", "fallback"])
 async def test_documented_terms_require_their_own_literal_span(
     fixture_repo, c4_llm_manager, pipeline_answers, tmp_path, origin
