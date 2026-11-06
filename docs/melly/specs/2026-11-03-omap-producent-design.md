@@ -2,7 +2,7 @@
 
 - Datum: 2026-11-04 · Branch: `c4/shared-extraction-layer` (HEAD bij start `cfb59235`)
 - **Status:** opgeleverd 2026-11-05 (`4aa1f173`); historie, de code is leidend
-  Implementatie tot en met §20 is geaccepteerd; praktijkacceptatie van §20.6 blijft open voor een apart goed te keuren run 5. Deze oplevering geeft geen toestemming voor een providerrun of push.
+  Implementatie tot en met §20 is geaccepteerd. Praktijkacceptatie §20.6: run 5 uitgevoerd op 2026-11-06 (`5d7f4ba0`); controle 4 en 5 geslaagd, controle 3 deels (OpenCode CLI ontbreekt), zie besluitenlog rij "O-MAP §20.6 · run 5 en overrides". Deze oplevering geeft geen toestemming voor een providerrun of push.
 - Besluitenlog: [2026-10-27-map-structuuranalyse.md](../decisions/2026-10-27-map-structuuranalyse.md), de rijen "O-MAP", "Bronselectie", "Groepsindeling", "C4-toets" en "Bouwstenen en reikwijdte" (hieronder "besluit: …")
 - Consument: [AutoDoc-spec](2026-10-29-autodoc-c4-map-design.md) en `chunkhound/autodoc/architecture/`
 - Vervolg: [deel B, containers per proces](2026-11-04-c4-processen-design.md)
