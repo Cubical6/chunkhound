@@ -1,7 +1,7 @@
 # Spec: LLM-beslissingen voor personen en externe systemen (O-MAP vervolg)
 
 - Datum: 2026-11-06 · Branch: `c4/shared-extraction-layer` (HEAD bij start `7be265c7`)
-- **Status:** concept, wacht op review. Geeft geen toestemming voor een providerrun of push.
+- **Status:** spec en [implementatieplan](../plans/2026-11-06-omap-llm-beslissingen.md) goedgekeurd 2026-11-06 (besluiten: Spec-review · goedkeuring; Planreview · goedkeuring). Implementatie wordt overgedragen aan de seriële Orca-coordinator; nog niet geïmplementeerd. Geeft geen toestemming voor een providerrun, wijziging van de run-5-overrides of push.
 - Besluitenlog: [2026-10-27-map-structuuranalyse.md](../decisions/2026-10-27-map-structuuranalyse.md), de rijen van 2026-11-06 vanaf "Domeinmodel · personen" tot en met "Ontwerp · patroon en klassendiagram" (hieronder "besluit: …")
 - Model: [map-structuuranalyse.md](../models/map-structuuranalyse.md), regels R17-R23
 - Basis: [O-MAP deel A](2026-11-03-omap-producent-design.md), §19 en §20. Deze spec herziet §20.7 "Automatisch samenvoegen".
