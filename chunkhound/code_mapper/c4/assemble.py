@@ -2,11 +2,11 @@
 
 from collections import Counter, defaultdict
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from chunkhound.code_mapper.c4.classify import Classification
-from chunkhound.code_mapper.c4.curation import CurationState, curate
+from chunkhound.code_mapper.c4.curation import CurationState, curate, remap_overrides
 from chunkhound.code_mapper.c4.documented import DocElement, DocumentedOutcome
 from chunkhound.code_mapper.c4.grouping import Group
 from chunkhound.code_mapper.c4.identity import element_id
@@ -86,6 +86,7 @@ class AssemblyInput:
     fallback_containers: frozenset[str] = frozenset()
     # Language detection reads ambiguous files (.m), so paths must resolve.
     project_root: Path = Path()
+    merges: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -441,14 +442,8 @@ def assemble(inp: AssemblyInput) -> tuple[list[Element], list[Relation], C4Evide
     return elements, relations, evidence
 
 
-def assemble_with_notes(
-    inp: AssemblyInput,
-) -> tuple[list[Element], list[Relation], C4Evidence, AssemblyNotes]:
-    """Consume finalized retry outcomes; writer assigns the shared run ID later.
-
-    element_files rolls component files up to their container/system; directly
-    owned files stay with the container. Documentation is not file membership.
-    """
+def prepare_assembly(inp: AssemblyInput) -> tuple[CurationState, UnlinkedCounts]:
+    """Build fresh source-backed state before decisions, overrides and coverage."""
     state = _Assembly(inp)
     state.runtime()
     state.components()
@@ -457,7 +452,7 @@ def assemble_with_notes(
     state.statuses()
     references = state.static_relations()
     state.documented_relations()
-    curated = curate(
+    return (
         CurationState(
             elements=state.elements,
             relations=state.relations,
@@ -465,18 +460,41 @@ def assemble_with_notes(
             references=references,
             files=state.files,
         ),
+        UnlinkedCounts(
+            no_match=state.unlinked["no_match"],
+            ambiguous=state.unlinked["ambiguous"],
+            not_allowed=state.unlinked["not_allowed"],
+        ),
+    )
+
+
+def assemble_with_notes(
+    inp: AssemblyInput,
+) -> tuple[list[Element], list[Relation], C4Evidence, AssemblyNotes]:
+    """Apply LLM merges before lock rules; writer assigns the shared run ID later.
+
+    element_files rolls component files up to their container/system; directly
+    owned files stay with the container. Documentation is not file membership.
+    """
+    state, unlinked = prepare_assembly(inp)
+    decisions = curate(
+        state, inp.titles, Overrides(merge=inp.merges), prefix="C4-decisions:"
+    )
+    overrides, ignored = remap_overrides(inp.overrides, decisions.absorbed)
+    curated = curate(
+        replace(decisions, ignored_overrides=decisions.ignored_overrides + ignored),
         inp.titles,
-        inp.overrides,
+        overrides,
     )
     for element in curated.elements.values():
-        element.name = inp.overrides.names.get(element.id, element.name)
-        element.description = inp.overrides.descriptions.get(
+        element.name = overrides.names.get(element.id, element.name)
+        element.description = overrides.descriptions.get(
             element.id, element.description
         )
         if curated.files[element.id]:
             element.coverage = Coverage(status="not_computed", topics=[])
     for relation in curated.relations.values():
-        relation.title = inp.overrides.titles.get(relation.id, relation.title)
+        relation.title = overrides.titles.get(relation.id, relation.title)
     citations = {tuple(c.model_dump().values()): c for c in curated.citations}
     evidence = C4Evidence(
         schema_version=SCHEMA_VERSION,
@@ -502,11 +520,7 @@ def assemble_with_notes(
         [curated.relations[id] for id in sorted(curated.relations)],
         evidence,
         AssemblyNotes(
-            unlinked=UnlinkedCounts(
-                no_match=state.unlinked["no_match"],
-                ambiguous=state.unlinked["ambiguous"],
-                not_allowed=state.unlinked["not_allowed"],
-            ),
+            unlinked=unlinked,
             ignored_overrides=curated.ignored_overrides,
         ),
     )

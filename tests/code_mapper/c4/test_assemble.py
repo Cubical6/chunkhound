@@ -1,6 +1,9 @@
 """Assembly contracts: sources, static edges, coverage and referential integrity."""
 
+from copy import deepcopy
 from dataclasses import replace
+
+import pytest
 
 from chunkhound.code_mapper.c4.assemble import (
     AssemblyInput,
@@ -636,3 +639,199 @@ def test_curation_ignores_invalid_entries_with_a_reason():
             }
         )
         assert assemble_with_notes(replace(inp, overrides=reversed_overrides)) == result
+
+
+@pytest.mark.parametrize(
+    "overrides,external_ids,name,description,note",
+    [
+        (Overrides(drop=["external:stripe"]), {"external:billing"}, None, None, None),
+        (
+            Overrides(merge={"external:stripe": "external:billing"}),
+            {"external:billing"},
+            None,
+            None,
+            None,
+        ),
+        (
+            Overrides(merge={"external:billing": "external:stripe"}),
+            {"external:payments"},
+            "Payments",
+            "Takes payments.",
+            None,
+        ),
+        (
+            Overrides(merge={"external:stripe": "external:payments"}),
+            {"external:payments", "external:billing"},
+            "Payments",
+            "Takes payments.",
+            "same element",
+        ),
+        (
+            Overrides(
+                names={"external:stripe": "Manual payments"},
+                descriptions={"external:stripe": "Manual description"},
+            ),
+            {"external:payments", "external:billing"},
+            "Manual payments",
+            "Manual description",
+            None,
+        ),
+        (
+            Overrides(
+                names={"external:stripe": "Source", "external:payments": "Target"},
+                descriptions={
+                    "external:stripe": "Source description",
+                    "external:payments": "Target description",
+                },
+            ),
+            {"external:payments", "external:billing"},
+            "Target",
+            "Target description",
+            "conflict after merge",
+        ),
+        (
+            Overrides(
+                titles={"component:a->external:stripe": "Original title"},
+                labels={"external:stripe": "Original label"},
+                classifications={"stripe": "library"},
+                placements={"external:stripe": "container:app"},
+            ),
+            {"external:payments", "external:billing"},
+            "Payments",
+            "Takes payments.",
+            None,
+        ),
+    ],
+)
+def test_r22_lock_overrides_follow_llm_target(
+    overrides, external_ids, name, description, note
+):
+    inp = assembly_input()
+    inp.documented.elements.extend(
+        [
+            DocElement("external", "Payments", citation(line=7), "Takes payments."),
+            DocElement("external", "Billing", citation(line=8)),
+        ]
+    )
+    inp.merges = {"external:stripe": "external:payments"}
+    inp.overrides = overrides
+    elements, relations, _, notes = assemble_with_notes(inp)
+    assert {e.id for e in elements if e.kind == "external"} == external_ids
+    if name is not None:
+        payments = next(e for e in elements if e.id == "external:payments")
+        assert (payments.name, payments.description) == (name, description)
+    if note:
+        assert any(note in message for message in notes.ignored_overrides)
+    else:
+        assert notes.ignored_overrides == ()
+    if overrides.titles:
+        assert next(r for r in relations if r.to_id == "external:payments").title != (
+            "Original title"
+        )
+        from chunkhound.code_mapper.c4.curation import remap_overrides
+
+        remapped, _ = remap_overrides(overrides, inp.merges)
+        for field in ("titles", "labels", "classifications", "placements"):
+            assert getattr(remapped, field) == getattr(overrides, field)
+
+
+@pytest.mark.parametrize("target_rule", [False, True])
+def test_r22_remapped_override_conflicts_are_deterministic(target_rule):
+    inp = assembly_input()
+    inp.documented.elements.extend(
+        [
+            DocElement("external", term, citation(line=line))
+            for line, term in enumerate(("Alpha", "Payments", "Billing", "Checkout"), 7)
+        ]
+    )
+    inp.merges = {
+        "external:stripe": "external:payments",
+        "external:alpha": "external:payments",
+    }
+    inp.overrides = Overrides(
+        drop=["external:missing", "external:missing"],
+        merge={
+            "external:stripe": "external:checkout",
+            "external:alpha": "external:billing",
+        },
+        names={"external:stripe": "Stripe name", "external:alpha": "Alpha name"},
+        descriptions={
+            "external:stripe": "Stripe description",
+            "external:alpha": "Alpha description",
+        },
+    )
+    if target_rule:
+        inp.overrides.names["external:payments"] = "Target name"
+        inp.overrides.descriptions["external:payments"] = "Target description"
+    # Dropping Billing after the remap would hide which merge rule won.
+    elements, _, _, notes = result = assemble_with_notes(inp)
+    assert {e.id for e in elements if e.kind == "external"} == {
+        "external:billing",
+        "external:checkout",
+    }
+    for field in ("merge", "names", "descriptions"):
+        assert any(
+            f"{field} ignored" in n and "conflict after merge" in n
+            for n in notes.ignored_overrides
+        )
+    inp.overrides = inp.overrides.model_copy(
+        update={
+            field: dict(reversed(list(getattr(inp.overrides, field).items())))
+            for field in ("merge", "names", "descriptions")
+        }
+        | {"drop": list(reversed(inp.overrides.drop))}
+    )
+    inp.merges = dict(reversed(list(inp.merges.items())))
+    assert assemble_with_notes(inp) == result
+    # Without the lock merge, names and descriptions expose their own precedence.
+    inp.overrides.merge = {}
+    payments = next(e for e in assemble(inp)[0] if e.id == "external:payments")
+    assert (payments.name, payments.description) == (
+        ("Target name", "Target description")
+        if target_rule
+        else ("Alpha name", "Alpha description")
+    )
+
+
+def test_r18_llm_merge_preserves_evidence():
+    inp = assembly_input()
+    inp.documented.elements.append(
+        DocElement("external", "Payments", citation(line=7), "Takes payments.")
+    )
+    inp.documented.relations = [
+        DocRelation("A", "Payments", "pays via", citation(line=8)),
+        DocRelation("stripe", "Payments", "wraps", citation(line=9)),
+    ]
+    inp.merges = {
+        "external:stripe": "external:payments",
+        "external:missing": "external:payments",
+    }
+    inp.overrides = Overrides(merge={"external:payments": "person:user"})
+    original = deepcopy(inp)
+    elements, relations, evidence, notes = result = assemble_with_notes(inp)
+    assert {e.id for e in elements if e.kind == "external"} == {"external:payments"}
+    target = next(e for e in elements if e.id == "external:payments")
+    assert (target.name, target.description, target.status) == (
+        "Payments",
+        "Takes payments.",
+        "found",
+    )
+    relation = next(r for r in relations if r.to_id == target.id)
+    assert (relation.id, relation.status, relation.reference_counts) == (
+        "component:a->external:payments",
+        "found",
+        {"import": 1},
+    )
+    assert citation("a.py", 2, "code", target.id) in evidence.citations
+    assert citation(line=7, target=target.id) in evidence.citations
+    assert citation(line=8, target=relation.id) in evidence.citations
+    assert not any(r.from_id == r.to_id for r in relations)
+    assert not any(
+        c.start_line == 9 and c.file == "README.md" for c in evidence.citations
+    )
+    reference = next(r for r in evidence.references if r.line == 2)
+    assert (reference.to, reference.relation) == ("package:stripe", relation.id)
+    assert any(n.startswith("C4-decisions:") for n in notes.ignored_overrides)
+    assert any(n.startswith("C4-overrides:") for n in notes.ignored_overrides)
+    assert assemble_with_notes(inp) == result
+    assert inp == original

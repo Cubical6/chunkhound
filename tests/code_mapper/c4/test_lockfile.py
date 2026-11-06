@@ -154,6 +154,10 @@ def lockfile_with_overrides(overrides: dict[str, object]) -> str:
         '{"version": 5, "scopes": {"/": {"tree_spec": {}}}}',
         lockfile_with_overrides({"drop": "external:httpx"}),
         lockfile_with_overrides({"merge": {"external:google": 1}}),
+        lockfile_with_overrides({"keep_apart": "external:google"}),
+        lockfile_with_overrides({"keep_apart": [["external:google"]]}),
+        lockfile_with_overrides({"keep_apart": [["a", "b", "c"]]}),
+        lockfile_with_overrides({"keep_apart": [["external:google", 1]]}),
     ],
 )
 def test_corrupt_lockfile_is_reported_not_overwritten(
@@ -177,6 +181,7 @@ def test_override_section_is_never_rewritten(tmp_path: Path) -> None:
         "labels": {"arrow:api-service": "Manual label"},
         "drop": ["external:httpx"],
         "merge": {"external:google": "external:gemini"},
+        "keep_apart": [["external:google", "external:google-gemini"]],
     }
     document["scopes"]["/"]["overrides"] = manual
     path.write_text(json.dumps(document))
@@ -190,6 +195,9 @@ def test_override_section_is_never_rewritten(tmp_path: Path) -> None:
         "external:google": "external:gemini"
     }
     assert read_scope_lock(tmp_path, "/").base_sha == "new"
+    assert read_scope_lock(tmp_path, "/").overrides.keep_apart == [
+        ("external:google", "external:google-gemini")
+    ]
 
 
 def test_initial_scope_can_supply_overrides(tmp_path: Path) -> None:
@@ -197,3 +205,23 @@ def test_initial_scope_can_supply_overrides(tmp_path: Path) -> None:
     lock.overrides.classifications = {"service": "external"}
     write_scope_lock(tmp_path, "/", lock)
     assert read_scope_lock(tmp_path, "/").overrides == lock.overrides
+
+
+def test_v5_lock_without_keep_apart_is_readable(tmp_path: Path) -> None:
+    path = tmp_path / LOCK_RELATIVE_PATH
+    path.parent.mkdir(parents=True)
+    content = lockfile_with_overrides(
+        {
+            "drop": ["external:httpx"],
+            "merge": {"external:google": "external:gemini"},
+        }
+    )
+    path.write_text(content)
+    restored = read_scope_lock(tmp_path, "/")
+    assert restored is not None
+    assert restored.overrides.keep_apart == []
+    assert restored.overrides.drop == ["external:httpx"]
+    assert restored.overrides.merge == {"external:google": "external:gemini"}
+    write_scope_lock(tmp_path, "/", sample_lock("updated"))
+    manual = json.loads(path.read_text())["scopes"]["/"]["overrides"]
+    assert manual == json.loads(content)["scopes"]["/"]["overrides"]

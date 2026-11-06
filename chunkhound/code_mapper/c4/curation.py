@@ -1,7 +1,7 @@
 """Pure, simultaneous drop/merge curation of an assembled source-backed map."""
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from chunkhound.code_mapper.c4.merge import fallback_title, relation_fingerprint
 from chunkhound.code_mapper.c4.model import (
@@ -23,6 +23,7 @@ class CurationState:
     references: list[Reference]
     files: dict[str, list[str]]
     ignored_overrides: tuple[str, ...] = ()
+    absorbed: dict[str, str] = field(default_factory=dict)
 
 
 def _endpoint_reason(elements: dict[str, Element], *ids: str) -> str | None:
@@ -49,14 +50,14 @@ def _merge_reason(
 
 
 def _validated(
-    elements: dict[str, Element], overrides: Overrides
+    elements: dict[str, Element], overrides: Overrides, prefix: str
 ) -> tuple[set[str], dict[str, str], tuple[str, ...]]:
     dropped: set[str] = set()
     drop_notes: dict[str, str] = {}
     for id in sorted(set(overrides.drop)):
         reason = _endpoint_reason(elements, id)
         if reason:
-            drop_notes[id] = f"C4-overrides: drop ignored for {id} ({reason})"
+            drop_notes[id] = f"{prefix} drop ignored for {id} ({reason})"
         else:
             dropped.add(id)
 
@@ -66,7 +67,7 @@ def _validated(
         reason = _merge_reason(elements, source, target, dropped)
         if reason:
             merge_notes[source] = (
-                f"C4-overrides: merge ignored for {source} -> {target} ({reason})"
+                f"{prefix} merge ignored for {source} -> {target} ({reason})"
             )
         else:
             candidates[source] = target
@@ -76,7 +77,7 @@ def _validated(
     for source, target in candidates.items():
         if target in candidates:
             merge_notes[source] = (
-                f"C4-overrides: merge ignored for {source} -> {target} "
+                f"{prefix} merge ignored for {source} -> {target} "
                 "(target is merged itself)"
             )
         else:
@@ -89,6 +90,44 @@ def _validated(
             + [merge_notes[id] for id in sorted(merge_notes)]
         ),
     )
+
+
+def remap_overrides(
+    overrides: Overrides, absorbed: dict[str, str]
+) -> tuple[Overrides, tuple[str, ...]]:
+    """Follow accepted LLM merges without changing handwritten lock rules.
+
+    Colliding rules use the lowest original ID, except that a surviving
+    element's own name and description take precedence over absorbed rules.
+    """
+    updates: dict[str, dict[str, str] | list[str]] = {
+        "drop": sorted({absorbed.get(id, id) for id in overrides.drop})
+    }
+    notes: list[str] = []
+    for field_name in ("merge", "names", "descriptions"):
+        rules: dict[str, str] = getattr(overrides, field_name)
+        remapped: dict[str, str] = {}
+        ordered = sorted(
+            rules,
+            key=lambda id: (
+                field_name != "merge" and absorbed.get(id, id) != id,
+                id,
+            ),
+        )
+        for source in ordered:
+            target = absorbed.get(source, source)
+            if target in remapped:
+                notes.append(
+                    f"C4-overrides: {field_name} ignored for {source} -> {target} "
+                    "(conflict after merge)"
+                )
+                continue
+            value = rules[source]
+            remapped[target] = (
+                absorbed.get(value, value) if field_name == "merge" else value
+            )
+        updates[field_name] = remapped
+    return overrides.model_copy(update=updates), tuple(notes)
 
 
 def _relation_targets(
@@ -179,6 +218,8 @@ def curate(
     state: CurationState,
     titles: dict[str, str],
     overrides: Overrides,
+    *,
+    prefix: str = "C4-overrides:",
 ) -> CurationState:
     """Validate against the original map, then apply all accepted entries at once.
 
@@ -187,7 +228,7 @@ def curate(
     """
     elements, relations = state.elements, state.relations
     citations, references, files = state.citations, state.references, state.files
-    dropped, merged, ignored = _validated(elements, overrides)
+    dropped, merged, ignored = _validated(elements, overrides, prefix)
     kept_elements = {
         id: element.model_copy(deep=True)
         for id, element in elements.items()
@@ -220,5 +261,6 @@ def curate(
         citations=kept_citations,
         references=kept_references,
         files={id: sorted(values) for id, values in kept_files.items()},
-        ignored_overrides=ignored,
+        ignored_overrides=state.ignored_overrides + ignored,
+        absorbed=merged,
     )

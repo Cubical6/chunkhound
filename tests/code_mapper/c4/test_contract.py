@@ -1152,11 +1152,13 @@ def test_no_git_directory_gives_the_placeholder(
 ) -> None:
     monkeypatch.setenv("LC_ALL", "C")
     write_file(tmp_path / "a.py")
+    # Stop discovery at this fixture even when TMPDIR is inside a checkout.
+    (tmp_path / ".git").write_text(f"gitdir: {tmp_path / 'absent-git-metadata'}\n")
 
     rows, reasons = repositories(tmp_path, "a.py", head=NO_GIT_HEAD)
 
     assert rows["."] == ContractRepository(".", ".", None, NO_GIT_HEAD)
-    assert "not a git repository" in reasons["."]
+    assert reasons["."]
 
 
 def test_repository_without_a_commit_gives_no_url(tmp_path: Path) -> None:

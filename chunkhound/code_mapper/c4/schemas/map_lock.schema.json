@@ -235,6 +235,23 @@
           "title": "Drop",
           "type": "array"
         },
+        "keep_apart": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Keep Apart",
+          "type": "array"
+        },
         "labels": {
           "additionalProperties": {
             "type": "string"
