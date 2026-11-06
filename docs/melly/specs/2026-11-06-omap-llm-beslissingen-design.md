@@ -88,7 +88,7 @@ Direct na `extract_documented` en `retries.drain()` (`pipeline.py:756-768`), vó
 3. **Rijvraag** `c4_row` per rij van een dienstentabel. Bij `external` of `person`:
    - een nieuw `DocElement` met als term de zichtbare tekst van de eerste cel: de code leidt die af uit de inline-knopen van tree-sitter (link, code, nadruk), niet het model; een lege eerste cel levert niets;
    - het citaat is de rij (bestand, regelnummer, ruwe rijtekst). De code las de term zelf uit die regel, dus `verify_term` (`documented.py:183`) is niet nodig; die functie zoekt de term letterlijk in de ruwe regel en zou `Open**Code** CLI` afwijzen. `verify_term` blijft alleen voor het hergebruik van de lock (`documented.py:211`), en rij-elementen staan niet in de lock;
-   - een `DocRelation` met de vaste titel `uses`, in de stijl van `fallback_title` (`merge.py:133`): voor een extern systeem van het systeem naar het element, voor een persoon van het element naar het systeem.
+   - een `DocRelation` met de vaste titel `uses`, in de stijl van `fallback_title` (`merge.py:133`): voor een extern systeem van het systeem naar het element, voor een persoon van het element naar het systeem (besluit: Spec-review · richting rij-relatie).
 4. **Elementcontrole** `c4_element` per `DocElement` van soort `person` of `external` uit de documentstap. Rij-elementen uit stap 3 krijgen geen elementcontrole; de rijvraag besliste hun soort al.
    - Een andere soort: de soort wordt aangepast.
    - `neither`: het element verdwijnt. Een `DocRelation` met dat element als eindpunt telt in de bestaande telling "not linked: no match" (`pipeline.py:847-849`).
