@@ -93,7 +93,7 @@ classDiagram
 | R20  | Elk element uit de documentstap krijgt de gesloten controle persoon / extern systeem / geen van beide, met de criteria uit R15 en R17                                                                                                                                | `astro` → geen van beide (R15c), valt weg; `https-endpoint` → geen van beide (R15a), valt weg; `AI assistant` → persoon                                                                                                                         |
 | R21  | De code haalt de tabellen uit de documentatie; een gesloten tabelvraag beslist of het een dienstentabel is, en per rij daarvan beslist een gesloten rijvraag de soort                                                                                                | LLM-tabel `configuration.md:497-509` → dienstentabel; rij "OpenCode CLI" → extern systeem met relatie `uses`; vlaggentabel in `cli-reference.md` → geen dienstentabel                                                                           |
 | R22  | Eerst de LLM-stappen, dan `drop`/`merge`/`names`; `keep_apart` verbiedt een samenvoeging; een override op een opgegaan id volgt het doel                                                                                                                             | `keep_apart: [["person:agents", "person:teams"]]` → apart, ook bij `same`; `names: {"person:agents": "AI agent"}` met `agents` opgegaan in `ai-assistant` → het doel heet "AI agent"                                                            |
-| R23  | Elke gesloten beslissing en het samenvoegvoorstel staan per item in een cache; opnieuw beslissen alleen bij gewijzigde invoer                                                                                                                                        | run zonder wijziging → 0 aanroepen, dezelfde kaart; nieuwe tabelrij → alleen die tabel, rij, het voorstel en de nieuwe paren; andere prompt, model of effort → alles                                                                            |
+| R23  | Elke gesloten beslissing en het samenvoegvoorstel staan per item in een cache; opnieuw beslissen alleen bij gewijzigde invoer                                                                                                                                        | run zonder wijziging → 0 aanroepen, dezelfde kaart; nieuwe tabelrij → die rij, het voorstel van die soort en de nieuwe paren (de tabelvraag alleen als de rij bij de eerste drie hoort); ander utility-model of -effort → alles                 |
 
 Geschiedenis bij R3 (uitvoeringsbesluit R): behoud elk paar met ≥10% overlap aan één kant, over bestanden in beide runs na renames. Meerdere voorgangers → `merge`, anders meerdere opvolgers → `split`, anders `continuation`; het label bewijst geen overerving. Niet-geërfde nieuwe id's krijgen tevens `new` (`from_id=""`), niet-geërfde oude id's `removed` (`to_id=""`) plus tombstone `oud_id → oud_id`. Andere eindpunten zijn echte id's; bestaande tombstones blijven staan en beide kolommen reserveren id's.
 
@@ -372,12 +372,12 @@ sequenceDiagram
     C4->>LLM: classify / merge / titles (alleen nieuw; niet bij --plan)
   end
   CLI->>LLM: documented (alle documenten in de scope; alleen bij gewijzigde hash of stapversie)
-  CLI->>LLM: decide: c4_table, c4_row, c4_element (alleen items zonder cachetreffer)
-  CLI->>C4: _prepare / _identify, AssemblyInput
-  CLI->>LLM: consolidate: c4_group, keep_apart filteren, c4_survivor, c4_pair -> AssemblyInput.merges
+  CLI->>LLM: decide: c4_table, c4_row, c4_element (alleen items zonder cachetreffer; de lock houdt de onbewerkte documentuitkomst)
+  CLI->>C4: _prepare, _identify, invoervingerafdruk, history/renames hergebruiken indien gelijk (pipeline.py:769-775)
+  CLI->>C4: AssemblyInput
+  CLI->>LLM: consolidate: c4_group per soort, keep_apart filteren, c4_survivor, c4_pair -> AssemblyInput.merges
   CLI->>C4: _titles, assemble: curate pass 1 (LLM), pass 2 (lock)
-  CLI->>C4: identity, topic_coverage, summaries
-  C4->>C4: vergelijk invoervingerafdruk; hergebruik laatste succesvolle history/renames indien gelijk
+  CLI->>C4: topic_coverage, summaries
   C4->>LLM: summaries (alleen nieuwe labels)
   CLI->>W: Markdown, _c4_map_model.json + _c4_map_evidence.json (samen), daarna _c4_model.json (contract, alleen volledige run)
   CLI->>Lock: os.replace na volledige run met exitcode 0; terugvalitems weggelaten

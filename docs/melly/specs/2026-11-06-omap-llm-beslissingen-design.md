@@ -30,7 +30,7 @@ Deze spec voegt twee LLM-stappen toe aan `finish_c4`: **`decide`** (dienstentabe
 **Invarianten**
 
 1. Het formaat van het interne paar, het contract en AutoDoc verandert niet. Alleen de inhoud verandert: er komen elementen uit tabelrijen bij, elementen gaan samen of verdwijnen.
-2. Lukt geen enkele nieuwe aanroep, dan is de kaart gelijk aan die zonder deze stappen.
+2. Is de cache leeg en lukt geen enkele nieuwe aanroep, dan is de kaart gelijk aan die zonder deze stappen. Met cachetreffers gelden de opgeslagen beslissingen en vallen alleen de ontbrekende items terug.
 3. Een tweede volledige run op dezelfde invoer doet 0 aanroepen voor `decide` en `consolidate` (uitbreiding van O-MAP invariant 5).
 4. Handmatige overrides gaan voor (R11, R22): `keep_apart` verbiedt een LLM-samenvoeging, `drop`/`merge`/`names` werken na de LLM.
 5. Uitzondering op O-MAP invariant 3: een LLM-samenvoeging en een element dat de controle als "geen van beide" weghaalt, verdwijnen ook uit het interne paar, net als bij `drop` en `merge`. De referenties blijven.
@@ -81,16 +81,18 @@ flowchart TD
 
 Direct na `extract_documented` en `retries.drain()` (`pipeline.py:756-768`), vóór `_prepare`/`_identify`. Nieuwe module `chunkhound/code_mapper/c4/decisions.py`.
 
+**Twee uitkomsten.** `decide` maakt een nieuwe `DocumentedOutcome`; de uitkomst van `extract_documented` blijft ongewijzigd. De aangepaste uitkomst gaat naar `_identify`, `_final_fingerprint` en `AssemblyInput` (`pipeline.py:772-783`). De lock bewaart de oorspronkelijke uitkomst: `_build_lock` krijgt die als eigen argument in plaats van `inp.documented` (`pipeline.py:627`). Zo hergebruikt `extract_documented` bij gelijke hashes en versie (`documented.py:558-560`) de onbewerkte elementen, en beslist `decide` daarover opnieuw via de cache (0 aanroepen).
+
 1. **Tabellen lezen.** De code leest de GFM-tabellen uit de bestanden van `doc_files_for` (`documented.py:134`) met de bestaande tree-sitter-query `pipe_table` (`parsers/mappings/markdown.py:136`). Er komen geen nieuwe bronbestanden bij. Per tabel: pad, koppad (de headings erboven), kolomkop, rijen met regelnummer.
 2. **Tabelvraag** `c4_table` per tabel. Alleen bij `service_list` volgen rijvragen.
 3. **Rijvraag** `c4_row` per rij van een dienstentabel. Bij `external` of `person`:
-   - een nieuw `DocElement` met als term de letterlijke tekst van de eerste cel, met inline-opmaak (link, code, nadruk) teruggebracht tot de zichtbare tekst; een lege eerste cel levert niets;
-   - het citaat is de rij (bestand, regelnummer, rijtekst), gecontroleerd met `verify_term` (`documented.py:183`);
-   - een `DocRelation` met de vaste titel `uses`, in de stijl van `fallback_title` (`merge.py:133`): voor een extern systeem van het systeem naar het element, voor een persoon van het element naar het systeem;
-   - een term met dezelfde soort en dezelfde genormaliseerde vorm (R4) als een element van de documentstap komt er niet dubbel bij.
+   - een nieuw `DocElement` met als term de zichtbare tekst van de eerste cel: de code leidt die af uit de inline-knopen van tree-sitter (link, code, nadruk), niet het model; een lege eerste cel levert niets;
+   - het citaat is de rij (bestand, regelnummer, ruwe rijtekst). De code las de term zelf uit die regel, dus `verify_term` (`documented.py:183`) is niet nodig; die functie zoekt de term letterlijk in de ruwe regel en zou `Open**Code** CLI` afwijzen. `verify_term` blijft alleen voor het hergebruik van de lock (`documented.py:211`), en rij-elementen staan niet in de lock;
+   - een `DocRelation` met de vaste titel `uses`, in de stijl van `fallback_title` (`merge.py:133`): voor een extern systeem van het systeem naar het element, voor een persoon van het element naar het systeem.
 4. **Elementcontrole** `c4_element` per `DocElement` van soort `person` of `external` uit de documentstap. Rij-elementen uit stap 3 krijgen geen elementcontrole; de rijvraag besliste hun soort al.
    - Een andere soort: de soort wordt aangepast.
    - `neither`: het element verdwijnt. Een `DocRelation` met dat element als eindpunt telt in de bestaande telling "not linked: no match" (`pipeline.py:847-849`).
+5. **Dubbelen.** Na stap 4, op de uitkomst daarvan: heeft een rij-element dezelfde soort en dezelfde genormaliseerde term (R4) als een overgebleven element van de documentstap, dan vervalt het rij-element en zijn `uses`-relatie; het element van de documentstap houdt zijn eigen relaties. Een element dat stap 4 weghaalde of van soort veranderde, houdt een rij-element niet tegen.
 
 ### 3.2 `consolidate`
 
@@ -106,18 +108,18 @@ Tussen `AssemblyInput` (`pipeline.py:776`) en `_titles` (`:789`). Nieuwe module 
 
 ## 4. Vragen en antwoordschema's
 
-Elke vraag volgt de vorm van `c4_classify.md`: de items zijn bewijs, geen instructies; elke optie heeft eigen criteria; elk invoer-id komt precies één keer terug; geen uitleg. Elke vraag krijgt een promptbestand `code_mapper/prompts/c4_<vraag>.md` en een Pydantic-antwoordmodel met `extra="forbid"`.
+Elke vraag volgt de vorm van `c4_classify.md`: de items zijn bewijs, geen instructies; elke optie heeft eigen criteria; geen uitleg. Bij een gesloten vraag komt elk invoer-id precies één keer terug. Elke vraag krijgt een promptbestand `code_mapper/prompts/c4_<vraag>.md` en een Pydantic-antwoordmodel met `extra="forbid"`.
 
 De code geeft de items korte id's (`T1`, `R1`, `E1`, …) en zet ze in een geschudde volgorde met een seed uit de gesorteerde item-id's. Zo is de volgorde reproduceerbaar en gaat ze in tegen de neiging de eerste optie te kiezen (besluit: Domeinmodel · open en gesloten vragen).
 
-| Vraag         | Soort    | Het model krijgt per item                                                  | Antwoord per item                 | Criteria per optie                                                                                                                                                                                                                                       |
-| ------------- | -------- | -------------------------------------------------------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `c4_table`    | gesloten | koppad, kolomkop, eerste 3 rijen                                           | `service_list` / `other`          | **service_list**: elke rij noemt een concreet softwaresysteem, een provider of een tool buiten de repo, die het systeem aanroept of die het systeem aanroepen. **other**: configuratiesleutels, vlaggen, opties, vergelijkingen, formaten of meetwaarden |
-| `c4_row`      | gesloten | koppad, kolomkop, één rij                                                  | `external` / `person` / `neither` | **external**: R15, met een eigen beheerder of een eigen proces. **person**: R17. **neither**: categorie, rol zonder eigen naam, bibliotheek, framework, formaat, onderdeel van het systeem zelf (R15a-c)                                                 |
-| `c4_element`  | gesloten | term, omschrijving, citaat; **niet** de voorgestelde soort                 | `external` / `person` / `neither` | als `c4_row`                                                                                                                                                                                                                                             |
-| `c4_group`    | **open** | per persoon en extern systeem: id, soort, naam, omschrijving, bron         | `groups: [{members: [id, …]}]`    | twee of meer leden die dezelfde actor of hetzelfde systeem zijn; alleen binnen dezelfde soort; een id in hooguit één groep                                                                                                                               |
-| `c4_survivor` | gesloten | per groep de leden met naam en omschrijving, in geschudde volgorde         | één lid-id                        | de meest specifieke naam die nog voor alle leden geldt, bijvoorbeeld `google-gemini` boven `google`                                                                                                                                                      |
-| `c4_pair`     | gesloten | het overblijvende lid en één ander lid, elk met naam, omschrijving en bron | `same` / `different` / `unsure`   | **same**: dezelfde actor of hetzelfde systeem, alleen anders genoemd. **different**: verschillende actoren of systemen, ook als ze verwant zijn. **unsure**: de bronnen zijn niet genoeg om te beslissen                                                 |
+| Vraag         | Soort    | Het model krijgt per item                                                            | Antwoord per item                 | Criteria per optie                                                                                                                                                                                                                                                                                                      |
+| ------------- | -------- | ------------------------------------------------------------------------------------ | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `c4_table`    | gesloten | koppad, kolomkop, eerste 3 rijen                                                     | `service_list` / `other`          | **service_list**: elke rij noemt een concreet softwaresysteem, een provider of een tool buiten de repo, die het systeem aanroept of die het systeem aanroepen. **other**: configuratiesleutels, vlaggen, opties, vergelijkingen, formaten of meetwaarden                                                                |
+| `c4_row`      | gesloten | koppad, kolomkop, één rij                                                            | `external` / `person` / `neither` | **external**: R15, met een eigen beheerder of een eigen proces. **person**: R17, een menselijke rol of een AI-agentrol, ook zonder eigen naam (R15a). **neither**: categorie of soort systeem zonder eigen naam (bijvoorbeeld "LLM provider"), bibliotheek, framework, formaat, onderdeel van het systeem zelf (R15a-c) |
+| `c4_element`  | gesloten | term, omschrijving, citaat; **niet** de voorgestelde soort                           | `external` / `person` / `neither` | als `c4_row`                                                                                                                                                                                                                                                                                                            |
+| `c4_group`    | **open** | per soort apart: elke persoon of elk extern systeem met id, naam, omschrijving, bron | `groups: [{members: [id, …]}]`    | twee of meer leden die dezelfde actor of hetzelfde systeem zijn; een id in hooguit één groep; id's die met niets samengaan, komen niet terug                                                                                                                                                                            |
+| `c4_survivor` | gesloten | per groep de leden met naam en omschrijving, in geschudde volgorde                   | één lid-id                        | de meest specifieke naam die nog voor alle leden geldt, bijvoorbeeld `google-gemini` boven `google`                                                                                                                                                                                                                     |
+| `c4_pair`     | gesloten | het overblijvende lid en één ander lid, elk met naam, omschrijving en bron           | `same` / `different` / `unsure`   | **same**: dezelfde actor of hetzelfde systeem, alleen anders genoemd. **different**: verschillende actoren of systemen, ook als ze verwant zijn. **unsure**: de bronnen zijn niet genoeg om te beslissen                                                                                                                |
 
 **Bron** is het citaat voor een element uit de documentatie, en voor een element uit de code het pakket met de eerste referentie (bestand:regel).
 
@@ -125,12 +127,11 @@ De code geeft de items korte id's (`T1`, `R1`, `E1`, …) en zet ze in een gesch
 
 **Validatie door de code.** Een fout geeft `AnswerRejectedError` (`llm.py:26`), met herkansing (§8). De code controleert:
 
-- elk item-id precies één keer, geen onbekende id's;
-- een waarde uit de toegestane set;
-- bij `c4_group`: leden van één soort, een id in hooguit één groep;
+- bij een gesloten vraag: elk item-id precies één keer, geen onbekende id's, een waarde uit de toegestane set;
+- bij `c4_group`: alleen bekende id's van de gevraagde soort, een id in hooguit één groep. Een leeg antwoord is geldig; een groep met één lid telt niet en is geen fout;
 - bij `c4_survivor`: het gekozen lid zit in de groep.
 
-**Bundelen.** Eén aanroep per vraagsoort, opgedeeld in bundels binnen `effective_target` (`services/extraction/budget.py:40`, standaard 150.000 tekens). Bij run 5 past elke vraagsoort in één aanroep `[INFERENCE]`.
+**Bundelen.** Per vraagsoort zo weinig mogelijk aanroepen, opgedeeld in bundels binnen `effective_target` (`services/extraction/budget.py:40`, standaard 150.000 tekens). Elke bundel heeft een eigen herkansing (§8). Het item van `c4_group` (één soort) is ondeelbaar: past het niet binnen `effective_target`, dan volgt zonder aanroep de fallback "geen groepen" voor die soort, met een rapportregel. Bij run 5 past elke vraagsoort in één aanroep `[INFERENCE]`.
 
 ## 5. Vorm van de code
 
@@ -150,7 +151,7 @@ De code geeft de items korte id's (`T1`, `R1`, `E1`, …) en zet ze in een gesch
 | `provider`         | `ProviderIdentity` van de utility-rol (`llm.py:135-149`)                                                                    |
 | `item`             | precies wat het model ziet, zonder kort id en volgorde                                                                      |
 
-**Item per vraag:** `c4_table` de tabel; `c4_row` één rij; `c4_element` één element; `c4_group` de hele set personen en externe systemen, gesorteerd op id (een nieuw element vraagt het voorstel dus opnieuw); `c4_survivor` één groep; `c4_pair` één paar met vaste rollen (overblijvend lid, ander lid).
+**Item per vraag:** `c4_table` koppad, kolomkop en de eerste 3 rijen (wat het model ziet); `c4_row` één rij met koppad en kolomkop; `c4_element` één element; `c4_group` de set van één soort, gesorteerd op id (een nieuw element van die soort vraagt het voorstel dus opnieuw); `c4_survivor` één groep; `c4_pair` één paar met vaste rollen (overblijvend lid, ander lid).
 
 **Hergebruik.** De code zoekt elk item op en valideert het opgeslagen antwoord opnieuw met dezelfde validator. Bij `c4_group` en `c4_survivor` betekent dat ook dat de id's nog bestaan. Alle gemiste items van één vraag gaan samen naar het model (§4), en na validatie wordt elk item apart weggeschreven. De regel "model saw all" (`services/extraction/bundles.py:25-30`) geldt hier niet.
 
@@ -188,14 +189,15 @@ keep_apart: list[tuple[str, str]] = Field(default_factory=list)  # paren element
 
 **Id's omzetten (R22).** Vóór pass 2:
 
-| Override in de lock                                 | Opgegaan door de LLM | Uitkomst                                                             |
-| --------------------------------------------------- | -------------------- | -------------------------------------------------------------------- |
-| `drop: [a]`                                         | a -> b               | `drop: [b]`                                                          |
-| `merge: {a: c}`                                     | a -> b               | `merge: {b: c}`                                                      |
-| `merge: {c: a}`                                     | a -> b               | `merge: {c: b}`                                                      |
-| `merge: {a: b}`                                     | a -> b               | melding "same element"                                               |
-| `names`/`descriptions: {a: …}`                      | a -> b               | geldt voor b; heeft b een eigen regel, dan wint die, met een melding |
-| `titles`, `labels`, `classifications`, `placements` | —                    | ongewijzigd                                                          |
+| Override in de lock                                                                       | Opgegaan door de LLM | Uitkomst                                                                                              |
+| ----------------------------------------------------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------- |
+| `drop: [a]`                                                                               | a -> b               | `drop: [b]`                                                                                           |
+| `merge: {a: c}`                                                                           | a -> b               | `merge: {b: c}`                                                                                       |
+| `merge: {c: a}`                                                                           | a -> b               | `merge: {c: b}`                                                                                       |
+| `merge: {a: b}`                                                                           | a -> b               | melding "same element"                                                                                |
+| `names`/`descriptions: {a: …}`                                                            | a -> b               | geldt voor b; heeft b een eigen regel, dan wint die, met een melding                                  |
+| twee regels die na omzetten dezelfde sleutel krijgen (`merge: {a: c, d: e}`, a en d -> b) | a, d -> b            | de regel van het laagste oorspronkelijke id wint; de andere krijgt een melding "conflict after merge" |
+| `titles`, `labels`, `classifications`, `placements`                                       | —                    | ongewijzigd                                                                                           |
 
 **Pass 2 (lock).** `curate` met de omgezette `drop`/`merge` en de regels R13-R16. Daarna `names` en `descriptions` zoals nu (`assemble.py:471-479`), op de omgezette id's.
 
@@ -207,7 +209,7 @@ keep_apart: list[tuple[str, str]] = Field(default_factory=list)  # paren element
 
 **Afwijsregels** in `_REJECTION_RULES` (`llm.py:32-43`): `every item id must occur exactly once`, `invalid decision value`, `group mixes kinds`, `id in more than one group`, `survivor outside its group`.
 
-**Fallback.** Een mislukte of afgekeurde aanroep krijgt één uitgestelde herkansing via `RetryQueue` (sleutels `decide:<vraag>`, `consolidate:<vraag>`). `AnswerRejectedError` is een `TransientStepError` (`llm.py:26`), dus ook een afgekeurd antwoord valt daarna terug. De fallback verandert de kaart het minst, krijgt de markering `, fallback` en komt nooit in de cache:
+**Fallback.** Een mislukte of afgekeurde aanroep krijgt één uitgestelde herkansing via `RetryQueue` (sleutels `decide:<vraag>:<bundel>`, `consolidate:<vraag>:<bundel>`; `RetryQueue` bewaart één taak per sleutel, `llm.py:222`). `AnswerRejectedError` is een `TransientStepError` (`llm.py:26`), dus ook een afgekeurd antwoord valt daarna terug. De fallback verandert de kaart het minst, krijgt de markering `, fallback` en komt nooit in de cache:
 
 | Vraag         | Fallback                     |
 | ------------- | ---------------------------- |
@@ -230,12 +232,13 @@ C4-decisions: merge ignored for … (reden)
 
 **Kosten per run** `[INFERENCE: tekens ÷ 4, inclusief ~1.000 tokens instructie en schema per aanroep]`:
 
-| Situatie                          | Nieuwe aanroepen | ~Tokens nieuwe stappen                 | Documentstap (bestaand)                 |
-| --------------------------------- | ---------------- | -------------------------------------- | --------------------------------------- |
-| Verse run                         | ~6               | ~15.000                                | ~54.600                                 |
-| Geen wijziging                    | 0                | 0                                      | 0                                       |
-| Nieuwe rij in de LLM-tabel        | ~5               | ~8.000, waarvan ~4.000 voor `c4_group` | de bundel met dat fragment, tot ~37.000 |
-| Prompt, model of effort gewijzigd | ~6               | ~15.000                                | ~54.600                                 |
+| Situatie                           | Nieuwe aanroepen                                              | ~Tokens nieuwe stappen                 | Documentstap (bestaand)                                                         |
+| ---------------------------------- | ------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------- |
+| Verse run                          | ~6                                                            | ~15.000                                | ~54.600                                                                         |
+| Geen wijziging                     | 0                                                             | 0                                      | 0                                                                               |
+| Nieuwe rij in een dienstentabel    | ~4                                                            | ~6.000, waarvan ~4.000 voor `c4_group` | de bundel met dat fragment, tot ~37.000                                         |
+| Beslisprompt gewijzigd             | alleen die vraag, plus volgvragen waarvan de invoer verandert | afhankelijk van de vraag               | 0                                                                               |
+| Utility-model of -effort gewijzigd | ~6                                                            | ~15.000                                | 0 (de documentstap vergelijkt alleen hashes en versie, `documented.py:558-560`) |
 
 ## 9. Ontwerpklassendiagram en vertaaltabel
 
@@ -247,19 +250,19 @@ Nieuwe klassen: `DecisionQuestion` (`Protocol`) met `TableQuestion`, `RowQuestio
 
 ## 11. Testen
 
-Contracttests volgens `AGENTS.md` (TESTING_PHILOSOPHY), met fakes alleen aan de providergrens via de fixtures `scripted` en `c4_llm_manager` (`tests/code_mapper/c4/test_documented.py:70-113`). Geen tests op prompttekst.
+Contracttests volgens `AGENTS.md` (TESTING_PHILOSOPHY), met fakes alleen aan de providergrens via de fixtures `scripted` en `c4_llm_manager` (`tests/code_mapper/c4/conftest.py:183-191`; voorbeeld van een cachetest in `test_documented.py:70-113`). Geen tests op prompttekst.
 
 | Bestand                     | Gedrag                                                                                                                                                                                                                                                   | Regel    |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| `test_decisions.py` (nieuw) | een rij uit een dienstentabel wordt een extern systeem met rijcitaat en relatie `uses`; een vlaggentabel levert niets; een bestaande term komt er niet dubbel bij                                                                                        | R21      |
-|                             | `neither` haalt een element en zijn relatie weg en telt als `no match`; een andere soort past de soort aan                                                                                                                                               | R20      |
-|                             | een ongeldig antwoord (ontbrekend, dubbel of onbekend id, ongeldige waarde, groep met gemengde soorten, overblijvend lid buiten de groep) wordt afgewezen en één keer opnieuw gevraagd; daarna fallback, kaart gelijk aan die zonder de stap, cache leeg | §8       |
-|                             | zonder wijziging 0 aanroepen voor `decide` en `consolidate`; na één gewijzigde tabelrij alleen die tabel en rij; na een andere effort alles; een proefrun leest alleen, schrijft niet en markeert `trial`                                                | R23      |
-|                             | groep, overblijvend lid, `same`: samengevoegd, relaties omgezet, status opnieuw bepaald; `different`/`unsure`: apart                                                                                                                                     | R18, R19 |
-|                             | `keep_apart`: een groep van 2 vervalt zonder `c4_survivor`-aanroep; zijn beide paarleden niet het overblijvende lid, dan blijft het hoogste id apart                                                                                                     | R22      |
-| `test_assemble.py`          | omzetten van opgegane id's volgens §7.3; meldingen beginnen met `C4-decisions:` of `C4-overrides:`                                                                                                                                                       | R22      |
-| `test_lockfile.py`          | een lock met `keep_apart` overleeft het herschrijven; een v5-lock zonder het veld blijft leesbaar                                                                                                                                                        | §7.1     |
-| `test_pipeline.py`          | het rapport noemt samengevoegde en weggehaalde elementen bij naam                                                                                                                                                                                        | §8       |
+| `test_decisions.py` (nieuw) | een rij uit een dienstentabel wordt een extern systeem met rijcitaat en relatie `uses`; een eerste cel met inline-opmaak (`Open**Code** CLI`) geeft de zichtbare term; een vlaggentabel levert niets; een term die de documentstap al heeft, komt er niet dubbel bij, maar wel als de elementcontrole die term weghaalde | R21      |
+|                             | `neither` haalt een element en zijn relatie weg en telt als `no match`; een andere soort past de soort aan; de lock bewaart de onbewerkte uitkomst van de documentstap                                                                                                                                                   | R20      |
+|                             | een ongeldig antwoord (ontbrekend, dubbel of onbekend id, ongeldige waarde, groep met gemengde soorten, overblijvend lid buiten de groep) wordt afgewezen en één keer opnieuw gevraagd; daarna fallback, bij een lege cache een kaart gelijk aan die zonder de stap, cache leeg; een leeg `c4_group`-antwoord is geldig  | §8       |
+|                             | zonder wijziging 0 aanroepen voor `decide` en `consolidate`; een gewijzigde rij na de eerste drie: één `c4_row`, geen `c4_table`; een nieuw element: opnieuw `c4_group` voor die soort, de andere soort niet; een ander utility-effort: alles; een proefrun leest alleen, schrijft niet en markeert `trial`              | R23      |
+|                             | groep, overblijvend lid, `same`: samengevoegd, relaties omgezet, status opnieuw bepaald; `different`/`unsure`: apart                                                                                                                                                                                                     | R18, R19 |
+|                             | `keep_apart`: een groep van 2 vervalt zonder `c4_survivor`-aanroep; zijn beide paarleden niet het overblijvende lid, dan blijft het hoogste id apart                                                                                                                                                                     | R22      |
+| `test_assemble.py`          | omzetten van opgegane id's volgens §7.3, ook twee regels die na omzetten botsen (laagste oorspronkelijke id wint, melding); meldingen beginnen met `C4-decisions:` of `C4-overrides:`                                                                                                                                    | R22      |
+| `test_lockfile.py`          | een lock met `keep_apart` overleeft het herschrijven; een v5-lock zonder het veld blijft leesbaar                                                                                                                                                                                                                        | §7.1     |
+| `test_pipeline.py`          | het rapport noemt samengevoegde en weggehaalde elementen bij naam                                                                                                                                                                                                                                                        | §8       |
 
 `test_output_contract.py` controleert al dat het meegeleverde lock-schema met het model klopt.
 
@@ -285,3 +288,4 @@ De run slaagt als:
 - **Een lockveld `keep`** om een als "geen van beide" weggehaald element terug te halen: open punt (besluit: Ontwerp · sectie 4).
 - **Diensten in lopende tekst:** blijven bij de open documentstap.
 - **Containers, opslag en componenten samenvoegen**, deel B, misleidende componentnamen: buiten deze stap.
+- **Richting per rij:** de richting van een `uses`-relatie uit een tabelrij ligt vast per soort (besluit: Spec-review · richting rij-relatie). Een extern systeem dat ChunkHound aanroept (bijvoorbeeld een AI-assistent via MCP) zou in een dienstentabel de verkeerde richting krijgen; de huidige documentatie heeft zo'n tabel niet.
