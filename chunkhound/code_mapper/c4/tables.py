@@ -66,12 +66,13 @@ def _text(node: Node, source: bytes, parser: Parser) -> str:
 
 def _heading(node: Node, source: bytes, parser: Parser) -> tuple[int, str]:
     content = node.child_by_field_name("heading_content")
-    assert content is not None  # Both grammar heading forms require content.
     if node.type == "atx_heading":
         level = len(source[node.children[0].start_byte : node.children[0].end_byte])
     else:
         level = 1 if node.children[-1].type == "setext_h1_underline" else 2
-    return level, _text(content, source, parser)
+    # Empty ATX headings still carry a level and close preceding sections.
+    title = _text(content, source, parser) if content is not None else ""
+    return level, title
 
 
 def _cells(node: Node, source: bytes, parser: Parser) -> tuple[str, ...]:

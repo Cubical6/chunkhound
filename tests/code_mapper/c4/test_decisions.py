@@ -550,3 +550,66 @@ async def test_r21_tables_with_same_preview_keep_both_late_rows(
         "First late tool",
         "Second late tool",
     }
+
+
+@pytest.mark.parametrize(
+    ("heading", "expected_headings"),
+    [
+        ("#", ("",)),
+        ("##", ("Shop", "")),
+        ("###", ("Shop", "Obsolete", "")),
+        ("####", ("Shop", "Obsolete", "Retired", "")),
+        ("#####", ("Shop", "Obsolete", "Retired", "")),
+        ("######", ("Shop", "Obsolete", "Retired", "")),
+    ],
+)
+async def test_r21_empty_heading_keeps_scope_and_service_actor(
+    tmp_path, c4_llm_manager, scripted, heading, expected_headings
+):
+    from chunkhound.code_mapper.c4.tables import read_tables
+
+    raw = "| Open**Code** CLI | command-line provider |"
+    (tmp_path / "README.md").write_text(
+        "# Shop\n\n## Obsolete\n\n### Retired\n\n"
+        + heading
+        + "\n\n| Service | Purpose |\n| --- | --- |\n"
+        + raw
+        + "\n",
+        encoding="utf-8",
+    )
+    (table,) = read_tables(tmp_path, ["README.md"])
+    assert table.headings == expected_headings
+    assert table.rows[0].raw == raw and table.rows[0].line == 11
+    scripted.answers["c4_table"] = decisions_value("service_list")
+    scripted.answers["c4_row"] = decisions_value("external")
+    docs = DocumentedOutcome([], [], {"README.md": "raw-hash"}, False)
+    result, _ = await run(tmp_path, c4_llm_manager, docs)
+    elements, relations, evidence, _ = assembled(tmp_path, result.documented)
+    actor = next(e for e in elements if e.id == "external:opencode-cli")
+    assert actor.name == "OpenCode CLI"
+    citation = next(c for c in evidence.citations if c.target == actor.id)
+    assert (citation.file, citation.start_line, citation.end_line) == (
+        "README.md",
+        11,
+        11,
+    )
+    assert citation.source == "documentation" and citation.verified
+    assert [
+        (relation.from_id, relation.to_id, relation.title) for relation in relations
+    ] == [("system:shop", "external:opencode-cli", "uses")]
+
+
+async def test_r21_empty_headings_without_tables_add_no_actors(
+    tmp_path, c4_llm_manager
+):
+    from chunkhound.code_mapper.c4.tables import read_tables
+
+    (tmp_path / "README.md").write_text("#\n\n##\n\n###\n\n####\n\n#####\n\n######\n")
+    assert read_tables(tmp_path, ["README.md"]) == []
+    docs = DocumentedOutcome([], [], {"README.md": "raw-hash"}, False)
+    result, llm = await run(tmp_path, c4_llm_manager, docs)
+    elements, relations, _, _ = assembled(tmp_path, result.documented)
+    assert result.added == [] and result.documented == docs
+    assert [element.id for element in elements] == ["system:shop"]
+    assert relations == []
+    assert llm.calls == 0
