@@ -1,5 +1,6 @@
 """Shared, network-free inputs for the C4 contract tests."""
 
+import json
 import re
 import shutil
 import subprocess
@@ -24,6 +25,7 @@ class ScriptedLLM(FakeLLMProvider):
         super().__init__()
         self.answers = dict(answers)
         self.calls: Counter[str] = Counter()
+        self.question_calls: Counter[str] = Counter()
 
     async def complete_structured(
         self,
@@ -38,7 +40,11 @@ class ScriptedLLM(FakeLLMProvider):
         step = match.group(1)
         self.calls[step] += 1
         self._requests_made += 1
-        answer = self.answers[step]
+        question = re.search(r"C4 question: (\w+)\b", prompt)
+        key = question.group(1) if question else step
+        if question:
+            self.question_calls[key] += 1
+        answer = self.answers[key]
         if isinstance(answer, Exception):
             raise answer
         result = answer(prompt) if callable(answer) else deepcopy(answer)
@@ -91,6 +97,21 @@ def documented_per_fragment(prompt: str, answer: dict[str, Any]) -> dict[str, An
                 },
             }
             for fid, (path, _lines) in documented_fragments(prompt).items()
+        ]
+    }
+
+
+def decision_items(prompt: str) -> list[dict[str, Any]]:
+    """The public JSON items shown to a decision provider."""
+    return json.loads(prompt.split("Items:\n", 1)[1])
+
+
+def element_answer(prompt: str) -> dict[str, Any]:
+    kinds = {"beheerder": "person", "Stripe": "external"}
+    return {
+        "decisions": [
+            {"id": item["id"], "value": kinds[item["term"]]}
+            for item in decision_items(prompt)
         ]
     }
 
@@ -176,6 +197,7 @@ def default_answers() -> dict[str, Answer]:
             ],
         },
         "summaries": {"labels": []},
+        "c4_element": element_answer,
     }
 
 

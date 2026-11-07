@@ -24,6 +24,7 @@ NOTATION_VERSION = 1
 PRUNE_UNUSED_DAYS = 30
 PRUNE_TMP_DAYS = 1
 _DAY = 86_400
+DECISION_FORMAT_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -134,6 +135,63 @@ class ExtractionStore:
                         path.unlink()
                 except OSError as exc:
                     logger.debug(f"Cannot prune extraction cache entry: {exc}")
+
+
+class DecisionStore:
+    """Disposable per-item decisions, independently checked against their inputs."""
+
+    def __init__(self, root: Path, *, read_only: bool) -> None:
+        self.root = root
+        self.read_only = read_only
+
+    def get(self, question: str, key_parts: dict[str, Any]) -> dict[str, Any] | None:
+        key = key_from_parts(key_parts)
+        path = self.root / question / f"{key}.json"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data["format"] != DECISION_FORMAT_VERSION:
+                return None
+            if key_parts["format"] != DECISION_FORMAT_VERSION:
+                return None
+            if key_parts["question"] != question or data["key"] != key:
+                return None
+            if data["key_parts"] != key_parts:
+                return None
+            if key_from_parts(data["key_parts"]) != path.stem:
+                return None
+            if not isinstance(data["answer"], dict):
+                return None
+            return data["answer"]
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
+    def put(
+        self, question: str, key_parts: dict[str, Any], value: dict[str, Any]
+    ) -> None:
+        if self.read_only:
+            return
+        directory = self.root / question
+        directory.mkdir(parents=True, exist_ok=True)
+        key = key_from_parts(key_parts)
+        _write_json_durable(
+            directory / f"{key}.json",
+            {
+                "format": DECISION_FORMAT_VERSION,
+                "key": key,
+                "key_parts": key_parts,
+                "answer": value,
+            },
+        )
+
+    def touch(self, question: str, key: str) -> None:
+        ExtractionStore(self.root, question, read_only=self.read_only).touch(key)
+
+    def prune(self, now: float | None = None) -> None:
+        if self.read_only or not self.root.is_dir():
+            return
+        for directory in self.root.iterdir():
+            if directory.is_dir():
+                ExtractionStore(self.root, directory.name, read_only=False).prune(now)
 
 
 def _identity(member: dict[str, Any]) -> FragmentIdentity:

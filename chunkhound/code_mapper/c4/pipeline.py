@@ -24,6 +24,7 @@ from chunkhound.code_mapper.c4.contract import (
     repository_lookup,
     with_git_data,
 )
+from chunkhound.code_mapper.c4.decisions import decide, prune_decision_cache
 from chunkhound.code_mapper.c4.documented import (
     DocElement,
     DocRelation,
@@ -621,10 +622,11 @@ def _build_lock(
     fingerprint: str,
     lock: ScopeLock | None,
     carried: dict[str, LockedComponent],
+    raw_documented: DocumentedOutcome,
 ) -> ScopeLock:
     fingerprints = _fingerprints(evidence, model.relations)
     titles = {r.id: r.title for r in model.relations}
-    docs = inp.documented
+    docs = raw_documented
     return ScopeLock(
         # The next run must still see renames made since the last complete merge.
         base_sha=lock.base_sha
@@ -753,11 +755,12 @@ async def finish_c4(
 ) -> C4Build:
     """Finalize dependent steps only after their deferred inputs are settled."""
     topic_files = {file for topic in topics or () for file in topic.files}
-    docs = await extract_documented(
+    doc_files = doc_files_for(
+        draft.project_root, draft.scope_path, draft.files, config, own_output
+    )
+    raw_docs = await extract_documented(
         project_root=draft.project_root,
-        doc_files=doc_files_for(
-            draft.project_root, draft.scope_path, draft.files, config, own_output
-        ),
+        doc_files=doc_files,
         system_name=draft.runtime.system_name,
         locked=lock.documented if lock else None,
         llm=llm,
@@ -766,6 +769,15 @@ async def finish_c4(
         order_hint=lambda fragment: float(fragment.source.path in topic_files),
     )
     await retries.drain()
+    decisions = await decide(
+        project_root=draft.project_root,
+        doc_files=doc_files,
+        system_name=draft.runtime.system_name,
+        documented=raw_docs,
+        llm=llm,
+        retries=draft.steps,
+    )
+    docs = decisions.documented
     if not draft.prepared:
         await _prepare(draft, llm, lock)
         await retries.drain()
@@ -836,14 +848,16 @@ async def finish_c4(
         None
         if llm.trial
         else _build_lock(
-            draft, model, evidence, inp, identity, fingerprint, lock, carried
+            draft, model, evidence, inp, identity, fingerprint, lock, carried, raw_docs
         )
     )
     if not llm.trial:
         prune_documented_cache(draft.project_root)
+        prune_decision_cache(draft.project_root)
     notes = assemble_with_notes(inp)[3]
     report_extra = [
-        *documented_report_lines(docs),
+        *documented_report_lines(raw_docs),
+        *decisions.report_lines,
         "C4 documentation relationships not linked: "
         f"{notes.unlinked.no_match} no match, {notes.unlinked.ambiguous} multiple "
         f"matches, {notes.unlinked.not_allowed} not allowed",

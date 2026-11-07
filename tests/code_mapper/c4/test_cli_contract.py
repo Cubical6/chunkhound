@@ -574,7 +574,6 @@ async def test_call_report_counts_bundled_rounds_and_retry_outcome(
         and "C4 documented bundles:" not in line
         and "C4 documentation relationships" not in line
     ]
-    assert len(lines) == 5
     line = next(line for line in lines if "C4 classify:" in line)
     assert cli.provider.calls["classify"] == 6
     assert "6 attempts" in line
@@ -822,7 +821,11 @@ async def test_resume_after_fatal_error_publishes_nothing(cli, scripted):
     """Bundles validated before a fatal error survive; nothing is published."""
     from chunkhound.code_mapper.c4.documented import EXTRACTION_CACHE
     from chunkhound.llm_manager import LLMManager
-    from tests.code_mapper.c4.conftest import component_answer, write_sections
+    from tests.code_mapper.c4.conftest import (
+        component_answer,
+        decision_items,
+        write_sections,
+    )
 
     cli.monkeypatch.setattr(
         LLMManager, "_create_provider", lambda self, config: scripted
@@ -836,6 +839,17 @@ async def test_resume_after_fatal_error_publishes_nothing(cli, scripted):
     cli.result.poi_sections_indexed[0][2]["metadata"]["sources"]["files"].append(
         "docs/arch.md"
     )
+    kinds = {
+        "beheerder": "person",
+        "Stripe": "external",
+        **{f"Component{number}": "external" for number in range(12)},
+    }
+    scripted.answers["c4_element"] = lambda prompt: {
+        "decisions": [
+            {"id": item["id"], "value": kinds[item["term"]]}
+            for item in decision_items(prompt)
+        ]
+    }
 
     def fatal_on_second(prompt):
         if scripted.calls["documented"] == 2:

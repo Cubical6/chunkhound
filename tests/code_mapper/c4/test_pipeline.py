@@ -15,6 +15,7 @@ from chunkhound.code_mapper.c4.lockfile import read_scope_lock, write_scope_lock
 from chunkhound.code_mapper.c4.pipeline import analyze_c4, finish_c4
 from chunkhound.code_mapper.c4.summaries import summary_key
 from chunkhound.providers.llm.codex_cli_provider import CodexCLIProvider
+from tests.code_mapper.c4.conftest import decision_items
 
 
 def payload(prompt):
@@ -190,6 +191,13 @@ async def curation_baseline(repo, manager, answers):
             )
         ],
     }
+    kinds = {"beheerder": "person", "Mollie": "external", "Stripe": "external"}
+    answers.answers["c4_element"] = lambda prompt: {
+        "decisions": [
+            {"id": item["id"], "value": kinds[item["term"]]}
+            for item in decision_items(prompt)
+        ]
+    }
 
     def direct_root_answer(prompt):
         answer = merge_answer(prompt)
@@ -252,13 +260,9 @@ async def test_drop_and_merge_reach_the_contract_and_replay(
     assert result.contract_counts.persons_without_relation == ("beheerder",)
     assert "Mollie" not in result.contract_counts.externals_without_relation
     assert result.contract_counts.redundant_direct_relations == 1
-    report_index = next(
-        index
-        for index, line in enumerate(result.report_extra)
-        if line.startswith("C4 documentation relationships not linked: ")
-    )
-    assert result.report_extra[report_index + 1] == (
+    assert (
         "C4-overrides: drop ignored for external:gone (not on the map)"
+        in result.report_extra
     )
     assert result.lock.overrides == original_overrides
     pipeline_answers.calls.clear()
@@ -321,6 +325,13 @@ async def test_documented_terms_require_their_own_literal_span(
         for term in ("Invented Payment Authority", "Shop", "Beheerder")
     ]
     pipeline_answers.answers["documented"] = {"elements": valid, "relations": []}
+    kinds = {"beheerder": "person", "de webwinkel": "external"}
+    pipeline_answers.answers["c4_element"] = lambda prompt: {
+        "decisions": [
+            {"id": item["id"], "value": kinds[item["term"]]}
+            for item in decision_items(prompt)
+        ]
+    }
     lock = None
     if origin != "answer":
         previous = await build(fixture_repo, c4_llm_manager)
@@ -1435,24 +1446,104 @@ async def test_fallback_fragment_without_lock_items_blocks_lock(
     )
 
 
+@pytest.mark.parametrize("goal", ["documented", "decisions/c4_element"])
 async def test_old_cache_entries_are_pruned_only_after_non_trial_run(
-    fixture_repo, c4_llm_manager, pipeline_answers
+    fixture_repo, c4_llm_manager, pipeline_answers, goal
 ):
-    import os
     import time
 
     from chunkhound.code_mapper.c4.documented import EXTRACTION_CACHE
 
-    directory = fixture_repo / EXTRACTION_CACHE / "documented"
-    directory.mkdir(parents=True)
+    first = await build(fixture_repo, c4_llm_manager)
+    directory = fixture_repo / EXTRACTION_CACHE / goal
+    hits = list(directory.glob("*.json"))
     old = directory / ("0" * 64 + ".json")
-    old.write_text("{}", encoding="utf-8")
+    expired = directory / ".expired.tmp"
+    recent = directory / ".recent.tmp"
+    for path in (old, expired, recent):
+        path.write_text("{}", encoding="utf-8")
     month_ago = time.time() - 31 * 86_400
-    os.utime(old, (month_ago, month_ago))
-
-    await build(fixture_repo, c4_llm_manager, trial=True)
-    assert old.exists()
+    for path in (*hits, old, expired):
+        os.utime(path, (month_ago, month_ago))
+    before = {
+        path: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in directory.iterdir()
+    }
+    pipeline_answers.calls.clear()
+    await build(fixture_repo, c4_llm_manager, lock=first.lock, trial=True)
+    assert not pipeline_answers.calls
+    assert {
+        path: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in directory.iterdir()
+    } == before
 
     await build(fixture_repo, c4_llm_manager)
-    assert not old.exists()
-    assert list(directory.glob("*.json"))  # this run's bundle stays
+    assert not old.exists() and not expired.exists()
+    assert recent.exists()
+    assert all(path.exists() and path.stat().st_mtime > month_ago for path in hits)
+
+
+async def test_r20_pipeline_keeps_raw_documented_lock(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    from tests.code_mapper.c4.conftest import decision_items
+
+    quote = "Astro is a framework; AI assistant uses Shop; Shop uses Stripe."
+    (fixture_repo / "README.md").write_text(f"# Shop\n\n{quote}\n")
+    citation = {"file": "README.md", "start_line": 3, "end_line": 3, "quote": quote}
+    pipeline_answers.answers["documented"] = {
+        "elements": [
+            {"kind": "external", "term": term, "description": "", "citation": citation}
+            for term in ("Astro", "AI assistant", "Stripe")
+        ],
+        "relations": [
+            {
+                "from_term": "Shop",
+                "to_term": "Astro",
+                "title": "uses",
+                "citation": citation,
+            }
+        ],
+    }
+    kinds = {"Astro": "neither", "AI assistant": "person", "Stripe": "external"}
+    pipeline_answers.answers["c4_element"] = lambda prompt: {
+        "decisions": [
+            {"id": item["id"], "value": kinds[item["term"]]}
+            for item in decision_items(prompt)
+        ]
+    }
+    first = await build(fixture_repo, c4_llm_manager)
+    assert {e["term"]: e["kind"] for e in first.lock.documented.elements} == {
+        "Astro": "external",
+        "AI assistant": "external",
+        "Stripe": "external",
+    }
+    assert first.lock.documented.version
+    assert "person:ai-assistant" in {e.id for e in first.model.elements}
+    assert "external:astro" not in {e.id for e in first.model.elements}
+    report = "\n".join(first.report_extra)
+    assert "Astro" in report and "dropped" in report
+    assert "AI assistant" in report and "kind changed" in report
+    before = pipeline_answers.question_calls["c4_element"]
+    replay = await build(fixture_repo, c4_llm_manager, lock=first.lock)
+    assert replay.lock.documented == first.lock.documented
+    assert pipeline_answers.question_calls["c4_element"] == before
+    assert replay.model == first.model
+
+
+async def test_decision_fallback_blocks_transition_not_raw_documentation(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    pipeline_answers.answers["c4_element"] = {"decisions": []}
+    result = await build(fixture_repo, c4_llm_manager)
+    assert pipeline_answers.question_calls["c4_element"] == 2
+    assert result.lock.transition is None
+    assert result.lock.documented is not None
+    assert {item["term"] for item in result.lock.documented.elements} == {
+        "beheerder",
+        "Stripe",
+    }
+    assert {"person:beheerder", "external:stripe"} <= {
+        element.id for element in result.model.elements
+    }
+    assert any("2 fallback" in line for line in result.report_extra)

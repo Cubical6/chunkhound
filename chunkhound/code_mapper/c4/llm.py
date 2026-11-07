@@ -39,6 +39,11 @@ _REJECTION_RULES = frozenset(
         "no proposed item has a literal quote",
         "every fragment id must occur exactly once",
         "exactly one nonblank label per supplied key required",
+        "every item id must occur exactly once",
+        "invalid decision value",
+        "group mixes kinds",
+        "id in more than one group",
+        "survivor outside its group",
     }
 )
 
@@ -104,7 +109,15 @@ class C4Llm:
         self.calls = 0
         self._reports: dict[str, list[StepReport]] = {
             step: []
-            for step in ("classify", "merge", "titles", "documented", "summaries")
+            for step in (
+                "classify",
+                "merge",
+                "titles",
+                "documented",
+                "decide",
+                "consolidate",
+                "summaries",
+            )
         }
 
     def report(self, step: str, reason: str) -> StepReport:
