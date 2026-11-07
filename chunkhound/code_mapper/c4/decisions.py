@@ -14,8 +14,10 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from chunkhound.code_mapper.c4.documented import (
     EXTRACTION_CACHE,
     DocElement,
+    DocRelation,
     DocumentedOutcome,
 )
+from chunkhound.code_mapper.c4.identity import element_id
 from chunkhound.code_mapper.c4.llm import (
     AnswerRejectedError,
     C4Llm,
@@ -24,6 +26,8 @@ from chunkhound.code_mapper.c4.llm import (
     TransientStepError,
     load_c4_prompt,
 )
+from chunkhound.code_mapper.c4.model import Citation
+from chunkhound.code_mapper.c4.tables import ServiceTable, TableRow, read_tables
 from chunkhound.services.extraction.budget import (
     effective_target,
     fits,
@@ -83,17 +87,39 @@ class DecisionQuestion(Protocol[SubjectT]):
     def fallback(self, subject: SubjectT) -> str: ...
 
 
-class ElementQuestion:
+class _ChoiceQuestion(Generic[SubjectT]):
+    name: str
+    values: frozenset[str]
+
+    def __init__(self) -> None:
+        schema = json.dumps(DecisionAnswer.model_json_schema(), sort_keys=True)
+        prompt = load_c4_prompt(self.name.removeprefix("c4_"))
+        self.version = hashlib.sha256(
+            f"{prompt}\n{schema}\n{_VALIDATOR_VERSION}".encode()
+        ).hexdigest()
+
+    def validate(
+        self,
+        answer: DecisionAnswer,
+        items: Mapping[str, SubjectT],
+        *,
+        cached: bool = False,
+    ) -> dict[str, str]:
+        counts = Counter(value.id for value in answer.decisions)
+        if counts != Counter({key: 1 for key in items}):
+            raise AnswerRejectedError("decide: every item id must occur exactly once")
+        if any(value.value not in self.values for value in answer.decisions):
+            raise AnswerRejectedError("decide: invalid decision value")
+        return {value.id: value.value for value in answer.decisions}
+
+
+class ElementQuestion(_ChoiceQuestion[DocElement]):
     name = "c4_element"
     values = frozenset({"external", "person", "neither"})
 
     def __init__(self, project_root: Path) -> None:
         self.project_root = project_root
-        schema = json.dumps(DecisionAnswer.model_json_schema(), sort_keys=True)
-        prompt = load_c4_prompt("element")
-        self.version = hashlib.sha256(
-            f"{prompt}\n{schema}\n{_VALIDATOR_VERSION}".encode()
-        ).hexdigest()
+        super().__init__()
 
     def item(self, subject: DocElement) -> dict[str, Any]:
         citation = subject.citation
@@ -113,22 +139,41 @@ class ElementQuestion:
             },
         }
 
-    def validate(
-        self,
-        answer: DecisionAnswer,
-        items: Mapping[str, DocElement],
-        *,
-        cached: bool = False,
-    ) -> dict[str, str]:
-        counts = Counter(value.id for value in answer.decisions)
-        if counts != Counter({key: 1 for key in items}):
-            raise AnswerRejectedError("decide: every item id must occur exactly once")
-        if any(value.value not in self.values for value in answer.decisions):
-            raise AnswerRejectedError("decide: invalid decision value")
-        return {value.id: value.value for value in answer.decisions}
-
     def fallback(self, subject: DocElement) -> str:
         return subject.kind
+
+
+class TableQuestion(_ChoiceQuestion[ServiceTable]):
+    name = "c4_table"
+    values = frozenset({"service_list", "other"})
+
+    def item(self, subject: ServiceTable) -> dict[str, Any]:
+        return {
+            "path": subject.path,
+            "headings": list(subject.headings),
+            "header": list(subject.header),
+            "rows": [row.raw for row in subject.rows[:3]],
+        }
+
+    def fallback(self, subject: ServiceTable) -> str:
+        return "other"
+
+
+class RowQuestion(_ChoiceQuestion[tuple[ServiceTable, TableRow]]):
+    name = "c4_row"
+    values = frozenset({"external", "person", "neither"})
+
+    def item(self, subject: tuple[ServiceTable, TableRow]) -> dict[str, Any]:
+        table, row = subject
+        return {
+            "path": table.path,
+            "headings": list(table.headings),
+            "header": list(table.header),
+            "row": row.raw,
+        }
+
+    def fallback(self, subject: tuple[ServiceTable, TableRow]) -> str:
+        return "neither"
 
 
 def _store(project_root: Path, *, read_only: bool) -> DecisionStore:
@@ -315,6 +360,85 @@ class DecisionOutcome:
     report_lines: tuple[str, ...]
 
 
+async def _decide_rows(
+    project_root: Path, doc_files: Sequence[str], llm: C4Llm, retries: RetryQueue
+) -> tuple[DecisionResults, DecisionResults, dict[str, tuple[ServiceTable, TableRow]]]:
+    table_question = TableQuestion()
+    source_tables = read_tables(project_root, doc_files)
+    tables = {
+        key_from_parts(table_question.item(table)): table for table in source_tables
+    }
+    selected = await run_decisions(
+        table_question,
+        tables,
+        project_root=project_root,
+        llm=llm,
+        retries=retries,
+        step="decide",
+        reason="tables",
+    )
+    row_question = RowQuestion()
+    rows = {
+        key_from_parts(row_question.item((table, row))): (table, row)
+        for table in source_tables
+        if selected.values[key_from_parts(table_question.item(table))] == "service_list"
+        for row in table.rows
+    }
+    classified = await run_decisions(
+        row_question,
+        rows,
+        project_root=project_root,
+        llm=llm,
+        retries=retries,
+        step="decide",
+        reason="rows",
+    )
+    return selected, classified, rows
+
+
+def _add_rows(
+    elements: list[DocElement],
+    relations: list[DocRelation],
+    subjects: Mapping[str, tuple[ServiceTable, TableRow]],
+    values: Mapping[str, str],
+    system_name: str,
+) -> list[DocElement]:
+    seen = {element_id(item.kind, item.term) for item in elements}
+    added = []
+    for key, (table, row) in subjects.items():
+        value = values[key]
+        term = row.cells[0] if row.cells else ""
+        if value == "neither" or not term:
+            continue
+        kind = cast(Literal["external", "person"], value)
+        identity = element_id(kind, term)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        citation = Citation(
+            target=None,
+            file=table.path,
+            start_line=row.line,
+            end_line=row.line,
+            source="documentation",
+            verified=True,
+        )
+        added.append(DocElement(kind, term, citation))
+        source, target = (
+            (system_name, term) if kind == "external" else (term, system_name)
+        )
+        relations.append(DocRelation(source, target, "uses", citation))
+    elements.extend(added)
+    return added
+
+
+def _count_summary(counts: DecisionCounts) -> str:
+    return (
+        f"{counts.total} ({counts.reused} reused, {counts.new} new, "
+        f"{counts.fallback} fallback, {counts.trial} trial)"
+    )
+
+
 async def decide(
     *,
     project_root: Path,
@@ -324,6 +448,9 @@ async def decide(
     llm: C4Llm,
     retries: RetryQueue,
 ) -> DecisionOutcome:
+    tables, rows, row_subjects = await _decide_rows(
+        project_root, doc_files, llm, retries
+    )
     question = ElementQuestion(project_root)
     # The source identity excludes the suggested kind and extraction list order.
     subjects = {
@@ -356,16 +483,19 @@ async def decide(
             )
             if value != item.kind:
                 changed.append(f"{item.term} → {value}")
-    counts = result.counts
+    relations = list(documented.relations)
+    added = _add_rows(elements, relations, row_subjects, rows.values, system_name)
+    service_count = sum(value == "service_list" for value in tables.values.values())
     line = (
-        f"C4 decisions: elements {counts.total} ({counts.reused} reused, "
-        f"{counts.new} new, {counts.fallback} fallback, {counts.trial} trial), "
+        f"C4 decisions: tables {_count_summary(tables.counts)}, "
+        f"{service_count} service tables; rows {_count_summary(rows.counts)}, "
+        f"{len(added)} added; elements {_count_summary(result.counts)}, "
         f"{len(dropped)} dropped ({', '.join(dropped)}), "
         f"{len(changed)} kind changed ({', '.join(changed)})"
     )
     return DecisionOutcome(
-        replace(documented, elements=elements, relations=list(documented.relations)),
-        [],
+        replace(documented, elements=elements, relations=relations),
+        added,
         result.values,
         dropped,
         (line,),

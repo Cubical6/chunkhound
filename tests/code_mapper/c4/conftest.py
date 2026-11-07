@@ -116,6 +116,17 @@ def element_answer(prompt: str) -> dict[str, Any]:
     }
 
 
+def neutral_decisions(value: str) -> Callable[[str], dict[str, Any]]:
+    def answer(prompt: str) -> dict[str, Any]:
+        return {
+            "decisions": [
+                {"id": item["id"], "value": value} for item in decision_items(prompt)
+            ]
+        }
+
+    return answer
+
+
 @pytest.fixture
 def fixture_repo(tmp_path: Path) -> Path:
     """Give each test an independent, committed copy of the mini-repository."""
@@ -198,6 +209,8 @@ def default_answers() -> dict[str, Answer]:
         },
         "summaries": {"labels": []},
         "c4_element": element_answer,
+        "c4_table": neutral_decisions("other"),
+        "c4_row": neutral_decisions("neither"),
     }
 
 

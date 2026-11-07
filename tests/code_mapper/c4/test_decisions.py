@@ -339,3 +339,214 @@ async def test_r23_pruning_keeps_reused_items(tmp_path, c4_llm_manager, scripted
     assert hit.exists() and hit.stat().st_mtime > month
     assert not old.exists() and not temporary.exists()
     assert recent.exists()
+
+
+def table_documents(root, rows=("| OpenCode CLI | command-line provider |",)):
+    (root / "README.md").write_text(
+        "# Shop\n\n## Providers\n\n| Service | Purpose |\n| --- | --- |\n"
+        + "\n".join(rows)
+        + "\n",
+        encoding="utf-8",
+    )
+    return DocumentedOutcome([], [], {"README.md": "raw-hash"}, False)
+
+
+def decisions_value(value):
+    return lambda prompt: {
+        "decisions": [
+            {"id": item["id"], "value": value} for item in decision_items(prompt)
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    ("kind", "term", "expected"),
+    [
+        ("external", "OpenCode CLI", "external:opencode-cli"),
+        ("person", "AI assistant", "person:ai-assistant"),
+        ("neither", "LLM provider", None),
+        ("external", "", None),
+    ],
+)
+async def test_r21_service_row_adds_element_and_uses_relation(
+    tmp_path, c4_llm_manager, scripted, kind, term, expected
+):
+    raw = f"| {term} | command-line provider |"
+    docs = table_documents(tmp_path, [raw])
+    before = deepcopy(docs)
+    scripted.answers["c4_table"] = decisions_value("service_list")
+    scripted.answers["c4_row"] = decisions_value(kind)
+    result, _ = await run(tmp_path, c4_llm_manager, docs)
+    elements, relations, evidence, _ = assembled(tmp_path, result.documented)
+    assert docs == before
+    assert scripted.question_calls["c4_element"] == 0
+    if expected is None:
+        assert result.added == []
+        assert relations == []
+        assert [e.id for e in elements] == ["system:shop"]
+        return
+    actor = next(e for e in elements if e.id == expected)
+    assert actor.name == term
+    citation = next(c for c in evidence.citations if c.target == expected)
+    assert (citation.file, citation.start_line, citation.end_line) == (
+        "README.md",
+        7,
+        7,
+    )
+    assert citation.source == "documentation" and citation.verified
+    assert (tmp_path / citation.file).read_text().splitlines()[
+        citation.start_line - 1
+    ] == raw
+    relation = relations[0]
+    endpoints = (
+        ("system:shop", expected) if kind == "external" else (expected, "system:shop")
+    )
+    assert (relation.from_id, relation.to_id, relation.title) == (*endpoints, "uses")
+    assert [e.term for e in result.added] == [term]
+    assert "service tables" in "\n".join(result.report_lines)
+
+
+def test_r21_visible_cells_keep_source_lines(tmp_path):
+    from chunkhound.code_mapper.c4.tables import read_tables
+
+    raw = (
+        r"| Open**Code** CLI | [Tool](https://example.test) | `cli` | "
+        r"*agent* | a\|b | Café 🐍 |"
+    )
+    source = (
+        "# Shop\n\n## **Integrations**\n\n### Providers\n\n"
+        "| Name | Link | Code | Role | Pipe | Unicode |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        + raw
+        + "\n\n```\n| Fake | Service |\n| --- | --- |\n| Ghost | none |\n```\n"
+        "\nOther section\n=============\n\n"
+        "| Name | Use |\n| --- | --- |\n| Next | next |\n"
+    )
+    (tmp_path / "README.md").write_text(source, encoding="utf-8")
+    (tmp_path / "unselected.md").write_text(source, encoding="utf-8")
+    first, second = read_tables(tmp_path, ["README.md"])
+    assert first.path == "README.md"
+    assert first.headings == ("Shop", "Integrations", "Providers")
+    assert first.header == ("Name", "Link", "Code", "Role", "Pipe", "Unicode")
+    assert first.rows[0].cells == (
+        "OpenCode CLI",
+        "Tool",
+        "cli",
+        "agent",
+        "a|b",
+        "Café 🐍",
+    )
+    assert first.rows[0].line == 9
+    assert first.rows[0].raw == raw
+    assert second.headings == ("Other section",)
+    assert [r.cells[0] for r in second.rows] == ["Next"]
+
+
+async def test_r21_other_table_adds_nothing(tmp_path, c4_llm_manager, scripted):
+    docs = table_documents(tmp_path, ["| --verbose | verbose output |"])
+    scripted.answers["c4_table"] = decisions_value("other")
+    result, _ = await run(tmp_path, c4_llm_manager, docs)
+    assert scripted.question_calls["c4_table"] == 1
+    assert scripted.question_calls["c4_row"] == 0
+    assert result.added == []
+    assert result.documented.elements == [] and result.documented.relations == []
+
+
+@pytest.mark.parametrize(
+    ("checked", "row_kind", "added"),
+    [
+        ("external", "external", False),
+        ("neither", "external", True),
+        ("person", "external", True),
+        ("person", "person", False),
+    ],
+)
+async def test_r21_deduplicates_after_element_check(
+    tmp_path, c4_llm_manager, scripted, checked, row_kind, added
+):
+    docs = table_documents(tmp_path)
+    citation = Citation(
+        target=None,
+        file="README.md",
+        start_line=1,
+        end_line=1,
+        source="documentation",
+        verified=True,
+    )
+    original = DocElement("external", "opencode-cli", citation)
+    own_relation = DocRelation("Shop", "opencode-cli", "configured for", citation)
+    docs = replace(docs, elements=[original], relations=[own_relation])
+    scripted.answers["c4_table"] = decisions_value("service_list")
+    scripted.answers["c4_row"] = decisions_value(row_kind)
+    scripted.answers["c4_element"] = decisions_value(checked)
+    result, _ = await run(tmp_path, c4_llm_manager, docs)
+    assert [e.term for e in result.added] == (["OpenCode CLI"] if added else [])
+    assert own_relation in result.documented.relations
+    assert [r.title for r in result.documented.relations] == (
+        ["configured for", "uses"] if added else ["configured for"]
+    )
+    if added:
+        assert result.added[0].kind == row_kind
+    else:
+        assert result.documented.elements == [replace(original, kind=checked)]
+
+
+async def test_r23_only_changed_late_row_is_asked_again(
+    tmp_path, c4_llm_manager, scripted
+):
+    rows = [f"| Tool {n} | provider |" for n in range(1, 6)]
+    docs = table_documents(tmp_path, rows)
+    seen = []
+
+    def record(prompt):
+        seen.extend(item["row"] for item in decision_items(prompt))
+        return decisions_value("external")(prompt)
+
+    scripted.answers["c4_table"] = decisions_value("service_list")
+    scripted.answers["c4_row"] = record
+    await run(tmp_path, c4_llm_manager, docs)
+    seen.clear()
+    tables = scripted.question_calls["c4_table"]
+    await run(tmp_path, c4_llm_manager, docs)
+    assert seen == []
+    rows[3] = "| Changed tool | provider |"
+    table_documents(tmp_path, rows)
+    result, _ = await run(tmp_path, c4_llm_manager, docs)
+    assert scripted.question_calls["c4_table"] == tables
+    assert seen == ["| Changed tool | provider |"]
+    assert "Changed tool" in [e.term for e in result.added]
+    assert "Tool 4" not in [e.term for e in result.added]
+    path = tmp_path / "README.md"
+    for old, new in (
+        ("## Providers", "## Services"),
+        ("| Service | Purpose |", "| Name | Purpose |"),
+        ("| Tool 1 | provider |", "| Tool 1 | changed |"),
+    ):
+        path.write_text(path.read_text().replace(old, new))
+        await run(tmp_path, c4_llm_manager, docs)
+        tables += 1
+        assert scripted.question_calls["c4_table"] == tables
+
+
+async def test_r21_tables_with_same_preview_keep_both_late_rows(
+    tmp_path, c4_llm_manager, scripted
+):
+    rows = [f"| Tool {n} | provider |" for n in range(1, 4)]
+    docs = table_documents(tmp_path, [*rows, "| First late tool | provider |"])
+    path = tmp_path / "README.md"
+    path.write_text(
+        path.read_text()
+        + "\n| Service | Purpose |\n| --- | --- |\n"
+        + "\n".join([*rows, "| Second late tool | provider |"])
+        + "\n"
+    )
+    scripted.answers["c4_table"] = decisions_value("service_list")
+    scripted.answers["c4_row"] = decisions_value("external")
+    result, _ = await run(tmp_path, c4_llm_manager, docs)
+    assert {item.term for item in result.added} == {
+        "Tool 1",
+        "Tool 2",
+        "Tool 3",
+        "First late tool",
+        "Second late tool",
+    }
