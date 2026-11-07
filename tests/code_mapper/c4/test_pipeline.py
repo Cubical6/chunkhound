@@ -1547,3 +1547,122 @@ async def test_decision_fallback_blocks_transition_not_raw_documentation(
         element.id for element in result.model.elements
     }
     assert any("2 fallback" in line for line in result.report_extra)
+
+
+async def test_decision_report_names_changes_and_replays(
+    fixture_repo, c4_llm_manager, pipeline_answers
+):
+    from tests.code_mapper.c4.conftest import consolidation_sources
+
+    consolidation_sources(fixture_repo, pipeline_answers)
+    commit(fixture_repo, "actor consolidation evidence")
+    first = await build(fixture_repo, c4_llm_manager)
+    ids = {e.id for e in first.contract.elements}
+    assert {
+        "person:ai-assistant",
+        "external:google-gemini",
+        "external:opencode-cli",
+    } <= ids
+    assert not {"person:agents", "external:google", "external:astro"} & ids
+    actor = next(e for e in first.model.elements if e.id == "external:google-gemini")
+    assert actor.status == "found" and actor.name == "Google Gemini"
+    assert any(
+        c.target == "external:opencode-cli"
+        and c.file == "README.md"
+        and c.start_line == 7
+        and c.verified
+        for c in first.evidence.citations
+    )
+    assert any(
+        r.to_id == "external:google-gemini" and r.reference_counts
+        for r in first.model.relations
+    )
+    assert any(
+        r.to == "package:google" and r.relation.endswith("external:google-gemini")
+        for r in first.evidence.references
+        if r.relation
+    )
+    raw = first.lock.documented.model_copy(deep=True)
+    assert {e["term"] for e in raw.elements} == {
+        "agents",
+        "AI assistant",
+        "Google Gemini",
+        "Astro",
+    }
+    assert first.lock.overrides.merge == {}
+    report = "\n".join(first.report_extra)
+    for name in ("agents", "AI assistant", "google", "Google Gemini", "Astro"):
+        assert name in report
+    pipeline_answers.calls.clear()
+    replay = await build(fixture_repo, c4_llm_manager, lock=first.lock)
+    assert not pipeline_answers.calls
+    assert replay.model == first.model and replay.lock.documented == raw
+    pipeline_answers.calls.clear()
+    trial = await build(fixture_repo, c4_llm_manager, lock=replay.lock, trial=True)
+    assert not pipeline_answers.calls
+    assert [e for e in trial.model.elements if e.kind in {"person", "external"}] == [
+        e for e in replay.model.elements if e.kind in {"person", "external"}
+    ]
+    assert replay.lock.documented == raw
+    config = {**c4_llm_manager.role_config("utility"), "reasoning_effort": "high"}
+    from chunkhound.llm_manager import LLMManager
+
+    manager = LLMManager(utility_config=config, synthesis_config=config)
+    pipeline_answers.question_calls.clear()
+    changed = await build(fixture_repo, manager, lock=replay.lock)
+    assert set(pipeline_answers.question_calls) == {
+        "c4_table",
+        "c4_row",
+        "c4_element",
+        "c4_group",
+        "c4_survivor",
+        "c4_pair",
+    }
+    assert pipeline_answers.calls["documented"] == 0
+    assert changed.lock.documented == raw
+    changed.lock.overrides.keep_apart = [("person:ai-assistant", "person:agents")]
+    restored = await build(fixture_repo, manager, lock=changed.lock)
+    assert {"person:agents", "person:ai-assistant"} <= {
+        e.id for e in restored.contract.elements
+    }
+    assert restored.lock.documented == raw
+
+
+async def test_all_new_questions_unavailable_preserves_baseline_map(
+    fixture_repo, c4_llm_manager, pipeline_answers, monkeypatch
+):
+    from chunkhound.code_mapper.c4.consolidation import ConsolidationOutcome
+    from chunkhound.code_mapper.c4.decisions import DecisionOutcome
+    from tests.code_mapper.c4.conftest import consolidation_sources
+
+    consolidation_sources(fixture_repo, pipeline_answers)
+    commit(fixture_repo, "baseline actor evidence")
+    for question in (
+        "c4_table",
+        "c4_row",
+        "c4_element",
+        "c4_group",
+        "c4_survivor",
+        "c4_pair",
+    ):
+        pipeline_answers.answers[question] = TimeoutError("utility unavailable")
+    failed = await build(fixture_repo, c4_llm_manager)
+    assert any("fallback" in line for line in failed.report_extra)
+
+    async def without_decisions(*, documented, **kwargs):
+        return DecisionOutcome(documented, [], {}, [], ())
+
+    async def without_consolidation(**kwargs):
+        return ConsolidationOutcome({}, ())
+
+    monkeypatch.setattr("chunkhound.code_mapper.c4.pipeline.decide", without_decisions)
+    monkeypatch.setattr(
+        "chunkhound.code_mapper.c4.pipeline.consolidate", without_consolidation
+    )
+    baseline = await build(fixture_repo, c4_llm_manager)
+    assert failed.model.elements == baseline.model.elements
+    assert failed.model.relations == baseline.model.relations
+    assert failed.evidence.references == baseline.evidence.references
+    assert failed.evidence.citations == baseline.evidence.citations
+    assert failed.contract == baseline.contract
+    assert failed.lock.documented == baseline.lock.documented

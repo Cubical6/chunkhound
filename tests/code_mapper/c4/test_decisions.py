@@ -613,3 +613,484 @@ async def test_r21_empty_headings_without_tables_add_no_actors(
     assert [element.id for element in elements] == ["system:shop"]
     assert relations == []
     assert llm.calls == 0
+
+
+def actor_state(root, *, extra=()):
+    from chunkhound.code_mapper.c4.curation import CurationState
+    from chunkhound.code_mapper.c4.model import Coverage, Element, Reference, Relation
+
+    names = {
+        "system:shop": ("system", "Shop"),
+        "person:agents": ("person", "agents"),
+        "person:ai-assistant": ("person", "AI assistant"),
+        "external:google": ("external", "Google"),
+        "external:google-gemini": ("external", "Google Gemini"),
+        **dict(extra),
+    }
+    (root / "README.md").write_text("\n".join(name for _, name in names.values()))
+    elements = {
+        id: Element(
+            id=id,
+            kind=kind,
+            name=name,
+            description=None,
+            parent=None,
+            status="found" if id == "external:google" else "documented",
+            markers=[],
+            coverage=Coverage(status="none", topics=[]),
+        )
+        for id, (kind, name) in names.items()
+    }
+    relations = {}
+    citations = []
+    for line, (id, element) in enumerate(elements.items(), 1):
+        citations.append(
+            Citation(
+                target=id,
+                file="README.md",
+                start_line=line,
+                end_line=line,
+                source="code" if id == "external:google" else "documentation",
+                verified=True,
+            )
+        )
+        if element.kind == "system":
+            continue
+        source, target = (
+            (id, "system:shop") if element.kind == "person" else ("system:shop", id)
+        )
+        rid = f"{source}->{target}"
+        relations[rid] = Relation(
+            id=rid,
+            from_id=source,
+            to_id=target,
+            title="uses",
+            status=element.status,
+            reference_counts={"import": 1} if id == "external:google" else {},
+            markers=[],
+        )
+    reference = Reference(
+        relation="system:shop->external:google",
+        from_file="client.py",
+        line=1,
+        to="google",
+        kind="import",
+        status="counts",
+    )
+    return CurationState(
+        elements, relations, citations, [reference], {id: [] for id in elements}
+    )
+
+
+async def consolidate_state(root, manager, state, *, overrides=None, trial=False):
+    from chunkhound.code_mapper.c4.consolidation import consolidate
+
+    llm = C4Llm(manager, concurrency=2, trial=trial)
+    outcome = await consolidate(
+        state=state,
+        overrides=overrides or Overrides(),
+        project_root=root,
+        llm=llm,
+        retries=RetryQueue(),
+    )
+    return outcome, llm
+
+
+def actor_answers(scripted, pair="same"):
+    from tests.code_mapper.c4.conftest import (
+        actor_groups,
+        actor_survivors,
+        neutral_decisions,
+    )
+
+    scripted.answers.update(
+        {
+            "c4_group": actor_groups,
+            "c4_survivor": actor_survivors,
+            "c4_pair": neutral_decisions(pair),
+        }
+    )
+
+
+@pytest.mark.parametrize("pair", ["same", "different", "unsure"])
+async def test_r18_r19_only_same_merges_into_existing_survivor(
+    tmp_path, c4_llm_manager, scripted, pair
+):
+    from chunkhound.code_mapper.c4.curation import curate
+
+    state = actor_state(tmp_path)
+    before = deepcopy(state)
+    actor_answers(scripted, pair)
+    outcome, _ = await consolidate_state(tmp_path, c4_llm_manager, state)
+    expected = (
+        {
+            "person:agents": "person:ai-assistant",
+            "external:google": "external:google-gemini",
+        }
+        if pair == "same"
+        else {}
+    )
+    assert outcome.merges == expected
+    result = curate(state, {}, Overrides(merge=outcome.merges))
+    assert state == before
+    assert result.elements["external:google-gemini"].name == "Google Gemini"
+    assert result.references[0].to == "google"
+    if pair == "same":
+        assert "external:google" not in result.elements
+        assert result.elements["external:google-gemini"].status == "found"
+        assert result.relations[
+            "system:shop->external:google-gemini"
+        ].reference_counts == {"import": 1}
+        assert result.references[0].relation == "system:shop->external:google-gemini"
+        assert sum(c.target == "external:google-gemini" for c in result.citations) == 2
+    assert not (tmp_path / ".chunkhound/map.lock.json").exists()
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "unknown",
+        "mixed",
+        "duplicate",
+        "overlap",
+        "survivor",
+    ],
+)
+async def test_group_answers_retry_then_fall_back(
+    tmp_path, c4_llm_manager, scripted, fault
+):
+    state = actor_state(tmp_path)
+    actor_answers(scripted)
+
+    def invalid(prompt):
+        members = decision_items(prompt)[0]["members"]
+        ids = [m["id"] for m in members]
+        if fault == "unknown":
+            ids.append("unknown")
+        elif fault == "mixed":
+            ids.append(
+                "person:agents" if members[0]["name"] == "Google" else "external:google"
+            )
+        elif fault == "duplicate":
+            ids.append(ids[0])
+        groups = [{"members": ids}]
+        if fault == "overlap":
+            groups.append({"members": ids[:1]})
+        return {"groups": groups}
+
+    if fault == "survivor":
+        scripted.answers["c4_survivor"] = lambda prompt: {
+            "decisions": [
+                {"id": i["id"], "value": "unknown"} for i in decision_items(prompt)
+            ]
+        }
+    else:
+        scripted.answers["c4_group"] = invalid
+    outcome, llm = await consolidate_state(tmp_path, c4_llm_manager, state)
+    assert outcome.merges == {}
+    assert ", fallback" in "\n".join(llm.report_lines())
+    question = "c4_survivor" if fault == "survivor" else "c4_group"
+    assert not list(
+        (tmp_path / ".chunkhound/extraction/decisions" / question).glob("*.json")
+    )
+    assert scripted.question_calls[question] == (2 if fault == "survivor" else 4)
+    assert scripted.question_calls["c4_pair"] == 0
+
+
+@pytest.mark.parametrize("singleton", [False, True])
+async def test_empty_and_singleton_groups_are_cached_without_closed_questions(
+    tmp_path, c4_llm_manager, scripted, singleton
+):
+    state = actor_state(tmp_path)
+    scripted.answers["c4_group"] = lambda prompt: {
+        "groups": [{"members": [decision_items(prompt)[0]["members"][0]["id"]]}]
+        if singleton
+        else []
+    }
+    outcome, _ = await consolidate_state(tmp_path, c4_llm_manager, state)
+    assert outcome.merges == {}
+    scripted.calls.clear()
+    replay, _ = await consolidate_state(tmp_path, c4_llm_manager, state)
+    assert replay.merges == {} and not scripted.calls
+    assert not scripted.question_calls["c4_survivor"]
+
+
+@pytest.mark.parametrize(
+    "pair,expected",
+    [
+        (
+            ("person:ai-assistant", "person:agents"),
+            {"person:teams": "person:ai-assistant"},
+        ),
+        (("person:agents", "person:teams"), {"person:agents": "person:ai-assistant"}),
+        (
+            ("person:teams", "person:ai-assistant"),
+            {"person:agents": "person:ai-assistant"},
+        ),
+    ],
+)
+async def test_r22_keep_apart_blocks_direct_and_shared_target_merges(
+    tmp_path, c4_llm_manager, scripted, pair, expected
+):
+    state = actor_state(tmp_path, extra=(("person:teams", ("person", "teams")),))
+    actor_answers(scripted)
+
+    def pair_answer(prompt):
+        items = decision_items(prompt)
+        assert {(i["survivor"]["name"], i["other"]["name"]) for i in items} == {
+            ("AI assistant", "agents"),
+            ("AI assistant", "teams"),
+        }
+        return {"decisions": [{"id": i["id"], "value": "same"} for i in items]}
+
+    scripted.answers["c4_pair"] = pair_answer
+    scripted.answers["c4_group"] = lambda prompt: {
+        "groups": [{"members": [m["id"] for m in decision_items(prompt)[0]["members"]]}]
+        if decision_items(prompt)[0]["kind"] == "person"
+        else []
+    }
+    outcome, _ = await consolidate_state(
+        tmp_path, c4_llm_manager, state, overrides=Overrides(keep_apart=[pair])
+    )
+    assert outcome.merges == expected
+    assert "keep_apart" in "\n".join(outcome.report_lines)
+    assert scripted.question_calls["c4_pair"] == 1  # one bundle, two independent pairs
+
+
+async def test_r22_two_member_block_precedes_survivor_and_reports_invalid_ids(
+    tmp_path, c4_llm_manager, scripted
+):
+    state = actor_state(tmp_path)
+    actor_answers(scripted)
+    normal = scripted.answers["c4_survivor"]
+
+    def external_survivor_only(prompt):
+        names = {m["name"] for i in decision_items(prompt) for m in i["members"]}
+        assert names == {"Google", "Google Gemini"}
+        return normal(prompt)
+
+    scripted.answers["c4_survivor"] = external_survivor_only
+    overrides = Overrides(
+        keep_apart=[
+            ("person:ai-assistant", "person:agents"),
+            ("system:shop", "person:agents"),
+            ("person:missing", "person:agents"),
+        ]
+    )
+    outcome, _ = await consolidate_state(
+        tmp_path, c4_llm_manager, state, overrides=overrides
+    )
+    assert outcome.merges == {"external:google": "external:google-gemini"}
+    report = "\n".join(outcome.report_lines)
+    assert "not on the map" in report and "not an external system or person" in report
+    assert "keep_apart" in report
+
+
+async def test_oversized_group_does_not_call_provider(
+    tmp_path, c4_llm_manager, scripted
+):
+    state = actor_state(tmp_path)
+    state.elements["person:agents"].description = "x" * 20_000
+    actor_answers(scripted)
+    config = {
+        **c4_llm_manager.role_config("utility"),
+        "max_input_chars": 12_000,
+        "max_input_tokens": 4_000,
+    }
+    manager = LLMManager(utility_config=config, synthesis_config=config)
+    outcome, llm = await consolidate_state(tmp_path, manager, state)
+    assert outcome.merges == {"external:google": "external:google-gemini"}
+    assert scripted.question_calls["c4_group"] == 1
+    assert "budget" in "\n".join(outcome.report_lines)
+    assert "fallback" in "\n".join(llm.report_lines())
+
+
+async def test_r23_consolidation_reuses_and_invalidates_per_kind(
+    tmp_path, c4_llm_manager, scripted
+):
+    state = actor_state(tmp_path)
+    actor_answers(scripted)
+    first, _ = await consolidate_state(tmp_path, c4_llm_manager, state)
+    scripted.calls.clear()
+    replay, _ = await consolidate_state(tmp_path, c4_llm_manager, state)
+    assert replay.merges == first.merges and not scripted.calls
+    scripted.question_calls.clear()
+    added = actor_state(tmp_path, extra=(("person:teams", ("person", "teams")),))
+    await consolidate_state(tmp_path, c4_llm_manager, added)
+    assert dict(scripted.question_calls) == {"c4_group": 1}
+    # Changing one group's choice invalidates only the pairs that depend on it.
+    for path in (tmp_path / ".chunkhound/extraction/decisions/c4_survivor").glob(
+        "*.json"
+    ):
+        data = json.loads(path.read_text())
+        if "person:agents" in str(data["key_parts"]["item"]):
+            data["answer"]["decisions"][0]["value"] = "person:agents"
+            path.write_text(json.dumps(data))
+    scripted.question_calls.clear()
+    changed, _ = await consolidate_state(tmp_path, c4_llm_manager, state)
+    assert changed.merges["person:ai-assistant"] == "person:agents"
+    assert dict(scripted.question_calls) == {"c4_pair": 1}
+    config = {**c4_llm_manager.role_config("utility"), "reasoning_effort": "high"}
+    manager = LLMManager(utility_config=config, synthesis_config=config)
+    scripted.question_calls.clear()
+    await consolidate_state(tmp_path, manager, state)
+    assert set(scripted.question_calls) == {"c4_group", "c4_survivor", "c4_pair"}
+
+
+async def test_r23_partial_failure_preserves_cached_decisions(
+    tmp_path, c4_llm_manager, scripted
+):
+    state = actor_state(tmp_path)
+    actor_answers(scripted)
+    await consolidate_state(tmp_path, c4_llm_manager, state)
+    state.elements["person:agents"].description = "Changed evidence"
+    for question in ("c4_group", "c4_survivor", "c4_pair"):
+        scripted.answers[question] = TimeoutError("unavailable")
+    outcome, _ = await consolidate_state(tmp_path, c4_llm_manager, state)
+    assert outcome.merges == {"external:google": "external:google-gemini"}
+    scripted.question_calls.clear()
+    await consolidate_state(tmp_path, c4_llm_manager, state)
+    assert dict(scripted.question_calls) == {"c4_group": 2}
+
+
+async def test_r23_trial_consolidates_only_cached_answers(
+    tmp_path, c4_llm_manager, scripted
+):
+    state = actor_state(tmp_path)
+    actor_answers(scripted)
+    await consolidate_state(tmp_path, c4_llm_manager, state)
+    state.elements["person:agents"].description = "Changed evidence"
+    before = snapshot(tmp_path)
+    outcome, llm = await consolidate_state(tmp_path, c4_llm_manager, state, trial=True)
+    assert outcome.merges == {"external:google": "external:google-gemini"}
+    assert llm.calls == 0 and snapshot(tmp_path) == before
+    assert "trial" in "\n".join(outcome.report_lines)
+
+
+@pytest.mark.parametrize("fault", ["missing", "duplicate", "unknown", "value", "extra"])
+async def test_pair_answers_fail_closed_without_caching(
+    tmp_path, c4_llm_manager, scripted, fault
+):
+    from tests.code_mapper.c4.conftest import neutral_decisions
+
+    state = actor_state(tmp_path)
+    actor_answers(scripted)
+
+    def invalid(prompt):
+        result = neutral_decisions("same")(prompt)
+        rows = result["decisions"]
+        if fault == "missing":
+            rows.pop()
+        elif fault == "duplicate":
+            rows.append(dict(rows[0]))
+        elif fault == "unknown":
+            rows[0]["id"] = "unknown"
+        elif fault == "value":
+            rows[0]["value"] = "equal"
+        else:
+            rows[0]["explanation"] = "not allowed"
+        return result
+
+    scripted.answers["c4_pair"] = invalid
+    outcome, _ = await consolidate_state(tmp_path, c4_llm_manager, state)
+    assert outcome.merges == {}
+    assert scripted.question_calls["c4_pair"] == 2
+    assert not list(
+        (tmp_path / ".chunkhound/extraction/decisions/c4_pair").glob("*.json")
+    )
+    scripted.question_calls.clear()
+    await consolidate_state(tmp_path, c4_llm_manager, state)
+    assert dict(scripted.question_calls) == {"c4_pair": 2}
+
+
+@pytest.mark.parametrize("question", ["c4_survivor", "c4_pair"])
+async def test_consolidation_bundles_retry_independently_within_budget(
+    tmp_path, c4_llm_manager, scripted, question
+):
+    from chunkhound.code_mapper.c4.decisions import DecisionAnswer
+
+    state = actor_state(tmp_path)
+    for element in state.elements.values():
+        element.description = "evidence " * 250
+    actor_answers(scripted)
+    normal = scripted.answers[question]
+    attempts = {}
+    config = {
+        **c4_llm_manager.role_config("utility"),
+        "max_input_chars": 12_000,
+        "max_input_tokens": 4_000,
+    }
+    manager = LLMManager(utility_config=config, synthesis_config=config)
+    meter = C4Llm(manager, concurrency=2, trial=False)
+
+    def bounded(prompt):
+        schema = DecisionAnswer.model_json_schema()
+        assert fits(prompt, schema, meter.input_limit("utility"), meter.estimate_tokens)
+        assert measure_request(prompt, schema, []) <= effective_target(
+            meter.input_limit("utility")
+        )
+        items = decision_items(prompt)
+        names = tuple(
+            sorted(
+                member["name"]
+                for item in items
+                for member in (
+                    item["members"]
+                    if question == "c4_survivor"
+                    else [item["survivor"], item["other"]]
+                )
+            )
+        )
+        attempts[names] = attempts.get(names, 0) + 1
+        return {"decisions": []} if attempts[names] == 1 else normal(prompt)
+
+    scripted.answers[question] = bounded
+    first, _ = await consolidate_state(tmp_path, manager, state)
+    assert first.merges == {
+        "person:agents": "person:ai-assistant",
+        "external:google": "external:google-gemini",
+    }
+    assert len(attempts) == 2 and set(attempts.values()) == {2}
+    # Larger bundles and reversed input order must not reinterpret cached aliases.
+    state = replace(state, elements=dict(reversed(list(state.elements.items()))))
+    scripted.calls.clear()
+    replay, _ = await consolidate_state(tmp_path, c4_llm_manager, state)
+    assert replay.merges == first.merges and not scripted.calls
+
+
+@pytest.mark.parametrize("missing", ["c4_survivor", "c4_pair"])
+async def test_trial_with_warm_groups_and_missing_dependents_is_read_only(
+    tmp_path, c4_llm_manager, scripted, missing
+):
+    state = actor_state(tmp_path)
+    actor_answers(scripted)
+    await consolidate_state(tmp_path, c4_llm_manager, state)
+    directory = tmp_path / ".chunkhound/extraction/decisions" / missing
+    for path in directory.glob("*.json"):
+        if "person:agents" in path.read_text():
+            path.unlink()
+    before = snapshot(tmp_path)
+    outcome, llm = await consolidate_state(tmp_path, c4_llm_manager, state, trial=True)
+    assert outcome.merges == {"external:google": "external:google-gemini"}
+    assert llm.calls == 0 and snapshot(tmp_path) == before
+    assert "trial" in "\n".join(outcome.report_lines)
+
+
+async def test_cached_groups_reject_removed_member_ids(
+    tmp_path, c4_llm_manager, scripted
+):
+    state = actor_state(tmp_path)
+    actor_answers(scripted)
+    await consolidate_state(tmp_path, c4_llm_manager, state)
+    for path in (tmp_path / ".chunkhound/extraction/decisions/c4_group").glob("*.json"):
+        data = json.loads(path.read_text())
+        if data["key_parts"]["item"]["kind"] == "person":
+            data["answer"]["groups"][0]["members"].append("person:removed")
+            path.write_text(json.dumps(data))
+    scripted.question_calls.clear()
+    outcome, _ = await consolidate_state(tmp_path, c4_llm_manager, state)
+    assert outcome.merges == {
+        "person:agents": "person:ai-assistant",
+        "external:google": "external:google-gemini",
+    }
+    assert dict(scripted.question_calls) == {"c4_group": 1}

@@ -15,8 +15,10 @@ from chunkhound.code_mapper.c4.assemble import (
     AssemblyInput,
     assemble,
     assemble_with_notes,
+    prepare_assembly,
 )
 from chunkhound.code_mapper.c4.classify import Classification, ClassifyItem, classify
+from chunkhound.code_mapper.c4.consolidation import consolidate
 from chunkhound.code_mapper.c4.contract import (
     Contract,
     ContractCounts,
@@ -798,6 +800,15 @@ async def finish_c4(
         _failed_containers(draft),
         draft.project_root,
     )
+    state, _ = prepare_assembly(inp)
+    consolidation = await consolidate(
+        state=state,
+        overrides=overrides,
+        project_root=draft.project_root,
+        llm=llm,
+        retries=draft.steps,
+    )
+    inp.merges = consolidation.merges
     elements, relations, evidence = await _titles(inp, draft, llm, lock)
     coverage = compute_coverage(
         element_files=evidence.element_files,
@@ -858,6 +869,7 @@ async def finish_c4(
     report_extra = [
         *documented_report_lines(raw_docs),
         *decisions.report_lines,
+        *consolidation.report_lines,
         "C4 documentation relationships not linked: "
         f"{notes.unlinked.no_match} no match, {notes.unlinked.ambiguous} multiple "
         f"matches, {notes.unlinked.not_allowed} not allowed",

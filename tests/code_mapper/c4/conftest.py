@@ -211,6 +211,7 @@ def default_answers() -> dict[str, Answer]:
         "c4_element": element_answer,
         "c4_table": neutral_decisions("other"),
         "c4_row": neutral_decisions("neither"),
+        "c4_group": {"groups": []},
     }
 
 
@@ -268,3 +269,92 @@ def component_answer(prompt, *, reject=None):
                 )
         fragments.append({"id": fid, "part": {"elements": elements, "relations": []}})
     return {"fragments": fragments}
+
+
+def actor_groups(prompt: str) -> dict[str, Any]:
+    """Propose the two actor equivalences in the integration fixture."""
+    members = decision_items(prompt)[0]["members"]
+    by_name = {member["name"].casefold(): member["id"] for member in members}
+    return {
+        "groups": [
+            {"members": [by_name[a], by_name[b]]}
+            for a, b in (("agents", "ai assistant"), ("google", "google gemini"))
+            if a in by_name and b in by_name
+        ]
+    }
+
+
+def actor_survivors(prompt: str) -> dict[str, Any]:
+    return {
+        "decisions": [
+            {
+                "id": item["id"],
+                "value": next(
+                    member["id"]
+                    for member in item["members"]
+                    if member["name"] in {"AI assistant", "Google Gemini"}
+                ),
+            }
+            for item in decision_items(prompt)
+        ]
+    }
+
+
+def consolidation_sources(repo: Path, scripted: ScriptedLLM) -> None:
+    """Network-free actor evidence shared by integration and runtime proof."""
+    manifest = repo / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text().replace('name = "shop"', 'name = "webwinkel"')
+    )
+    quote = (
+        "agents and AI assistant use webwinkel; "
+        "Google Gemini is used by webwinkel. Astro."
+    )
+    (repo / "README.md").write_text(
+        "# webwinkel\n\n" + quote + "\n\n"
+        "| Provider | Purpose |\n| --- | --- |\n"
+        "| Open**Code** CLI | command-line provider |\n"
+    )
+    (repo / "google_client.py").write_text("import google\n\ngoogle.call()\n")
+    citation = {"file": "README.md", "start_line": 3, "end_line": 3, "quote": quote}
+    kinds = {
+        "agents": "person",
+        "AI assistant": "person",
+        "Google Gemini": "external",
+        "Astro": "neither",
+    }
+    scripted.answers.update(
+        {
+            "documented": {
+                "elements": [
+                    {
+                        "kind": "external" if term == "Astro" else kind,
+                        "term": term,
+                        "description": "",
+                        "citation": citation,
+                    }
+                    for term, kind in kinds.items()
+                ],
+                "relations": [
+                    {
+                        "from_term": term if kind == "person" else "webwinkel",
+                        "to_term": "webwinkel" if kind == "person" else term,
+                        "title": "uses",
+                        "citation": citation,
+                    }
+                    for term, kind in kinds.items()
+                ],
+            },
+            "c4_element": lambda prompt: {
+                "decisions": [
+                    {"id": item["id"], "value": kinds[item["term"]]}
+                    for item in decision_items(prompt)
+                ]
+            },
+            "c4_table": neutral_decisions("service_list"),
+            "c4_row": neutral_decisions("external"),
+            "c4_group": actor_groups,
+            "c4_survivor": actor_survivors,
+            "c4_pair": neutral_decisions("same"),
+        }
+    )

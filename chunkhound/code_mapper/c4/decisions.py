@@ -7,10 +7,11 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Any, Generic, Literal, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, Literal, Protocol, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from chunkhound.code_mapper.c4.curation import CurationState
 from chunkhound.code_mapper.c4.documented import (
     EXTRACTION_CACHE,
     DocElement,
@@ -38,6 +39,9 @@ from chunkhound.services.extraction.store import (
     DecisionStore,
     key_from_parts,
 )
+
+if TYPE_CHECKING:
+    from chunkhound.code_mapper.c4.consolidation import MergeGroup
 
 SubjectT = TypeVar("SubjectT", contravariant=True)
 _VALIDATOR_VERSION = 1
@@ -76,6 +80,8 @@ class DecisionQuestion(Protocol[SubjectT]):
 
     def item(self, subject: SubjectT) -> dict[str, Any]: ...
 
+    def prompt_item(self, item: dict[str, Any]) -> dict[str, Any]: ...
+
     def validate(
         self,
         answer: DecisionAnswer,
@@ -97,6 +103,9 @@ class _ChoiceQuestion(Generic[SubjectT]):
         self.version = hashlib.sha256(
             f"{prompt}\n{schema}\n{_VALIDATOR_VERSION}".encode()
         ).hexdigest()
+
+    def prompt_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        return item
 
     def validate(
         self,
@@ -176,6 +185,135 @@ class RowQuestion(_ChoiceQuestion[tuple[ServiceTable, TableRow]]):
         return "neither"
 
 
+def candidate_metadata(
+    state: CurationState, project_root: Path
+) -> dict[str, dict[str, Any]]:
+    """Minimal actor evidence: a document quote or package and first code site."""
+    result = {}
+    for id, element in sorted(state.elements.items()):
+        if element.kind not in {"person", "external"}:
+            continue
+        source: dict[str, Any] = {}
+        citations = sorted(
+            (c for c in state.citations if c.target == id),
+            key=lambda c: (c.source != "documentation", c.file, c.start_line),
+        )
+        if citations and citations[0].source == "documentation":
+            citation = citations[0]
+            lines = (
+                (project_root / citation.file)
+                .read_text(encoding="utf-8", errors="replace")
+                .splitlines()
+            )
+            source = {
+                "file": citation.file,
+                "start_line": citation.start_line,
+                "end_line": citation.end_line,
+                "quote": "\n".join(lines[citation.start_line - 1 : citation.end_line]),
+            }
+        else:
+            sites = sorted(
+                (
+                    r
+                    for r in state.references
+                    if r.relation in state.relations
+                    and state.relations[r.relation].to_id == id
+                ),
+                key=lambda r: (r.from_file, r.line, r.to),
+            )
+            if sites:
+                source = {
+                    "package": sites[0].to,
+                    "file": sites[0].from_file,
+                    "line": sites[0].line,
+                }
+        result[id] = {
+            "id": id,
+            "name": element.name,
+            "description": element.description or "",
+            "source": source,
+        }
+    return result
+
+
+class SurvivorQuestion(_ChoiceQuestion["MergeGroup"]):
+    name = "c4_survivor"
+    values = frozenset[str]()
+
+    def __init__(self, candidates: Mapping[str, dict[str, Any]]) -> None:
+        self.candidates = candidates
+        super().__init__()
+
+    def item(self, subject: "MergeGroup") -> dict[str, Any]:
+        return {
+            "members": [
+                {key: self.candidates[id][key] for key in ("id", "name", "description")}
+                for id in sorted(subject.members)
+            ]
+        }
+
+    def prompt_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        members = [
+            {**member, "id": f"M{number}"}
+            for number, member in enumerate(item["members"], 1)
+        ]
+        seed = key_from_parts(item)
+        random.Random(seed).shuffle(members)
+        return {"members": members}
+
+    def validate(
+        self,
+        answer: DecisionAnswer,
+        items: Mapping[str, "MergeGroup"],
+        *,
+        cached: bool = False,
+    ) -> dict[str, str]:
+        if Counter(v.id for v in answer.decisions) != Counter({k: 1 for k in items}):
+            raise AnswerRejectedError(
+                "consolidate: every item id must occur exactly once"
+            )
+        checked = {}
+        for value in answer.decisions:
+            members = sorted(items[value.id].members)
+            aliases = {f"M{n}": id for n, id in enumerate(members, 1)}
+            real = value.value if cached else aliases.get(value.value, "")
+            if real not in members or real not in self.candidates:
+                raise AnswerRejectedError("consolidate: survivor outside its group")
+            checked[value.id] = real
+        return checked
+
+    def fallback(self, subject: "MergeGroup") -> str:
+        return ""
+
+
+class PairQuestion(_ChoiceQuestion[tuple[str, str]]):
+    name = "c4_pair"
+    values = frozenset({"same", "different", "unsure"})
+
+    def __init__(self, candidates: Mapping[str, dict[str, Any]]) -> None:
+        self.candidates = candidates
+        super().__init__()
+
+    def item(self, subject: tuple[str, str]) -> dict[str, Any]:
+        survivor, other = subject
+        return {"survivor": self.candidates[survivor], "other": self.candidates[other]}
+
+    def prompt_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        aliases = {
+            id: f"M{n}"
+            for n, id in enumerate(
+                sorted((item["survivor"]["id"], item["other"]["id"])), 1
+            )
+        }
+        return {
+            role: {**member, "id": aliases[member["id"]]}
+            for role, member in item.items()
+        }
+
+    def fallback(self, subject: tuple[str, str]) -> str:
+        return "different"
+
+
 def _store(project_root: Path, *, read_only: bool) -> DecisionStore:
     return DecisionStore(
         project_root / EXTRACTION_CACHE / "decisions", read_only=read_only
@@ -235,7 +373,7 @@ class _DecisionRun(Generic[SubjectT]):
             f"{template}\nItems:\n"
         )
         items = [
-            {"id": f"I{number}", **self.parts[key]["item"]}
+            {"id": f"I{number}", **self.question.prompt_item(self.parts[key]["item"])}
             for number, key in enumerate(keys, 1)
         ]
         return header + json.dumps(items, ensure_ascii=False)
