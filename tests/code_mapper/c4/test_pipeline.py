@@ -1591,12 +1591,22 @@ async def test_decision_report_names_changes_and_replays(
     }
     assert first.lock.overrides.merge == {}
     report = "\n".join(first.report_extra)
-    for name in ("agents", "AI assistant", "google", "Google Gemini", "Astro"):
+    for name in (
+        "agents",
+        "AI assistant",
+        "google",
+        "Google Gemini",
+        "Astro",
+        "OpenCode CLI",
+        "README.md:7",
+    ):
         assert name in report
     pipeline_answers.calls.clear()
     replay = await build(fixture_repo, c4_llm_manager, lock=first.lock)
     assert not pipeline_answers.calls
     assert replay.model == first.model and replay.lock.documented == raw
+    replay_report = "\n".join(replay.report_extra)
+    assert "OpenCode CLI" in replay_report and "README.md:7" in replay_report
     pipeline_answers.calls.clear()
     trial = await build(fixture_repo, c4_llm_manager, lock=replay.lock, trial=True)
     assert not pipeline_answers.calls

@@ -623,11 +623,19 @@ async def decide(
                 changed.append(f"{item.term} → {value}")
     relations = list(documented.relations)
     added = _add_rows(elements, relations, row_subjects, rows.values, system_name)
+    added_names = []
+    for item in added:
+        citation = item.citation
+        span = str(citation.start_line)
+        if citation.end_line != citation.start_line:
+            span += f"-{citation.end_line}"
+        added_names.append(f"{item.term} ({citation.file}:{span})")
     service_count = sum(value == "service_list" for value in tables.values.values())
     line = (
         f"C4 decisions: tables {_count_summary(tables.counts)}, "
         f"{service_count} service tables; rows {_count_summary(rows.counts)}, "
-        f"{len(added)} added; elements {_count_summary(result.counts)}, "
+        f"{len(added)} added ({', '.join(added_names)}); "
+        f"elements {_count_summary(result.counts)}, "
         f"{len(dropped)} dropped ({', '.join(dropped)}), "
         f"{len(changed)} kind changed ({', '.join(changed)})"
     )

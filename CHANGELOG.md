@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **C4 added-actor reporting** — Decision reports now name each added table actor and its authoritative row citation, including cached replay, without changing extraction or decisions.
 - **C4 empty Markdown headings** — Valid empty ATX headings no longer abort table decisions, including documents without tables. Empty headings still end preceding sections at their own level, so service-table context does not retain obsolete headings.
 - **C4 template exclusion** — A Dockerfile beside a package with a placeholder name no longer promotes that template directory to a runtime container.
 - **C4 scoped replay** — Fresh reference-resolution outcomes now invalidate transition replay when imports change between project files and external packages, including dirty target creation or removal outside the selected scope. Genuinely unchanged results still replay with identical JSON and no model calls.
