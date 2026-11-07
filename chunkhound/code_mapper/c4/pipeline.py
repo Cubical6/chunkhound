@@ -26,7 +26,11 @@ from chunkhound.code_mapper.c4.contract import (
     repository_lookup,
     with_git_data,
 )
-from chunkhound.code_mapper.c4.decisions import decide, prune_decision_cache
+from chunkhound.code_mapper.c4.decisions import (
+    DecisionRunner,
+    decide,
+    prune_decision_cache,
+)
 from chunkhound.code_mapper.c4.documented import (
     DocElement,
     DocRelation,
@@ -615,24 +619,34 @@ def _transition(
     )
 
 
+def _lock_documented(docs: DocumentedOutcome) -> LockedDocumented | None:
+    """Persist only raw extraction; derived decisions never enter this payload."""
+    if docs.fallback:
+        return None
+    return LockedDocumented(
+        version=docs.version,
+        hashes=docs.hashes,
+        elements=TypeAdapter(list[DocElement]).dump_python(docs.elements, mode="json"),
+        relations=TypeAdapter(list[DocRelation]).dump_python(
+            docs.relations, mode="json"
+        ),
+    )
+
+
 def _build_lock(
     draft: C4Draft,
     model: C4Model,
     evidence: C4Evidence,
     inp: AssemblyInput,
-    identity: IdentityResult,
-    fingerprint: str,
-    lock: ScopeLock | None,
-    carried: dict[str, LockedComponent],
-    raw_documented: DocumentedOutcome,
+    previous: ScopeLock | None,
 ) -> ScopeLock:
+    """Snapshot current model caches, independently of the identity transition."""
     fingerprints = _fingerprints(evidence, model.relations)
     titles = {r.id: r.title for r in model.relations}
-    docs = raw_documented
     return ScopeLock(
-        # The next run must still see renames made since the last complete merge.
-        base_sha=lock.base_sha
-        if lock and _failed_containers(draft)
+        # A partial merge must not advance the base for the next rename attempt.
+        base_sha=previous.base_sha
+        if previous and _failed_containers(draft)
         else model.run.head_sha,
         system=draft.runtime.system_id,
         containers={
@@ -641,9 +655,10 @@ def _build_lock(
             if not {"fallback", "trial"}.intersection(unit.markers)
         },
         direct_groups=_direct_groups(draft),
-        transition=_transition(draft, model, inp, fingerprint),
-        components={**_lock_components(inp, evidence), **carried},
-        tombstones=identity.tombstones,
+        transition=None,
+        components=_lock_components(inp, evidence),
+        tombstones={},
+        documented=None,
         relations={
             r.id: LockedRelation(title=r.title, fingerprint=fingerprints[r.id])
             for r in model.relations
@@ -657,18 +672,6 @@ def _build_lock(
             for key, c in draft.classifications.items()
             if not {"fallback", "trial"}.intersection(c.markers)
         },
-        documented=None
-        if docs.fallback
-        else LockedDocumented(
-            version=docs.version,
-            hashes=docs.hashes,
-            elements=TypeAdapter(list[DocElement]).dump_python(
-                docs.elements, mode="json"
-            ),
-            relations=TypeAdapter(list[DocRelation]).dump_python(
-                docs.relations, mode="json"
-            ),
-        ),
         summaries={
             summary_key((id, titles[id]) for id in arrow.underlying): arrow.label
             for arrow in model.merged
@@ -772,12 +775,10 @@ async def finish_c4(
     )
     await retries.drain()
     decisions = await decide(
-        project_root=draft.project_root,
+        runner=DecisionRunner(draft.project_root, llm, draft.steps, "decide"),
         doc_files=doc_files,
         system_name=draft.runtime.system_name,
         documented=raw_docs,
-        llm=llm,
-        retries=draft.steps,
     )
     docs = decisions.documented
     if not draft.prepared:
@@ -855,14 +856,13 @@ async def finish_c4(
         merged=merged,
         history=identity.history,
     )
-    updated = (
-        None
-        if llm.trial
-        else _build_lock(
-            draft, model, evidence, inp, identity, fingerprint, lock, carried, raw_docs
-        )
-    )
+    updated = None
     if not llm.trial:
+        updated = _build_lock(draft, model, evidence, inp, lock)
+        updated.transition = _transition(draft, model, inp, fingerprint)
+        updated.components.update(carried)
+        updated.tombstones = dict(identity.tombstones)
+        updated.documented = _lock_documented(raw_docs)
         prune_documented_cache(draft.project_root)
         prune_decision_cache(draft.project_root)
     notes = assemble_with_notes(inp)[3]

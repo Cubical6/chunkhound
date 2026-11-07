@@ -69,16 +69,14 @@ def documents(root):
 
 
 async def run(root, manager, docs, *, trial=False, retries=None):
-    from chunkhound.code_mapper.c4.decisions import decide
+    from chunkhound.code_mapper.c4.decisions import DecisionRunner, decide
 
     llm = C4Llm(manager, concurrency=2, trial=trial)
     outcome = await decide(
-        project_root=root,
+        runner=DecisionRunner(root, llm, retries or RetryQueue(), "decide"),
         doc_files=["README.md"],
         system_name="Shop",
         documented=docs,
-        llm=llm,
-        retries=retries or RetryQueue(),
     )
     return outcome, llm
 

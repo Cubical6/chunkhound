@@ -12,11 +12,11 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from chunkhound.code_mapper.c4.curation import CurationState
 from chunkhound.code_mapper.c4.decisions import (
     DecisionCounts,
+    DecisionRunner,
     PairQuestion,
     SurvivorQuestion,
     _count_summary,
     candidate_metadata,
-    run_decisions,
 )
 from chunkhound.code_mapper.c4.documented import EXTRACTION_CACHE
 from chunkhound.code_mapper.c4.llm import (
@@ -322,25 +322,10 @@ async def consolidate(
         key_from_parts({"kind": g.kind, "members": sorted(g.members)}): g
         for g in groups
     }
-    survivors = await run_decisions(
-        SurvivorQuestion(metadata),
-        subjects,
-        project_root=project_root,
-        llm=llm,
-        retries=retries,
-        step="consolidate",
-        reason="survivors",
-    )
+    runner = DecisionRunner(project_root, llm, retries, "consolidate")
+    survivors = await runner.run(SurvivorQuestion(metadata), subjects, "survivors")
     comparisons = _comparisons(subjects, survivors.values)
-    decisions = await run_decisions(
-        PairQuestion(metadata),
-        comparisons,
-        project_root=project_root,
-        llm=llm,
-        retries=retries,
-        step="consolidate",
-        reason="pairs",
-    )
+    decisions = await runner.run(PairQuestion(metadata), comparisons, "pairs")
     notes.extend(
         _decision_notes(
             subjects, survivors.values, comparisons, decisions.values, state

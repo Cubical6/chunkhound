@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **C4 decision and lock responsibilities** — A step-scoped decision runner now owns shared cache/provider/retry dependencies separately from each question's inputs. Lock snapshots, identity transitions and raw-document serialization are assembled separately, preserving replay, partial-merge recovery and manual override provenance without changing model or lock formats.
 - **Astro 7 / Vite 8 documentation sites** — Upgraded both the AutoDoc template and project website to Astro 7.4.2, with Vite 8 supplied by Astro. Building either site now requires Node.js 22.23.4 or newer and npm 9.6.5 or newer; CI uses Node.js 24. Existing generated sites can refresh their template with `chunkhound autodoc --assets-only --out-dir docs-site/`, followed by `npm install` and `npm run build` in that directory. Markdown/GFM, syntax highlighting and the existing Mermaid major versions are retained.
 
 ### Fixed

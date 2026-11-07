@@ -324,19 +324,68 @@ def prune_decision_cache(project_root: Path) -> None:
     _store(project_root, read_only=False).prune()
 
 
+class DecisionRunner:
+    """Execute closed questions within one step's cache and retry lifecycle."""
+
+    def __init__(
+        self,
+        project_root: Path,
+        llm: C4Llm,
+        retries: RetryQueue,
+        step: Literal["decide", "consolidate"],
+    ) -> None:
+        self.project_root = project_root
+        self.llm = llm
+        self.retries = retries
+        self.step = step
+        self.store = _store(project_root, read_only=llm.trial)
+
+    async def run(
+        self,
+        question: DecisionQuestion[SubjectT],
+        subjects: Mapping[str, SubjectT],
+        reason: str,
+    ) -> DecisionResults:
+        """Return final decisions only after all delayed bundle retries settle."""
+        provider = asdict(self.llm.provider_identity("utility"))
+        parts = {
+            key: {
+                "format": DECISION_FORMAT_VERSION,
+                "question": question.name,
+                "question_version": question.version,
+                "provider": provider,
+                "item": question.item(subject),
+            }
+            for key, subject in subjects.items()
+        }
+        run = _DecisionRun(
+            question,
+            subjects,
+            self,
+            parts,
+            DecisionResults(counts=DecisionCounts(total=len(subjects))),
+        )
+        for keys, bounded in run.bundles(run.misses()):
+            detail = reason if bounded else f"{reason} (item exceeds input budget)"
+            await run.bundle(
+                keys,
+                run.prompt(keys) if bounded else None,
+                self.llm.report(self.step, detail),
+            )
+        await self.retries.drain()
+        return run.result
+
+
 @dataclass
 class _DecisionRun(Generic[SubjectT]):
     question: DecisionQuestion[SubjectT]
     subjects: Mapping[str, SubjectT]
-    llm: C4Llm
-    retries: RetryQueue
-    step: Literal["decide", "consolidate"]
-    store: DecisionStore
+    runner: DecisionRunner
     parts: dict[str, dict[str, Any]]
     result: DecisionResults
 
     def cached(self, key: str) -> bool:
-        stored = self.store.get(self.question.name, self.parts[key])
+        stored = self.runner.store.get(self.question.name, self.parts[key])
         if stored is None:
             return False
         try:
@@ -349,7 +398,7 @@ class _DecisionRun(Generic[SubjectT]):
             return False
         self.result.values.update(checked)
         self.result.counts.reused += 1
-        self.store.touch(self.question.name, key_from_parts(self.parts[key]))
+        self.runner.store.touch(self.question.name, key_from_parts(self.parts[key]))
         return True
 
     def misses(self) -> list[str]:
@@ -357,7 +406,7 @@ class _DecisionRun(Generic[SubjectT]):
         for key in sorted(self.subjects):
             if self.cached(key):
                 continue
-            if self.llm.trial:
+            if self.runner.llm.trial:
                 self.result.values[key] = self.question.fallback(self.subjects[key])
                 self.result.counts.trial += 1
             else:
@@ -369,7 +418,7 @@ class _DecisionRun(Generic[SubjectT]):
     def prompt(self, keys: Sequence[str]) -> str:
         template = load_c4_prompt(self.question.name.removeprefix("c4_"))
         header = (
-            f"C4 step: {self.step}\nC4 question: {self.question.name}\n"
+            f"C4 step: {self.runner.step}\nC4 question: {self.question.name}\n"
             f"{template}\nItems:\n"
         )
         items = [
@@ -381,9 +430,9 @@ class _DecisionRun(Generic[SubjectT]):
     def bounded(self, keys: Sequence[str]) -> bool:
         prompt = self.prompt(keys)
         schema = DecisionAnswer.model_json_schema()
-        limit = self.llm.input_limit("utility")
+        limit = self.runner.llm.input_limit("utility")
         return measure_request(prompt, schema, []) <= effective_target(limit) and fits(
-            prompt, schema, limit, self.llm.estimate_tokens
+            prompt, schema, limit, self.runner.llm.estimate_tokens
         )
 
     def bundles(self, missing: Sequence[str]) -> list[tuple[list[str], bool]]:
@@ -414,9 +463,11 @@ class _DecisionRun(Generic[SubjectT]):
         async def attempt() -> dict[str, str]:
             with report.attempt():
                 if prompt is None:
-                    raise TransientStepError(f"{self.step}: item exceeds input budget")
-                answer = await self.llm.call(
-                    self.step, DecisionAnswer, prompt, provider="utility"
+                    raise TransientStepError(
+                        f"{self.runner.step}: item exceeds input budget"
+                    )
+                answer = await self.runner.llm.call(
+                    self.runner.step, DecisionAnswer, prompt, provider="utility"
                 )
                 checked = self.question.validate(answer, local)
                 return {ids[short]: value for short, value in checked.items()}
@@ -432,61 +483,22 @@ class _DecisionRun(Generic[SubjectT]):
             # Validate the entire bundle before committing any individual answer.
             for key, value in values.items():
                 answer = DecisionAnswer(decisions=[DecisionValue(id=key, value=value)])
-                self.store.put(self.question.name, self.parts[key], answer.model_dump())
+                self.runner.store.put(
+                    self.question.name, self.parts[key], answer.model_dump()
+                )
             self.result.counts.new += len(values)
 
         try:
             apply(await attempt(), False)
         except TransientStepError:
             bundle_key = key_from_parts({"subjects": sorted(keys)})
-            self.retries.defer(
-                f"{self.step}:{self.question.name}:{bundle_key}",
+            self.runner.retries.defer(
+                f"{self.runner.step}:{self.question.name}:{bundle_key}",
                 attempt,
                 fallback,
                 apply,
                 report=report,
             )
-
-
-async def run_decisions(
-    question: DecisionQuestion[SubjectT],
-    subjects: Mapping[str, SubjectT],
-    *,
-    project_root: Path,
-    llm: C4Llm,
-    retries: RetryQueue,
-    step: Literal["decide", "consolidate"],
-    reason: str,
-) -> DecisionResults:
-    """Return final decisions only after all delayed bundle retries settle."""
-    provider = asdict(llm.provider_identity("utility"))
-    parts = {
-        key: {
-            "format": DECISION_FORMAT_VERSION,
-            "question": question.name,
-            "question_version": question.version,
-            "provider": provider,
-            "item": question.item(subject),
-        }
-        for key, subject in subjects.items()
-    }
-    run = _DecisionRun(
-        question,
-        subjects,
-        llm,
-        retries,
-        step,
-        _store(project_root, read_only=llm.trial),
-        parts,
-        DecisionResults(counts=DecisionCounts(total=len(subjects))),
-    )
-    for keys, bounded in run.bundles(run.misses()):
-        detail = reason if bounded else f"{reason} (item exceeds input budget)"
-        await run.bundle(
-            keys, run.prompt(keys) if bounded else None, llm.report(step, detail)
-        )
-    await retries.drain()
-    return run.result
 
 
 @dataclass
@@ -499,22 +511,14 @@ class DecisionOutcome:
 
 
 async def _decide_rows(
-    project_root: Path, doc_files: Sequence[str], llm: C4Llm, retries: RetryQueue
+    runner: DecisionRunner, doc_files: Sequence[str]
 ) -> tuple[DecisionResults, DecisionResults, dict[str, tuple[ServiceTable, TableRow]]]:
     table_question = TableQuestion()
-    source_tables = read_tables(project_root, doc_files)
+    source_tables = read_tables(runner.project_root, doc_files)
     tables = {
         key_from_parts(table_question.item(table)): table for table in source_tables
     }
-    selected = await run_decisions(
-        table_question,
-        tables,
-        project_root=project_root,
-        llm=llm,
-        retries=retries,
-        step="decide",
-        reason="tables",
-    )
+    selected = await runner.run(table_question, tables, "tables")
     row_question = RowQuestion()
     rows = {
         key_from_parts(row_question.item((table, row))): (table, row)
@@ -522,15 +526,7 @@ async def _decide_rows(
         if selected.values[key_from_parts(table_question.item(table))] == "service_list"
         for row in table.rows
     }
-    classified = await run_decisions(
-        row_question,
-        rows,
-        project_root=project_root,
-        llm=llm,
-        retries=retries,
-        step="decide",
-        reason="rows",
-    )
+    classified = await runner.run(row_question, rows, "rows")
     return selected, classified, rows
 
 
@@ -579,32 +575,20 @@ def _count_summary(counts: DecisionCounts) -> str:
 
 async def decide(
     *,
-    project_root: Path,
+    runner: DecisionRunner,
     doc_files: Sequence[str],
     system_name: str,
     documented: DocumentedOutcome,
-    llm: C4Llm,
-    retries: RetryQueue,
 ) -> DecisionOutcome:
-    tables, rows, row_subjects = await _decide_rows(
-        project_root, doc_files, llm, retries
-    )
-    question = ElementQuestion(project_root)
+    tables, rows, row_subjects = await _decide_rows(runner, doc_files)
+    question = ElementQuestion(runner.project_root)
     # The source identity excludes the suggested kind and extraction list order.
     subjects = {
         key_from_parts(question.item(item)): item
         for item in documented.elements
         if item.kind in {"external", "person"}
     }
-    result = await run_decisions(
-        question,
-        subjects,
-        project_root=project_root,
-        llm=llm,
-        retries=retries,
-        step="decide",
-        reason="elements",
-    )
+    result = await runner.run(question, subjects, "elements")
     elements = []
     dropped = []
     changed = []
