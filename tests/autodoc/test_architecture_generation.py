@@ -243,6 +243,7 @@ async def test_no_model_preserves_unowned_paths_and_disables_map_imports(
 
 
 def test_missing_model_is_warning_not_cli_failure(tmp_path: Path) -> None:
+    (tmp_path / ".chunkhound.json").write_text("{}")
     root, output = tmp_path / "input", tmp_path / "site"
     model_path = write_input(root)
     model_path.unlink()
