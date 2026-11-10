@@ -338,6 +338,9 @@ class DecisionRunner:
         self.llm = llm
         self.retries = retries
         self.step = step
+        self.role: Literal["utility", "synthesis"] = (
+            "synthesis" if step == "consolidate" else "utility"
+        )
         self.store = _store(project_root, read_only=llm.trial)
 
     async def run(
@@ -347,7 +350,7 @@ class DecisionRunner:
         reason: str,
     ) -> DecisionResults:
         """Return final decisions only after all delayed bundle retries settle."""
-        provider = asdict(self.llm.provider_identity("utility"))
+        provider = asdict(self.llm.provider_identity(self.role))
         parts = {
             key: {
                 "format": DECISION_FORMAT_VERSION,
@@ -430,9 +433,12 @@ class _DecisionRun(Generic[SubjectT]):
     def bounded(self, keys: Sequence[str]) -> bool:
         prompt = self.prompt(keys)
         schema = DecisionAnswer.model_json_schema()
-        limit = self.runner.llm.input_limit("utility")
+        limit = self.runner.llm.input_limit(self.runner.role)
         return measure_request(prompt, schema, []) <= effective_target(limit) and fits(
-            prompt, schema, limit, self.runner.llm.estimate_tokens
+            prompt,
+            schema,
+            limit,
+            lambda text: self.runner.llm.estimate_tokens(text, role=self.runner.role),
         )
 
     def bundles(self, missing: Sequence[str]) -> list[tuple[list[str], bool]]:
@@ -467,7 +473,7 @@ class _DecisionRun(Generic[SubjectT]):
                         f"{self.runner.step}: item exceeds input budget"
                     )
                 answer = await self.runner.llm.call(
-                    self.runner.step, DecisionAnswer, prompt, provider="utility"
+                    self.runner.step, DecisionAnswer, prompt, provider=self.runner.role
                 )
                 checked = self.question.validate(answer, local)
                 return {ids[short]: value for short, value in checked.items()}

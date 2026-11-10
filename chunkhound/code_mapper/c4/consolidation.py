@@ -113,7 +113,7 @@ async def _propose_groups(
         "format": DECISION_FORMAT_VERSION,
         "question": "c4_group",
         "question_version": version,
-        "provider": asdict(llm.provider_identity("utility")),
+        "provider": asdict(llm.provider_identity("synthesis")),
         "item": {"kind": kind, "members": list(members.values())},
     }
     store = DecisionStore(
@@ -145,9 +145,9 @@ async def _propose_groups(
     item = {"id": "I1", "kind": kind, "members": prompt_members}
     prompt = f"C4 step: consolidate\nC4 question: c4_group\n{template}\nItems:\n"
     prompt += json.dumps([item], ensure_ascii=False)
-    limit = llm.input_limit("utility")
+    limit = llm.input_limit("synthesis")
     bounded = measure_request(prompt, schema, []) <= effective_target(limit) and fits(
-        prompt, schema, limit, llm.estimate_tokens
+        prompt, schema, limit, lambda text: llm.estimate_tokens(text, role="synthesis")
     )
     report = llm.report(
         "consolidate",
@@ -160,7 +160,7 @@ async def _propose_groups(
             if not bounded:
                 raise TransientStepError("consolidate: item exceeds input budget")
             answer = await llm.call(
-                "consolidate", GroupAnswer, prompt, provider="utility"
+                "consolidate", GroupAnswer, prompt, provider="synthesis"
             )
             return _validate_groups(answer, members, aliases, cached=False)
 

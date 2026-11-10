@@ -164,10 +164,17 @@ class C4Llm:
     def input_limit(self, role: Literal["utility", "synthesis"]) -> InputLimit:
         return resolve_input_limit(self._role_config(role))
 
-    def estimate_tokens(self, text: str) -> int:
+    def estimate_tokens(
+        self, text: str, *, role: Literal["utility", "synthesis"] = "utility"
+    ) -> int:
         if self._manager is None:
             return len(text) // 4
-        return self._manager.get_utility_provider().estimate_tokens(text)
+        selected = (
+            self._manager.get_utility_provider()
+            if role == "utility"
+            else self._manager.get_synthesis_provider()
+        )
+        return selected.estimate_tokens(text)
 
     async def call(
         self,

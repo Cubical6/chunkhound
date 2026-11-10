@@ -24,7 +24,7 @@ from chunkhound.services.extraction.budget import (
     fits,
     measure_request,
 )
-from tests.code_mapper.c4.conftest import decision_items
+from tests.code_mapper.c4.conftest import ScriptedLLM, decision_items
 
 KINDS = {"Astro": "neither", "AI assistant": "person", "Stripe": "external"}
 
@@ -935,6 +935,76 @@ async def test_r23_consolidation_reuses_and_invalidates_per_kind(
     assert set(scripted.question_calls) == {"c4_group", "c4_survivor", "c4_pair"}
 
 
+@pytest.mark.parametrize("step", ["decide", "consolidate"])
+async def test_decision_roles_control_requests_budgets_and_cache(
+    tmp_path, monkeypatch, step
+):
+    role = "synthesis" if step == "consolidate" else "utility"
+    other = "utility" if role == "synthesis" else "synthesis"
+    selected = ScriptedLLM({"c4_element": answer})
+    actor_answers(selected)
+
+    def wrong_provider():
+        raise AssertionError("Unselected role must not estimate or request decisions")
+
+    monkeypatch.setattr(
+        LLMManager,
+        "_create_provider",
+        lambda self, config: selected,
+    )
+    configs = {
+        name: {
+            "provider": "fake",
+            "model": name,
+            "reasoning_effort": "low",
+            "max_input_chars": 100_000 if name == role else 1,
+            "max_input_tokens": 30_000 if name == role else 1,
+        }
+        for name in ("utility", "synthesis")
+    }
+    docs = documents(tmp_path)
+    state = actor_state(tmp_path)
+
+    async def execute(settings):
+        manager = LLMManager(
+            utility_config=settings["utility"], synthesis_config=settings["synthesis"]
+        )
+        monkeypatch.setattr(manager, f"get_{other}_provider", wrong_provider)
+        if step == "decide":
+            await run(tmp_path, manager, docs)
+        else:
+            outcome, _ = await consolidate_state(tmp_path, manager, state)
+            assert outcome.merges == {
+                "person:agents": "person:ai-assistant",
+                "external:google": "external:google-gemini",
+            }
+
+    await execute(configs)
+    questions = (
+        {"c4_group", "c4_survivor", "c4_pair"}
+        if step == "consolidate"
+        else {"c4_element"}
+    )
+    assert set(selected.question_calls) == questions
+    selected.question_calls.clear()
+    await execute(configs)
+    assert not selected.question_calls
+    for field, value in (
+        ("provider", "other"),
+        ("model", f"{role}-stronger"),
+        ("reasoning_effort", "high"),
+    ):
+        changed = deepcopy(configs)
+        changed[other][field] = value
+        await execute(changed)
+        assert not selected.question_calls
+        changed = deepcopy(configs)
+        changed[role][field] = value
+        await execute(changed)
+        assert set(selected.question_calls) == questions
+        selected.question_calls.clear()
+
+
 async def test_r23_partial_failure_preserves_cached_decisions(
     tmp_path, c4_llm_manager, scripted
 ):
@@ -1023,9 +1093,14 @@ async def test_consolidation_bundles_retry_independently_within_budget(
 
     def bounded(prompt):
         schema = DecisionAnswer.model_json_schema()
-        assert fits(prompt, schema, meter.input_limit("utility"), meter.estimate_tokens)
+        assert fits(
+            prompt,
+            schema,
+            meter.input_limit("synthesis"),
+            lambda text: meter.estimate_tokens(text, role="synthesis"),
+        )
         assert measure_request(prompt, schema, []) <= effective_target(
-            meter.input_limit("utility")
+            meter.input_limit("synthesis")
         )
         items = decision_items(prompt)
         names = tuple(

@@ -10,7 +10,9 @@ Choose exactly one value per item:
   repository, with its own operator or process, that calls or is called by the
   system.
 - neither: a category without its own name (such as "LLM provider"), a library,
-  framework, format, endpoint or part of the system itself.
+  framework, format, endpoint or part of the system itself; a system named only
+  as an example, illustration or possible alternative, which this system does
+  not use, configure or support.
 
 Return only the structured decisions, with every supplied id exactly once.
 Do not add ids, explanations or other fields.
