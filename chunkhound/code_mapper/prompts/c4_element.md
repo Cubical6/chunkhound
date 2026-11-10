@@ -12,7 +12,16 @@ Choose exactly one value per item:
 - neither: a category without its own name (such as "LLM provider"), a library,
   framework, format, endpoint or part of the system itself; or a system named
   only in an example, sample configuration, illustration, comparison or possible
-  alternative without asserted participation as defined below.
+  alternative without asserted participation as defined below; or a person
+  candidate whose term is not a noun or noun phrase naming the role or group,
+  or a role that only develops, contributes to, reviews or maintains the code
+  or reads a document.
+
+A person counts only when the source states that the role or group uses,
+operates, configures, or receives output from the running described system. An
+AI-agent role using it, including through MCP, counts. People who develop,
+contribute to, review or maintain this repository's code, and a document's
+readers or audience, are not persons for this map.
 
 An external counts only when the source affirmatively states that this system
 uses it, calls it, is called by it, or explicitly supports it as an integration.
@@ -21,7 +30,7 @@ provider-specific URL appearing only in an example, sample configuration,
 illustration, comparison or possible alternative does not establish participation,
 including an arbitrary endpoint for a generic integration such as an
 OpenAI-compatible base_url. The extracted description is a claim to check against
-the cited source; it cannot supply participation the source does not state.
+the cited source; it cannot supply participation or use the source does not state.
 The context gives the Markdown heading path and any containing fence/table with
 its nearest preceding heading or introduction; it is not part of citation.quote.
 

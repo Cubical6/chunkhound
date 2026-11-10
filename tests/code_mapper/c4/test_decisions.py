@@ -20,6 +20,7 @@ from chunkhound.code_mapper.c4.references import ReferenceScan
 from chunkhound.code_mapper.c4.runtime import RuntimeScan
 from chunkhound.llm_manager import LLMManager
 from chunkhound.services.extraction.budget import (
+    ENVELOPE_MARGIN_CHARS,
     effective_target,
     fits,
     measure_request,
@@ -248,19 +249,45 @@ async def test_closed_answers_retry_then_fall_back(
 
 
 async def test_decision_bundles_retry_independently(tmp_path, c4_llm_manager, scripted):
-    from chunkhound.code_mapper.c4.decisions import DecisionAnswer
+    from chunkhound.code_mapper.c4.decisions import DecisionAnswer, ElementQuestion
+    from chunkhound.code_mapper.c4.llm import load_c4_prompt
 
     docs = documents(tmp_path)
     docs.elements = [
         replace(docs.elements[n], description="evidence " * 550) for n in (0, 1)
     ]
+    question = ElementQuestion(tmp_path)
+    header = (
+        f"C4 step: decide\nC4 question: c4_element\n"
+        f"{load_c4_prompt('element')}\nItems:\n"
+    )
+
+    def prompt(elements):
+        items = [
+            {"id": f"I{n}", **question.prompt_item(question.item(element))}
+            for n, element in enumerate(elements, 1)
+        ]
+        return header + json.dumps(items, ensure_ascii=False)
+
+    schema = DecisionAnswer.model_json_schema()
+    singles = [prompt([element]) for element in docs.elements]
     config = {
         **c4_llm_manager.role_config("utility"),
-        "max_input_chars": 12_000,
-        "max_input_tokens": 4_000,
+        "max_input_chars": max(measure_request(p, schema, []) for p in singles)
+        + ENVELOPE_MARGIN_CHARS,
+        "max_input_tokens": None,
     }
     manager = LLMManager(utility_config=config, synthesis_config=config)
     meter = C4Llm(manager, concurrency=2, trial=False)
+    limit = meter.input_limit("utility")
+
+    def within_budget(p):
+        return measure_request(p, schema, []) <= effective_target(limit) and fits(
+            p, schema, limit, meter.estimate_tokens
+        )
+
+    assert all(within_budget(p) for p in singles)
+    assert not within_budget(prompt(docs.elements))
     attempts = {}
 
     def bounded(prompt):
