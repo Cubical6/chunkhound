@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from chunkhound.core.config.config import Config
+from chunkhound.utils.duckdb_recovery import recover_duckdb_compaction
 
 
 def verify_database_exists(config: Config) -> Path:
@@ -21,6 +22,8 @@ def verify_database_exists(config: Config) -> Path:
 
     # Check existence using transformed path (includes provider-specific suffix)
     actual_db_path = config.database.get_db_path()
+    if config.database.provider == "duckdb":
+        recover_duckdb_compaction(actual_db_path, read_only=config.database.read_only)
     if not actual_db_path.exists():
         raise FileNotFoundError(
             f"Database not found at {actual_db_path}. "

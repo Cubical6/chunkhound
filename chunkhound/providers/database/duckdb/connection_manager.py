@@ -34,6 +34,7 @@ import duckdb
 from loguru import logger
 
 from chunkhound.core.exceptions import DatabaseError
+from chunkhound.utils.duckdb_recovery import recover_duckdb_compaction  # noqa: E402
 from chunkhound.utils.logging_guard import log_if_not_mcp
 from chunkhound.utils.windows_constants import _unlink_compacted
 
@@ -100,6 +101,10 @@ class DuckDBConnectionManager:
             # Gate recovery on read-only mode — a read-only observer must never
             # mutate compaction artifacts or attempt WAL replay.
             if not self._read_only:
+                # Native swaps use .old/.swap_intent, not the legacy Python
+                # .compact_backup protocol below. Recover before WAL probes or
+                # duckdb.connect() can create an empty live database.
+                recover_duckdb_compaction(self.db_path)
                 self._recover_interrupted_compaction()
                 self._preemptive_wal_cleanup()
             else:

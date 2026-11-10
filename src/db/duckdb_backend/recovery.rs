@@ -16,6 +16,14 @@ pub(super) enum RecoveredSwap {
 }
 
 impl DuckDbHnswBackend {
+    /// Recover the swap and discard an incomplete phase-1 copy without opening
+    /// DuckDB. Python must call this before any connection can create a live DB.
+    pub(crate) fn recover_compaction_swap(db_path: &Path) -> Result<bool, DbError> {
+        let recovered = Self::recover_swap_intent(db_path)?;
+        Self::discard_incomplete_compact_if_phase1(recovered, db_path);
+        Ok(recovered != RecoveredSwap::None)
+    }
+
     /// Write a compaction-intent marker file and fsync it to disk.
     /// Used by the 3-phase swap protocol to enable crash recovery (Invariant 17).
     pub(super) fn write_intent(path: &Path, phase: &str) -> Result<(), DbError> {

@@ -19,6 +19,17 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+/// Filesystem-only recovery: never opens DuckDB or creates a missing database.
+#[pyfunction]
+fn recover_compaction_swap(py: Python<'_>, db_path: String) -> PyResult<bool> {
+    py.allow_threads(move || {
+        db::duckdb_backend::DuckDbHnswBackend::recover_compaction_swap(std::path::Path::new(
+            &db_path,
+        ))
+    })
+    .map_err(Into::into)
+}
+
 #[pyfunction]
 #[pyo3(signature = (root, extensions, skip_dirs=None, exclude_patterns=None, exact_names=None, include_all=false))]
 fn scan_files(
@@ -469,6 +480,7 @@ fn chunkhound_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     pyo3_log::init();
 
     m.add_function(wrap_pyfunction!(scan_files, m)?)?;
+    m.add_function(wrap_pyfunction!(recover_compaction_swap, m)?)?;
 
     m.add_class::<pipeline::IndexingPipeline>()?;
     m.add_class::<pipeline::PipelineReport>()?;

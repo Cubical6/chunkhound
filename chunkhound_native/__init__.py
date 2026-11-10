@@ -65,3 +65,4 @@ IndexingPipeline = _native_module.IndexingPipeline
 PipelineReport = _native_module.PipelineReport
 ParseCallConfig = _native_module.ParseCallConfig
 AnalyticsRecorder = _native_module.AnalyticsRecorder
+recover_compaction_swap = _native_module.recover_compaction_swap
