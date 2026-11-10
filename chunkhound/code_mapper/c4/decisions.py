@@ -28,7 +28,13 @@ from chunkhound.code_mapper.c4.llm import (
     load_c4_prompt,
 )
 from chunkhound.code_mapper.c4.model import Citation
-from chunkhound.code_mapper.c4.tables import ServiceTable, TableRow, read_tables
+from chunkhound.code_mapper.c4.tables import (
+    ServiceTable,
+    TableRow,
+    read_structure_context,
+    read_tables,
+)
+from chunkhound.parsers.parser_factory import ParserFactory
 from chunkhound.services.extraction.budget import (
     effective_target,
     fits,
@@ -39,12 +45,16 @@ from chunkhound.services.extraction.store import (
     DecisionStore,
     key_from_parts,
 )
+from chunkhound.services.research.shared.import_context import ImportContextService
 
 if TYPE_CHECKING:
     from chunkhound.code_mapper.c4.consolidation import MergeGroup
 
 SubjectT = TypeVar("SubjectT", contravariant=True)
 _VALIDATOR_VERSION = 1
+# One entry per kind, in presentation order; no more than three per candidate.
+_EVIDENCE_KINDS = ("documentation", "code", "configuration")
+_EVIDENCE_TEXT_LIMIT = 600
 
 
 class DecisionValue(BaseModel):
@@ -140,6 +150,7 @@ class ElementQuestion(_ChoiceQuestion[DocElement]):
         return {
             "term": subject.term,
             "description": subject.description,
+            "context": read_structure_context(lines, citation.start_line),
             "citation": {
                 "file": citation.file,
                 "start_line": citation.start_line,
@@ -188,50 +199,117 @@ class RowQuestion(_ChoiceQuestion[tuple[ServiceTable, TableRow]]):
 def candidate_metadata(
     state: CurationState, project_root: Path
 ) -> dict[str, dict[str, Any]]:
-    """Minimal actor evidence: a document quote or package and first code site."""
+    """Complementary attached evidence, never inferred package associations.
+
+    At most three entries (one per source kind), each capped at 600 characters,
+    keep whole-kind group requests small. Order is documentation, code, config.
+    Line ranges identify the original statement even when its text is truncated.
+    If import extraction is unavailable, retain the first reference's locator
+    and literal source line instead; import references take precedence.
+    """
     result = {}
+    imports = ImportContextService(ParserFactory())
     for id, element in sorted(state.elements.items()):
         if element.kind not in {"person", "external"}:
             continue
-        source: dict[str, Any] = {}
+        evidence: list[dict[str, Any]] = []
         citations = sorted(
             (c for c in state.citations if c.target == id),
             key=lambda c: (c.source != "documentation", c.file, c.start_line),
         )
-        if citations and citations[0].source == "documentation":
-            citation = citations[0]
-            lines = (
-                (project_root / citation.file)
-                .read_text(encoding="utf-8", errors="replace")
-                .splitlines()
-            )
-            source = {
-                "file": citation.file,
-                "start_line": citation.start_line,
-                "end_line": citation.end_line,
-                "quote": "\n".join(lines[citation.start_line - 1 : citation.end_line]),
-            }
-        else:
-            sites = sorted(
-                (
-                    r
-                    for r in state.references
-                    if r.relation in state.relations
-                    and state.relations[r.relation].to_id == id
-                ),
-                key=lambda r: (r.from_file, r.line, r.to),
-            )
-            if sites:
-                source = {
-                    "package": sites[0].to,
-                    "file": sites[0].from_file,
-                    "line": sites[0].line,
+        for kind in _EVIDENCE_KINDS:
+            if kind == "code":
+                sites = sorted(
+                    (
+                        r
+                        for r in state.references
+                        if r.relation in state.relations
+                        and state.relations[r.relation].to_id == id
+                    ),
+                    key=lambda r: (
+                        r.kind != "import",
+                        r.from_file,
+                        r.line,
+                        r.to,
+                        r.kind,
+                    ),
+                )
+                if not sites:
+                    continue
+                site = sites[0]
+                path = project_root / site.from_file
+                text = (
+                    path.read_text(encoding="utf-8", errors="replace")
+                    if path.is_file()
+                    else ""
+                )
+                lines = text.splitlines()
+                code = {
+                    "source": kind,
+                    "package": site.to,
+                    "file": site.from_file,
+                    "start_line": site.line,
+                    "end_line": site.line,
+                    "quote": (
+                        lines[site.line - 1][:_EVIDENCE_TEXT_LIMIT]
+                        if 1 <= site.line <= len(lines)
+                        else ""
+                    ),
                 }
+                # Import parsing is optional enrichment: unsupported or broken
+                # parsers must never discard the original reference locator.
+                statements = []
+                if site.kind == "import" and text:
+                    try:
+                        statements = imports.get_file_imports(str(path), text)
+                    except Exception:
+                        pass
+                for statement in statements:
+                    if not statement:
+                        continue
+                    offset = 0
+                    found = False
+                    while (start := text.find(statement, offset)) >= 0:
+                        first = text.count("\n", 0, start) + 1
+                        last = first + statement.count("\n")
+                        offset = start + len(statement)
+                        if first <= site.line <= last:
+                            code.update(
+                                start_line=first,
+                                end_line=last,
+                                quote=statement[:_EVIDENCE_TEXT_LIMIT],
+                            )
+                            found = True
+                            break
+                    if found:
+                        break
+                evidence.append(code)
+                continue
+            for citation in citations:
+                if citation.source != kind:
+                    continue
+                lines = (
+                    (project_root / citation.file)
+                    .read_text(encoding="utf-8", errors="replace")
+                    .splitlines()
+                )
+                evidence.append(
+                    {
+                        "source": kind,
+                        "file": citation.file,
+                        "start_line": citation.start_line,
+                        "end_line": citation.end_line,
+                        "quote": "\n".join(
+                            lines[citation.start_line - 1 : citation.end_line]
+                        )[:_EVIDENCE_TEXT_LIMIT],
+                    }
+                )
+                break
         result[id] = {
             "id": id,
             "name": element.name,
             "description": element.description or "",
-            "source": source,
+            "evidence": evidence,
         }
     return result
 
@@ -246,10 +324,7 @@ class SurvivorQuestion(_ChoiceQuestion["MergeGroup"]):
 
     def item(self, subject: "MergeGroup") -> dict[str, Any]:
         return {
-            "members": [
-                {key: self.candidates[id][key] for key in ("id", "name", "description")}
-                for id in sorted(subject.members)
-            ]
+            "members": [dict(self.candidates[id]) for id in sorted(subject.members)]
         }
 
     def prompt_item(self, item: dict[str, Any]) -> dict[str, Any]:

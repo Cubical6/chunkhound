@@ -1149,6 +1149,284 @@ async def test_trial_with_warm_groups_and_missing_dependents_is_read_only(
     assert "trial" in "\n".join(outcome.report_lines)
 
 
+@pytest.mark.parametrize("other_actors", [0, 16])
+@pytest.mark.parametrize(
+    ("filename", "reference_kind"),
+    [
+        ("client.py", "import"),
+        ("client.unsupported", "import"),
+        ("client.unsupported", "call"),
+    ],
+)
+async def test_identity_evidence_reaches_every_question_and_invalidates_cache(
+    tmp_path, c4_llm_manager, scripted, other_actors, filename, reference_kind
+):
+    from chunkhound.code_mapper.c4.consolidation import GroupAnswer
+    from chunkhound.code_mapper.c4.curation import CurationState, curate
+    from chunkhound.code_mapper.c4.model import Coverage, Element, Reference, Relation
+
+    source = (
+        "from acme import (\n    widgetai,\n)"
+        if filename.endswith(".py")
+        else "acme.widgetai.connect(" + "opaque" * 150 + ")"
+    )
+    (tmp_path / filename).write_text(source + "\n")
+    quote = "Shop explicitly supports Acme WidgetAI as an integration."
+    (tmp_path / "README.md").write_text(quote + "\n")
+    manifest = 'dependencies = ["acme"]'
+    (tmp_path / "pyproject.toml").write_text(manifest + "\n")
+    ids = ("external:acme", "external:acme-widgetai")
+    elements = {
+        id: Element(
+            id=id,
+            kind="external",
+            name=name,
+            description="",
+            parent=None,
+            status="found",
+            markers=[],
+            coverage=Coverage(status="none", topics=[]),
+        )
+        for id, name in zip(ids, ("acme", "Acme WidgetAI"))
+    }
+    rid = "system:shop->external:acme"
+    relation = Relation(
+        id=rid,
+        from_id="system:shop",
+        to_id=ids[0],
+        title="uses",
+        status="found",
+        reference_counts={"import": 1},
+        markers=[],
+    )
+    citations = [
+        Citation(
+            target=id,
+            file=file,
+            start_line=1,
+            end_line=1,
+            source=kind,
+            verified=True,
+        )
+        for id, file, kind in (
+            (ids[0], "README.md", "documentation"),
+            (ids[1], "README.md", "documentation"),
+            (ids[0], "pyproject.toml", "configuration"),
+        )
+    ]
+    for n in range(other_actors):
+        id = f"external:tool-{n}"
+        elements[id] = elements[ids[1]].model_copy(
+            update={"id": id, "name": f"Tool {n}"}
+        )
+        citations.append(
+            citations[1].model_copy(
+                update={"target": id, "start_line": n + 2, "end_line": n + 2}
+            )
+        )
+    extra_quotes = "".join(
+        f"Shop supports Tool {n} integration.\n" for n in range(other_actors)
+    )
+    (tmp_path / "README.md").write_text(quote + "\n" + extra_quotes)
+    # Duplicate citations must not spend the evidence budget twice.
+    state = CurationState(
+        elements,
+        {rid: relation},
+        citations + [citations[0]],
+        [
+            Reference(
+                relation=rid,
+                from_file=filename,
+                line=1,
+                to="package:acme",
+                kind=reference_kind,
+                status="counts",
+            )
+        ],
+        {id: [] for id in elements},
+    )
+    config = {
+        **c4_llm_manager.role_config("synthesis"),
+        "max_input_chars": 20_000,
+        "max_input_tokens": 6_000,
+    }
+    manager = LLMManager(utility_config=config, synthesis_config=config)
+    meter = C4Llm(manager, concurrency=2, trial=False)
+    seen = set()
+
+    def check(prompt, question):
+        seen.add(question)
+        members = decision_items(prompt)[0]
+        members = (
+            members["members"]
+            if question != "c4_pair"
+            else [members["survivor"], members["other"]]
+        )
+        imported = next(m for m in members if m["name"] == "acme")
+        documented = next(m for m in members if m["name"] == "Acme WidgetAI")
+        assert imported["description"] == ""
+        assert [e["source"] for e in imported["evidence"]] == [
+            "documentation",
+            "code",
+            "configuration",
+        ]
+        code = imported["evidence"][1]
+        assert code == {
+            "source": "code",
+            "package": "package:acme",
+            "file": filename,
+            "start_line": 1,
+            "end_line": source.count("\n") + 1,
+            "quote": source[:600],
+        }
+        assert imported["evidence"][0]["quote"] == quote[:600]
+        assert documented["evidence"][0]["quote"] == quote[:600]
+        assert all(len(e["quote"]) <= 600 for m in members for e in m["evidence"])
+        assert imported["evidence"][2]["quote"] == manifest
+        if question == "c4_group":
+            schema = GroupAnswer.model_json_schema()
+            assert fits(
+                prompt,
+                schema,
+                meter.input_limit("synthesis"),
+                lambda text: meter.estimate_tokens(text, role="synthesis"),
+            )
+            assert measure_request(prompt, schema, []) <= effective_target(
+                meter.input_limit("synthesis")
+            )
+            return {"groups": [{"members": [imported["id"], documented["id"]]}]}
+        return {
+            "decisions": [
+                {
+                    "id": decision_items(prompt)[0]["id"],
+                    "value": documented["id"] if question == "c4_survivor" else "same",
+                }
+            ]
+        }
+
+    for question in ("c4_group", "c4_survivor", "c4_pair"):
+        scripted.answers[question] = lambda prompt, q=question: check(prompt, q)
+    overrides = Overrides()
+    outcome, _ = await consolidate_state(tmp_path, manager, state, overrides=overrides)
+    assert seen == {"c4_group", "c4_survivor", "c4_pair"}
+    assert outcome.merges == {ids[0]: ids[1]}
+    result = curate(state, {}, Overrides(merge=outcome.merges))
+    assert result.references[0].to == "package:acme"
+    assert result.references[0].relation.endswith(ids[1])
+    assert ids[0] not in result.elements
+    assert overrides == Overrides()
+    assert not (tmp_path / ".chunkhound/map.lock.json").exists()
+    seen.clear()
+    await consolidate_state(tmp_path, manager, state)
+    assert not seen
+    # Only the literal statement changes; term, reference and line stay fixed.
+    source = source.replace("widgetai", "widgetai_v2")
+    (tmp_path / filename).write_text(source + "\n")
+    await consolidate_state(tmp_path, manager, state)
+    assert seen == {"c4_group", "c4_survivor", "c4_pair"}
+    seen.clear()
+    await consolidate_state(tmp_path, manager, state)
+    assert not seen
+    # Attached configuration evidence and bounded documentation evidence also key
+    # all three questions, without changing extraction objects or line numbers.
+    manifest = 'dependencies = ["acme>=2"]'
+    (tmp_path / "pyproject.toml").write_text(manifest + "\n")
+    await consolidate_state(tmp_path, manager, state)
+    assert seen == {"c4_group", "c4_survivor", "c4_pair"}
+    seen.clear()
+    quote += " Additional source context." * 50
+    (tmp_path / "README.md").write_text(quote + "\n" + extra_quotes)
+    await consolidate_state(tmp_path, manager, state)
+    assert seen == {"c4_group", "c4_survivor", "c4_pair"}
+    seen.clear()
+    await consolidate_state(tmp_path, manager, state)
+    assert not seen
+
+
+async def test_example_context_is_separate_and_supported_provider_stays(
+    tmp_path, c4_llm_manager, scripted
+):
+    path = tmp_path / "README.md"
+    path.write_text(
+        "# Shop\n\n## Example: remote API\n\n"
+        "An illustrative configuration:\n\n```yaml\n"
+        "base_url: https://api.samplecloud.invalid/v1\n```\n\n"
+        "## Supported providers\n\n"
+        "| Provider | Support |\n| --- | --- |\n"
+        "| Acme WidgetAI | Optional integration |\n"
+    )
+    docs = DocumentedOutcome(
+        [
+            DocElement(
+                "external",
+                term,
+                Citation(
+                    target=None,
+                    file="README.md",
+                    start_line=line,
+                    end_line=line,
+                    source="documentation",
+                    verified=True,
+                ),
+                description="Shop uses this provider",
+            )
+            for term, line in (("SampleCloud", 8), ("Acme WidgetAI", 15))
+        ],
+        [],
+        {"README.md": "unchanged-extraction"},
+        False,
+    )
+    seen = []
+
+    def admit(prompt):
+        for item in decision_items(prompt):
+            seen.append(item["term"])
+            context = item["context"]
+            if item["term"] == "SampleCloud":
+                assert item["citation"]["quote"] == (
+                    "base_url: https://api.samplecloud.invalid/v1"
+                )
+                assert context["container"] == "fenced_code_block"
+                assert context["headings"][1]["line"] == 3
+                assert "Example" in context["headings"][1]["text"]
+                assert context["preceding"] == {
+                    "start_line": 5,
+                    "end_line": 5,
+                    "quote": "An illustrative configuration:",
+                }
+            else:
+                assert context["container"] == "pipe_table"
+                assert context["headings"][-1]["text"] == "Supported providers"
+        return {
+            "decisions": [
+                {
+                    "id": i["id"],
+                    "value": ("neither" if i["term"] == "SampleCloud" else "external"),
+                }
+                for i in decision_items(prompt)
+            ]
+        }
+
+    scripted.answers["c4_element"] = admit
+    scripted.answers["c4_table"] = decisions_value("service_list")
+    scripted.answers["c4_row"] = decisions_value("external")
+    result, _ = await run(tmp_path, c4_llm_manager, docs)
+    elements, _, _, _ = assembled(tmp_path, result.documented)
+    assert {e.id for e in elements} == {"system:shop", "external:acme-widgetai"}
+    seen.clear()
+    await run(tmp_path, c4_llm_manager, docs)
+    assert not seen
+    # Context alone changes: the verified quote and citation positions do not.
+    path.write_text(
+        path.read_text().replace("Example: remote API", "Example: sample API")
+    )
+    await run(tmp_path, c4_llm_manager, docs)
+    assert seen == ["SampleCloud"]
+    seen.clear()
+    await run(tmp_path, c4_llm_manager, docs)
+    assert not seen
+
+
 async def test_cached_groups_reject_removed_member_ids(
     tmp_path, c4_llm_manager, scripted
 ):

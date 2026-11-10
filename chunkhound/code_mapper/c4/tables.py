@@ -4,11 +4,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from html import unescape
 from pathlib import Path
+from typing import Any
 
 import tree_sitter_markdown
 from tree_sitter import Language, Node, Parser, Query, QueryCursor
 
 from chunkhound.parsers.mappings.markdown import MarkdownMapping
+
+_CONTEXT_TEXT_LIMIT = 240
 
 
 @dataclass(frozen=True)
@@ -81,6 +84,60 @@ def _cells(node: Node, source: bytes, parser: Parser) -> tuple[str, ...]:
         for child in node.named_children
         if child.type == "pipe_table_cell"
     )
+
+
+def read_structure_context(lines: Sequence[str], line: int) -> dict[str, Any]:
+    """Bounded Markdown context, separate from the citation's literal quote.
+
+    Reuse the table reader's grammar and heading interpretation. Markdown has
+    at most six heading levels; each excerpt is capped at 240 characters. Only
+    the nearest heading/paragraph before a containing fence/table is included.
+    """
+    source = "\n".join(lines).encode("utf-8")
+    language = Language(tree_sitter_markdown.language())
+    tree = Parser(language).parse(source)
+    inline = Parser(Language(tree_sitter_markdown.inline_language()))
+    query = Query(
+        language,
+        "(atx_heading) @heading\n(setext_heading) @heading\n"
+        "(paragraph) @intro\n(fenced_code_block) @block\n(pipe_table) @block",
+    )
+    captures = QueryCursor(query).captures(tree.root_node)
+    headings: list[tuple[int, dict[str, Any]]] = []
+    for node in sorted(captures.get("heading", []), key=lambda n: n.start_byte):
+        if node.start_point.row + 1 > line:
+            break
+        level, title = _heading(node, source, inline)
+        while headings and headings[-1][0] >= level:
+            headings.pop()
+        headings.append(
+            (
+                level,
+                {"line": node.start_point.row + 1, "text": title[:_CONTEXT_TEXT_LIMIT]},
+            )
+        )
+    context: dict[str, Any] = {"headings": [h for _, h in headings]}
+    for node in captures.get("block", []):
+        end_line = node.end_point.row + int(node.end_point.column > 0)
+        if not node.start_point.row + 1 <= line <= end_line:
+            continue
+        context["container"] = node.type
+        preceding = [
+            n
+            for n in [*captures.get("heading", []), *captures.get("intro", [])]
+            if n.end_byte <= node.start_byte
+        ]
+        if preceding:
+            previous = max(preceding, key=lambda n: n.end_byte)
+            context["preceding"] = {
+                "start_line": previous.start_point.row + 1,
+                "end_line": previous.end_point.row + int(previous.end_point.column > 0),
+                "quote": source[previous.start_byte : previous.end_byte]
+                .decode("utf-8", errors="replace")
+                .strip()[:_CONTEXT_TEXT_LIMIT],
+            }
+        break
+    return context
 
 
 def read_tables(project_root: Path, doc_files: Sequence[str]) -> list[ServiceTable]:
