@@ -10,7 +10,7 @@
 
 **Spec:** [2026-11-06-omap-llm-beslissingen-design.md](../specs/2026-11-06-omap-llm-beslissingen-design.md) §1–§13. **Model:** [map-structuuranalyse.md](../models/map-structuuranalyse.md) R17–R23, §2–§5. **Besluiten:** [2026-10-27-map-structuuranalyse.md](../decisions/2026-10-27-map-structuuranalyse.md), rijen van 2026-11-06 vanaf “Domeinmodel · personen”.
 
-**Status:** goedgekeurd 2026-11-06 (besluit: Planreview · goedkeuring). Uitvoering via de seriële Orca-coordinator; run 6, wijziging van de run-5-overrides en push niet goedgekeurd.
+**Status:** goedgekeurd 2026-11-06 (besluit: Planreview · goedkeuring). Uitgevoerd via de seriële Orca-coordinator; implementatie geaccepteerd op `8757ec33` (2026-11-07) en lokaal geïntegreerd op `main` (2026-11-10, niet gepusht). Run 6 is inhoudelijk niet geaccepteerd (4 van 6 criteria); wijziging van de run-5-overrides en push niet goedgekeurd.
 
 ## Project Commands
 
