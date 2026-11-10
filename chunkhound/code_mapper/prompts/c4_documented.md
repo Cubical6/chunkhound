@@ -31,6 +31,16 @@ systems, use those. A person may be a role. Never take a name that occurs only
 inside an example command, example query or code sample. A library stays
 excluded even when the text says what it does.
 
+An external counts only when the source affirmatively states that this system
+uses it, calls it, is called by it, or explicitly supports it as an integration.
+Optional support counts, including a table of supported providers. A name or
+provider-specific URL appearing only in an example, sample configuration,
+illustration, comparison or possible alternative does not establish participation,
+including an arbitrary endpoint for a generic integration such as an
+OpenAI-compatible base_url. Do not select such names. The extracted description
+is a claim to check against the cited source; it cannot supply participation the
+source does not state.
+
 The term is the literal plain name from the fragment: "Astro", not "Astro 7"; one
 name per element, never "A or B". Do not add an ID prefix or normalize it. The
 description is one short sentence in English saying what the element is
