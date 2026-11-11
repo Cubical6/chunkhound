@@ -252,7 +252,7 @@ Uitgevoerd op 2026-11-07, commit `8757ec33344f7aa8d024c54cb32d5f2a1332f726`, in 
 
 ## Run 7 · praktijkbewijs
 
-Uitgevoerd op 2026-11-10, commit `baa466b5`, in `/home/disorder/orca/workspaces/chunkhound/omap-run7`. Bewijs onder `.scratch/omap-a7/` in die worktree. Configuratie: utility `codex-cli/gpt-6-luna`/low, synthesis `codex-cli/gpt-6.1-sol`/medium, embeddings BAAI/bge-m3. **Niet geaccepteerd:** google en Fireworks zijn opnieuw niet opgelost.
+Uitgevoerd op 2026-11-10, commit `baa466b5`, in de inmiddels verwijderde worktree `/home/disorder/orca/workspaces/chunkhound/omap-run7`. Bewijs onder `.scratch/omap-a7/` in de hoofdrepo, met de besliscache in `extraction-after-run7/`. Configuratie: utility `codex-cli/gpt-6-luna`/low, synthesis `codex-cli/gpt-6.1-sol`/medium, embeddings BAAI/bge-m3. **Niet geaccepteerd:** google en Fireworks zijn opnieuw niet opgelost.
 
 ### Uitvoering en bewijs
 
@@ -277,7 +277,7 @@ Overig: `API Route`, een ondersteunde provider in de providertabel, is door de e
 
 ## Run 8 · praktijkbewijs
 
-Uitgevoerd op 2026-11-10, commit `b4112cdd` (identiteitsbewijs en één admissieregel; via `4737ccb4` in `main`), in `/home/disorder/orca/workspaces/chunkhound/omap-run8`. Bewijs onder `.scratch/omap-a8/` in die worktree. De configuratie is gelijk aan Run 7. **Doelen van de herstelrichting gehaald; nog niet geaccepteerd als eindrun**, omdat AutoDoc op verzoek is gestopt en er één nieuwe onjuiste persoon is.
+Uitgevoerd op 2026-11-10, commit `b4112cdd` (identiteitsbewijs en één admissieregel; via `4737ccb4` in `main`), in de inmiddels verwijderde worktree `/home/disorder/orca/workspaces/chunkhound/omap-run8`. Bewijs onder `.scratch/omap-a8/` in de hoofdrepo, met de besliscache in `extraction-after-run8/`. De configuratie is gelijk aan Run 7. **Doelen van de herstelrichting gehaald; nog niet geaccepteerd als eindrun**, omdat AutoDoc op verzoek is gestopt en er één nieuwe onjuiste persoon is.
 
 ### Uitvoering en bewijs
 
@@ -307,7 +307,7 @@ Uitgevoerd op 2026-11-10, commit `b4112cdd` (identiteitsbewijs en één admissie
 
 ## Run 9 · praktijkbewijs
 
-Uitgevoerd op 2026-11-10/11, commit `9ee88872` (personenregel; via `945a50be` in `main`), in `/home/disorder/orca/workspaces/chunkhound/omap-run9`. Bewijs onder `.scratch/omap-a9/` in die worktree. De configuratie is gelijk aan Run 7 en Run 8. **Niet geaccepteerd:** `person:contributing` is weg, maar google is weer niet samengevoegd en de elementvraag wijkt af van de eigen regels.
+Uitgevoerd op 2026-11-10/11, commit `9ee88872` (personenregel; via `945a50be` in `main`), in de inmiddels verwijderde worktree `/home/disorder/orca/workspaces/chunkhound/omap-run9`. Bewijs onder `.scratch/omap-a9/` in de hoofdrepo, met de besliscache in `extraction-after-run9/`. De configuratie is gelijk aan Run 7 en Run 8. **Niet geaccepteerd:** `person:contributing` is weg, maar google is weer niet samengevoegd en de elementvraag wijkt af van de eigen regels.
 
 ### Uitvoering en bewijs
 
