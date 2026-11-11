@@ -84,6 +84,7 @@ class DecisionResults:
 
 
 class DecisionQuestion(Protocol[SubjectT]):
+    role: Literal["utility", "synthesis"]
     name: str
     version: str
     values: frozenset[str]
@@ -104,6 +105,7 @@ class DecisionQuestion(Protocol[SubjectT]):
 
 
 class _ChoiceQuestion(Generic[SubjectT]):
+    role: Literal["utility", "synthesis"]
     name: str
     values: frozenset[str]
 
@@ -133,6 +135,7 @@ class _ChoiceQuestion(Generic[SubjectT]):
 
 
 class ElementQuestion(_ChoiceQuestion[DocElement]):
+    role: Literal["utility", "synthesis"] = "synthesis"
     name = "c4_element"
     values = frozenset({"external", "person", "neither"})
 
@@ -164,6 +167,7 @@ class ElementQuestion(_ChoiceQuestion[DocElement]):
 
 
 class TableQuestion(_ChoiceQuestion[ServiceTable]):
+    role: Literal["utility", "synthesis"] = "utility"
     name = "c4_table"
     values = frozenset({"service_list", "other"})
 
@@ -180,6 +184,7 @@ class TableQuestion(_ChoiceQuestion[ServiceTable]):
 
 
 class RowQuestion(_ChoiceQuestion[tuple[ServiceTable, TableRow]]):
+    role: Literal["utility", "synthesis"] = "utility"
     name = "c4_row"
     values = frozenset({"external", "person", "neither"})
 
@@ -194,6 +199,38 @@ class RowQuestion(_ChoiceQuestion[tuple[ServiceTable, TableRow]]):
 
     def fallback(self, subject: tuple[ServiceTable, TableRow]) -> str:
         return "neither"
+
+
+def _evidence_quote(lines: list[str], name: str) -> str:
+    quote = "\n".join(lines)
+    if len(quote) <= _EVIDENCE_TEXT_LIMIT:
+        return quote
+
+    def render(kept: Mapping[int, str]) -> str:
+        parts = []
+        previous = -1
+        for index, line in sorted(kept.items()):
+            if index > previous + 1:
+                parts.append("…")
+            parts.append(line)
+            previous = index
+        if previous < len(lines) - 1:
+            parts.append("…")
+        return "\n".join(parts)
+
+    matches = [i for i, line in enumerate(lines) if name.casefold() in line.casefold()]
+    kept: dict[int, str] = {}
+    for index in dict.fromkeys([*(matches or [len(lines) - 1]), 0]):
+        proposed = {**kept, index: lines[index]}
+        if len(render(proposed)) <= _EVIDENCE_TEXT_LIMIT:
+            kept = proposed
+        elif not kept:
+            # A single oversized line still needs a bounded, name-bearing excerpt.
+            available = _EVIDENCE_TEXT_LIMIT - len(render({index: ""}))
+            position = max(0, lines[index].casefold().find(name.casefold()))
+            start = max(0, position + len(name) - available)
+            kept[index] = lines[index][start : start + available]
+    return render(kept)
 
 
 def candidate_metadata(
@@ -299,9 +336,10 @@ def candidate_metadata(
                         "file": citation.file,
                         "start_line": citation.start_line,
                         "end_line": citation.end_line,
-                        "quote": "\n".join(
-                            lines[citation.start_line - 1 : citation.end_line]
-                        )[:_EVIDENCE_TEXT_LIMIT],
+                        "quote": _evidence_quote(
+                            lines[citation.start_line - 1 : citation.end_line],
+                            element.name,
+                        ),
                     }
                 )
                 break
@@ -315,6 +353,7 @@ def candidate_metadata(
 
 
 class SurvivorQuestion(_ChoiceQuestion["MergeGroup"]):
+    role: Literal["utility", "synthesis"] = "synthesis"
     name = "c4_survivor"
     values = frozenset[str]()
 
@@ -362,6 +401,7 @@ class SurvivorQuestion(_ChoiceQuestion["MergeGroup"]):
 
 
 class PairQuestion(_ChoiceQuestion[tuple[str, str]]):
+    role: Literal["utility", "synthesis"] = "synthesis"
     name = "c4_pair"
     values = frozenset({"same", "different", "unsure"})
 
@@ -413,9 +453,6 @@ class DecisionRunner:
         self.llm = llm
         self.retries = retries
         self.step = step
-        self.role: Literal["utility", "synthesis"] = (
-            "synthesis" if step == "consolidate" else "utility"
-        )
         self.store = _store(project_root, read_only=llm.trial)
 
     async def run(
@@ -425,7 +462,7 @@ class DecisionRunner:
         reason: str,
     ) -> DecisionResults:
         """Return final decisions only after all delayed bundle retries settle."""
-        provider = asdict(self.llm.provider_identity(self.role))
+        provider = asdict(self.llm.provider_identity(question.role))
         parts = {
             key: {
                 "format": DECISION_FORMAT_VERSION,
@@ -440,6 +477,7 @@ class DecisionRunner:
             question,
             subjects,
             self,
+            question.role,
             parts,
             DecisionResults(counts=DecisionCounts(total=len(subjects))),
         )
@@ -459,6 +497,7 @@ class _DecisionRun(Generic[SubjectT]):
     question: DecisionQuestion[SubjectT]
     subjects: Mapping[str, SubjectT]
     runner: DecisionRunner
+    role: Literal["utility", "synthesis"]
     parts: dict[str, dict[str, Any]]
     result: DecisionResults
 
@@ -508,12 +547,12 @@ class _DecisionRun(Generic[SubjectT]):
     def bounded(self, keys: Sequence[str]) -> bool:
         prompt = self.prompt(keys)
         schema = DecisionAnswer.model_json_schema()
-        limit = self.runner.llm.input_limit(self.runner.role)
+        limit = self.runner.llm.input_limit(self.role)
         return measure_request(prompt, schema, []) <= effective_target(limit) and fits(
             prompt,
             schema,
             limit,
-            lambda text: self.runner.llm.estimate_tokens(text, role=self.runner.role),
+            lambda text: self.runner.llm.estimate_tokens(text, role=self.role),
         )
 
     def bundles(self, missing: Sequence[str]) -> list[tuple[list[str], bool]]:
@@ -548,7 +587,7 @@ class _DecisionRun(Generic[SubjectT]):
                         f"{self.runner.step}: item exceeds input budget"
                     )
                 answer = await self.runner.llm.call(
-                    self.runner.step, DecisionAnswer, prompt, provider=self.runner.role
+                    self.runner.step, DecisionAnswer, prompt, provider=self.role
                 )
                 checked = self.question.validate(answer, local)
                 return {ids[short]: value for short, value in checked.items()}

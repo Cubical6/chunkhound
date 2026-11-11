@@ -15,7 +15,7 @@ citation}].
 
 Element kind is exactly one of:
 
-- person: a human role or group that uses the described system.
+- person: a human or AI-agent role or group that uses the described system.
 - external: a software system outside this repository, with its own operator or
   its own process, that the described system calls or that calls it, such as a
   hosted API, a model provider, or an AI assistant calling through MCP.
@@ -31,6 +31,12 @@ systems, use those. A person may be a role. Never take a name that occurs only
 inside an example command, example query or code sample. A library stays
 excluded even when the text says what it does.
 
+A person counts only when the source states that the role or group uses,
+operates, configures, or receives output from the running described system. An
+AI-agent role using it, including through MCP, counts. People who develop,
+contribute to, review or maintain this repository's code, and a document's
+readers or audience, are not persons for this map.
+
 An external counts only when the source affirmatively states that this system
 uses it, calls it, is called by it, or explicitly supports it as an integration.
 Optional support counts, including a table of supported providers. A name or
@@ -38,13 +44,16 @@ provider-specific URL appearing only in an example, sample configuration,
 illustration, comparison or possible alternative does not establish participation,
 including an arbitrary endpoint for a generic integration such as an
 OpenAI-compatible base_url. Do not select such names. The extracted description
-is a claim to check against the cited source; it cannot supply participation the
-source does not state.
+is a claim to check against the cited source; it cannot supply participation or
+use the source does not state.
 
 The term is the literal plain name from the fragment: "Astro", not "Astro 7"; one
-name per element, never "A or B". Do not add an ID prefix or normalize it. The
-description is one short sentence in English saying what the element is
-or does, based on the cited text; leave it empty when that text gives none.
+name per element, never "A or B". A person's term is the literal noun or noun
+phrase the fragment uses for the role or group, such as "operators" or "AI agent";
+never a verb, activity, adjective, heading or file name. Do not add an ID prefix
+or normalize it. The description is one short sentence in English saying what
+the element is or does, based on the cited text; leave it empty when that text
+gives none.
 
 Every relation has at least one person or external element as an endpoint. Relation
 endpoints use the literal terms of those elements; for any part of the described
