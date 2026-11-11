@@ -275,6 +275,11 @@ async def code_mapper_command(args: argparse.Namespace, config: Config) -> None:
         markdown=getattr(args, "markdown", True),
         trial=getattr(args, "overview_only", False),
     )
+    if getattr(args, "c4_only", False) and (not options.c4 or options.trial):
+        formatter.error(
+            "--c4-only cannot be combined with --no-c4 or --plan (--overview-only)."
+        )
+        sys.exit(2)
     if not options.markdown and (not options.c4 or getattr(args, "combined", False)):
         formatter.error("--no-markdown cannot be combined with --no-c4 or --combined.")
         sys.exit(2)
@@ -335,7 +340,15 @@ async def _run_requested_outputs(
     options: C4Options,
     c4: _C4Run | None,
 ) -> None:
-    if options.trial:
+    if getattr(args, "c4_only", False):
+        assert c4 is not None
+        llm_manager = _create_code_mapper_llm_manager(config, formatter)
+        c4.llm = C4Llm(
+            llm_manager, concurrency=getattr(args, "jobs", None) or 4, trial=False
+        )
+        await c4.finish(await c4.analyze(), None)
+        formatter.info("c4-only: topics skipped")
+    elif options.trial:
         if c4 is not None:
             await c4.finish(await c4.analyze(), None)
         if options.markdown:

@@ -113,6 +113,15 @@ def add_map_subparser(subparsers: Any) -> argparse.ArgumentParser:
         ),
     )
 
+    map_parser.add_argument(
+        "--c4-only",
+        action="store_true",
+        help=(
+            "Run full C4 analysis without planning or topic research "
+            "(no database or embeddings needed). Existing topic files are kept."
+        ),
+    )
+
     # Optional output formats; combined CLI overrides the environment when set.
     try:
         boolean_optional_action = argparse.BooleanOptionalAction

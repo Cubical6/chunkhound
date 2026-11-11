@@ -208,6 +208,47 @@ async def test_conflicting_output_flags_exit_2(cli, flags):
     assert not cli.out.exists()
 
 
+@pytest.mark.parametrize("existing_topics", [False, True])
+async def test_map_c4_only_makes_no_research_calls(cli, capsys, existing_topics):
+    cli.monkeypatch.setattr(command, "verify_database_exists", forbidden)
+    cli.monkeypatch.setattr(command, "create_services", forbidden)
+    cli.monkeypatch.setattr(command, "EmbeddingManager", forbidden)
+    cli.monkeypatch.setattr(command, "run_code_mapper_overview_hyde", forbidden)
+    cli.monkeypatch.setattr(command, "run_code_mapper_pipeline", forbidden)
+    before = {}
+    if existing_topics:
+        cli.out.mkdir()
+        (cli.out / "__arch_01_orders.md").write_text("Existing topic\n")
+        (cli.out / "__code_mapper_index.md").write_text("Existing index\n")
+        before = snapshot(cli.out)
+
+    await command.code_mapper_command(parse(cli.repo, cli.out, "--c4-only"), cli.config)
+
+    model, _ = pair(cli.out)
+    assert model.run.kind == "full"
+    assert cli.provider.calls
+    assert not cli.seen
+    assert all(not element.coverage.topics for element in model.elements)
+    assert json.loads((cli.out / CONTRACT).read_text())["topics"] == []
+    assert set(snapshot(cli.out)) == {CONTRACT, MAP_MODEL, MAP_EVIDENCE} | before.keys()
+    assert all((cli.out / name).read_bytes() == data for name, data in before.items())
+    assert (cli.repo / LOCK_RELATIVE_PATH).exists()
+    assert "c4-only: topics skipped" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("flag", ["--no-c4", "--plan", "--overview-only"])
+async def test_c4_only_conflicting_flags_exit_2(cli, capsys, flag):
+    cli.monkeypatch.setattr(command, "apply_code_mapper_workspace_overrides", forbidden)
+    with pytest.raises(SystemExit) as exc:
+        await command.code_mapper_command(
+            parse(cli.repo, cli.out, "--c4-only", flag), cli.config
+        )
+    assert exc.value.code == 2
+    assert "--c4-only cannot be combined" in capsys.readouterr().out
+    assert not cli.out.exists()
+    assert not cli.provider.calls
+
+
 async def test_plan_no_markdown_zero_calls_no_db(cli):
     await command.code_mapper_command(parse(cli.repo, cli.out), cli.config)
     lock_path = cli.repo / LOCK_RELATIVE_PATH
