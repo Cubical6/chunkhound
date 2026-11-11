@@ -156,7 +156,7 @@ Maximaal ~15 regels:
   - Implementeer geen echte usage-parsing (besluit 9).
 
 ## Phase 2: registratie in config, manager en CLI
-- [ ] Done
+- [x] Done
 - **Depends on:** Phase 1
 - **Model:** `openai-codex/gpt-6.1-terra` / `medium`
 - **Goal:** `pi-cli` is overal te kiezen waar `opencode-cli` te kiezen is (config, env, CLI-vlaggen, rollen utility/synthesis/map-hyde/autodoc-cleanup) en de manager maakt een `PiCLIProvider` aan.
@@ -246,6 +246,7 @@ Maximaal ~15 regels:
 |---|---|---|---|---|
 | 2026-11-11 | plan | - | - | Plan geschreven op basis van metingen en pi-probes |
 | 2026-11-11 | 1 | 01a1ccc7-8736-742b-987b-d84e7c7053aa | (zie git log) | 34 contracttests groen, ruff en mypy schoon; fixtures inline in de test i.p.v. aparte bestanden |
+| 2026-11-11 | 2 | 01a1cccf-fb1c-742b-987b-d850d8170c8a | (zie git log) | 139 gerichte tests groen; geen nieuwe mypy/ruff-fouten in gewijzigde code. Bestaande `assert_never`-fout (llm_config, providers zonder tak) en E501's zijn ouder dan dit plan |
 
 ---
 
