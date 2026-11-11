@@ -9,6 +9,7 @@ from chunkhound.autodoc.docsite import CleanupConfig, generate_docsite
 from chunkhound.autodoc.models import DocsiteResult
 from chunkhound.core.config.config import Config
 from chunkhound.llm_manager import LLMManager
+from chunkhound.services.extraction.dev_cache import DevCache
 
 from . import autodoc_autorun as autorun
 from . import autodoc_prompts as prompts
@@ -25,6 +26,7 @@ class DocsiteGenerationInputs:
     index_patterns: list[str] | None
     site_title: str | None
     site_tagline: str | None
+    dev_cache: DevCache | None = None
 
 
 async def call_generate_docsite(
@@ -38,9 +40,11 @@ async def call_generate_docsite(
     index_patterns: list[str] | None,
     site_title: str | None,
     site_tagline: str | None,
+    dev_cache: DevCache | None = None,
 ) -> DocsiteResult:
     return await generate_docsite(
         input_dir=input_dir,
+        dev_cache=dev_cache,
         output_dir=output_dir,
         llm_manager=llm_manager,
         cleanup_config=cleanup_config,
@@ -66,6 +70,7 @@ async def generate_docsite_with_optional_autorun(
             return await call_generate_docsite(
                 formatter=formatter,
                 input_dir=current_map_dir,
+                dev_cache=inputs.dev_cache,
                 output_dir=inputs.output_dir,
                 llm_manager=inputs.llm_manager,
                 cleanup_config=inputs.cleanup_config,
