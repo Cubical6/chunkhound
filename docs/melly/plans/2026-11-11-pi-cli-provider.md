@@ -1,6 +1,6 @@
 # PLAN: LLM-provider `pi-cli` (pi / pi-bolt als kaal model)
 
-- **Status:** concept 2026-11-11, wacht op akkoord. Geeft geen toestemming voor een push of voor een providerrun buiten fase 4.
+- **Status:** goedgekeurd 2026-11-11. Geeft geen toestemming voor een push of voor een providerrun buiten fase 4.
 - **Aanleiding:** metingen van 2026-11-11 (zie Context). `codex exec` stuurt bij elke aanroep ~14,5k tokens harness-overhead mee; pi stuurt dezelfde prompt met 51 tokens overhead en is per aanroep 2-4 s sneller.
 
 ## Goal
@@ -121,7 +121,7 @@ Maximaal ~15 regels:
 ---
 
 ## Phase 1: provider `PiCLIProvider` met contracttests
-- [ ] Done
+- [x] Done
 - **Depends on:** none
 - **Model:** `openai-codex/gpt-6.1-sol` / `medium`
 - **Goal:** een zelfstandige providerklasse die `pi` aanroept volgens besluiten 1-10, met contracttests. Nog niet geregistreerd in config of manager.
@@ -245,6 +245,7 @@ Maximaal ~15 regels:
 | Date | Phase | sessionId | Commit | Notes |
 |---|---|---|---|---|
 | 2026-11-11 | plan | - | - | Plan geschreven op basis van metingen en pi-probes |
+| 2026-11-11 | 1 | 01a1ccc7-8736-742b-987b-d84e7c7053aa | (zie git log) | 34 contracttests groen, ruff en mypy schoon; fixtures inline in de test i.p.v. aparte bestanden |
 
 ---
 
