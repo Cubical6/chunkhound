@@ -325,7 +325,7 @@ Uitgevoerd op 2026-11-10/11, commit `9ee88872` (personenregel; via `945a50be` in
 
 ## Run 10 · praktijkbewijs
 
-Uitgevoerd op 2026-11-11, commit `cbdafbe9` (citaatfix en elementvraag op synthesis), in `/home/disorder/orca/workspaces/chunkhound/omap-run10`. Bewijs onder `.scratch/omap-a10/`. Doel: de twee fixes controleren zonder volledige run. **Fix 2 gehaald; google nog niet samengevoegd.**
+Uitgevoerd op 2026-11-11, commit `cbdafbe9` (citaatfix en elementvraag op synthesis), in de inmiddels verwijderde worktree `/home/disorder/orca/workspaces/chunkhound/omap-run10`. Bewijs onder `.scratch/omap-a10/` in de hoofdrepo. Doel: de twee fixes controleren zonder volledige run. **Fix 2 gehaald; google nog niet samengevoegd.**
 
 ### Uitvoering en bewijs
 
@@ -346,7 +346,7 @@ Uitgevoerd op 2026-11-11, commit `cbdafbe9` (citaatfix en elementvraag op synthe
 
 ## Run 11 · praktijkbewijs
 
-Uitgevoerd op 2026-11-11, commit `f5b775ce` (clientbibliotheekregel in `c4_pair.md`), in dezelfde worktree als Run 10. Bewijs onder `.scratch/omap-a11/`; de besliscache na Run 10 is bewaard in `.scratch/omap-a10/extraction-after-run10/`. **Doelen van de herstelrichting gehaald; nog niet geaccepteerd als eindrun**, omdat alleen een kaart met één topic is gedraaid en AutoDoc en site ontbreken.
+Uitgevoerd op 2026-11-11, commit `f5b775ce` (clientbibliotheekregel in `c4_pair.md`), in dezelfde worktree als Run 10. Bewijs onder `.scratch/omap-a11/` in de hoofdrepo; de besliscache na Run 10 en na Run 11 staat in `.scratch/omap-a10/extraction-after-run10/` en `.scratch/omap-a11/extraction-after-run11/`. **Doelen van de herstelrichting gehaald; nog niet geaccepteerd als eindrun**, omdat alleen een kaart met één topic is gedraaid en AutoDoc en site ontbreken.
 
 ### Uitvoering en bewijs
 
