@@ -227,7 +227,7 @@ Maximaal ~15 regels:
 - **Verify:** `uv run --no-sync pytest tests/autodoc -q --tb=short -n auto | tail -n 40`
 
 ## Phase 7: meetrun (Run 12), alleen na expliciete toestemming
-- [ ] Done
+- [ ] Done — **overgeslagen** op 2026-11-11 op verzoek van de gebruiker; de acceptatiecriteria hieronder zijn dus niet gemeten.
 - **Depends on:** Phase 1-6, gemerged en geverifieerd
 - **Uitvoering:** door Claude, niet door pi-bolt.
 - **Opzet:** op een worktree van de integratiebranch, met een verse index:
@@ -246,10 +246,10 @@ Maximaal ~15 regels:
 ---
 
 ## Final verification (Claude, na alle fasen)
-- [ ] Volledige suite: `uv run pytest tests/ -v` (als achtergrondtaak)
-- [ ] Lint en types: `uv run ruff check chunkhound` en `uv run mypy chunkhound`
-- [ ] Review van de complete diff tegen het doel en de spec
-- [ ] `.pi-handoff/` verwijderd; niets daaruit gecommit
+- [x] Volledige suite: `uv run pytest tests/ -v` (als achtergrondtaak) — 244 failures/errors herhaald op integratie en `main`; enige echte oorzaak (nep-runners zonder fase-4-kwargs, 9 tests) gerepareerd in `a0619c98`, rest is omgeving (`site/node_modules`, volle `/tmp`) of bestaande instabiliteit
+- [x] Lint en types: `uv run ruff check chunkhound` en `uv run mypy chunkhound` — schoon op gewijzigde bestanden; repo-breed gelijk aan `main`
+- [x] Review van de complete diff tegen het doel en de spec
+- [x] `.pi-handoff/` verwijderd; niets daaruit gecommit
 
 ## Progress log
 | Date | Phase | sessionId | Commit | Notes |
@@ -264,6 +264,9 @@ Maximaal ~15 regels:
 | 2026-11-11 | 5 | `01a1cc98` | `6fc747e1` | topic-cache; code_mapper + smoke 729 passed |
 | 2026-11-11 | 6 | `01a1cc9a` | `a71a6aa5` | autorun geeft `--dev-cache` door; autodoc + smoke 144 passed |
 | 2026-11-11 | 5+6 → integration | – | `3baf0941` | smoke 14 passed; ruff en mypy schoon op gewijzigde bestanden (repo-breed 791/991 bestaande meldingen, gelijk aan `main`) |
+| 2026-11-11 | eindcontrole | – | `a0619c98` | testreparatie nep-runners (`**_kwargs`); 12 passed |
+| 2026-11-11 | integration → main | – | `43b00440` | smoke 14 passed; worktrees en branches `map-cache/*` opgeruimd |
+| 2026-11-11 | 7 | – | – | overgeslagen op verzoek van de gebruiker |
 
 ---
 
