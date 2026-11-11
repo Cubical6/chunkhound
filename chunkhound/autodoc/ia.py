@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Callable
@@ -12,6 +13,8 @@ from chunkhound.autodoc.markdown_utils import (
 from chunkhound.autodoc.models import DocsitePage, GlossaryTerm, NavGroup
 from chunkhound.core.audience import normalize_audience
 from chunkhound.interfaces.llm_provider import LLMProvider
+from chunkhound.services.extraction.dev_cache import DevCache, provider_identity
+from chunkhound.services.extraction.store import key_from_parts
 
 _SITE_IA_INPUT_LINE = (
     "Input: a list of pages (title, slug, description, headings, overview snippet)."
@@ -161,6 +164,7 @@ async def _synthesize_site_ia(
     audience: str = "balanced",
     log_info: Callable[[str], None] | None,
     log_warning: Callable[[str], None] | None,
+    dev_cache: DevCache | None = None,
 ) -> tuple[list[NavGroup] | None, list[GlossaryTerm] | None]:
     if not pages:
         return None, None
@@ -175,12 +179,34 @@ async def _synthesize_site_ia(
     if log_info:
         log_info("Synthesizing global navigation and glossary.")
 
-    response = await provider.complete_structured(
-        prompt,
-        json_schema=schema,
-        system=None,
-        max_completion_tokens=4096,
+    identity = provider_identity(provider) if dev_cache is not None else None
+    version = key_from_parts(
+        {
+            "system": None,
+            "template": _build_site_ia_prompt(context=[], audience=audience),
+            "schema": schema,
+            "max_completion_tokens": 4096,
+        }
     )
+    item = key_from_parts({"prompt": prompt, "schema": schema})
+    response = None
+    if dev_cache is not None and identity is not None:
+        response = dev_cache.get(
+            "autodoc_site_ia",
+            version,
+            identity,
+            item,
+            validate=lambda answer: isinstance(answer, dict),
+        )
+    if response is None:
+        response = await provider.complete_structured(
+            prompt,
+            json_schema=schema,
+            system=None,
+            max_completion_tokens=4096,
+        )
+        if dev_cache is not None and identity is not None:
+            dev_cache.put("autodoc_site_ia", version, identity, item, response)
 
     nav_groups = _validate_nav_groups(
         response.get("nav"),
@@ -237,6 +263,7 @@ async def _synthesize_homepage_overview(
     audience: str = "balanced",
     log_info: Callable[[str], None] | None,
     log_warning: Callable[[str], None] | None,
+    dev_cache: DevCache | None = None,
 ) -> str | None:
     if not pages:
         return None
@@ -280,6 +307,26 @@ async def _synthesize_homepage_overview(
         ]
     )
 
+    identity = provider_identity(provider) if dev_cache is not None else None
+    version = key_from_parts(
+        {
+            "system": None,
+            "template": prompt.split("Pages JSON:", 1)[0],
+            "max_completion_tokens": 600,
+        }
+    )
+    item = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    if dev_cache is not None and identity is not None:
+        cached = dev_cache.get(
+            "autodoc_homepage",
+            version,
+            identity,
+            item,
+            validate=lambda answer: isinstance(answer, str) and bool(answer.strip()),
+        )
+        if cached is not None:
+            return str(cached)
+
     if log_info:
         log_info("Synthesizing homepage overview.")
 
@@ -295,6 +342,8 @@ async def _synthesize_homepage_overview(
         return None
 
     overview = _normalize_homepage_overview(response.content)
+    if overview and dev_cache is not None and identity is not None:
+        dev_cache.put("autodoc_homepage", version, identity, item, overview)
     return overview or None
 
 

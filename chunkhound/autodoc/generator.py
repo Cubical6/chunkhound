@@ -37,6 +37,7 @@ from chunkhound.autodoc.references import (
 from chunkhound.autodoc.site_writer import write_astro_site
 from chunkhound.core.audience import normalize_audience
 from chunkhound.llm_manager import LLMManager
+from chunkhound.services.extraction.dev_cache import DevCache
 
 
 def _now_isoformat() -> str:
@@ -50,6 +51,7 @@ async def cleanup_topics(
     scope_label: str | None = None,
     log_info: Callable[[str], None] | None = None,
     log_warning: Callable[[str], None] | None = None,
+    dev_cache: DevCache | None = None,
 ) -> list[DocsitePage]:
     if not topics:
         return []
@@ -57,6 +59,7 @@ async def cleanup_topics(
     cleaned = await _cleanup_topic_bodies(
         topics=topics,
         llm_manager=llm_manager,
+        dev_cache=dev_cache,
         config=config,
         log_info=log_info,
         log_warning=log_warning,
@@ -97,6 +100,7 @@ async def _cleanup_topic_bodies(
     config: CleanupConfig,
     log_info: Callable[[str], None] | None,
     log_warning: Callable[[str], None] | None,
+    dev_cache: DevCache | None = None,
 ) -> list[str]:
     if config.mode != "llm":
         raise ValueError(
@@ -112,6 +116,7 @@ async def _cleanup_topic_bodies(
     return await _cleanup_with_llm(
         topics=topics,
         provider=provider,
+        dev_cache=dev_cache,
         config=config,
         log_info=log_info,
         log_warning=log_warning,
@@ -161,6 +166,7 @@ async def _maybe_synthesize_global_ia(
     audience: str,
     log_info: Callable[[str], None] | None,
     log_warning: Callable[[str], None] | None,
+    dev_cache: DevCache | None = None,
 ) -> tuple[list[NavGroup] | None, list[GlossaryTerm] | None, str | None]:
     if llm_manager is None:
         return None, None, None
@@ -177,6 +183,7 @@ async def _maybe_synthesize_global_ia(
     homepage_overview: str | None = None
     try:
         homepage_overview = await _synthesize_homepage_overview(
+            dev_cache=dev_cache,
             pages=pages,
             provider=provider,
             audience=audience,
@@ -193,6 +200,7 @@ async def _maybe_synthesize_global_ia(
     glossary_terms: list[GlossaryTerm] | None = None
     try:
         nav_groups, glossary_terms = await _synthesize_site_ia(
+            dev_cache=dev_cache,
             pages=pages,
             provider=provider,
             audience=audience,
@@ -220,6 +228,7 @@ async def generate_docsite(
     index_patterns: Iterable[str] | None = None,
     log_info: Callable[[str], None] | None = None,
     log_warning: Callable[[str], None] | None = None,
+    dev_cache: DevCache | None = None,
 ) -> DocsiteResult:
     index_path = find_index_file(
         input_dir,
@@ -242,6 +251,7 @@ async def generate_docsite(
         topics=topics,
         llm_manager=llm_manager,
         config=cleanup_config,
+        dev_cache=dev_cache,
         scope_label=index.scope_label,
         log_info=log_info,
         log_warning=log_warning,
@@ -267,6 +277,7 @@ async def generate_docsite(
             glossary_terms,
             homepage_overview,
         ) = await _maybe_synthesize_global_ia(
+            dev_cache=dev_cache,
             llm_manager=llm_manager,
             pages=pages,
             audience=cleanup_config.audience,
@@ -288,6 +299,15 @@ async def generate_docsite(
         ),
         log_warning=log_warning,
     )
+
+    if dev_cache is not None and dev_cache.enabled and log_info:
+        summaries = []
+        for label in ("cleanup", "homepage", "site_ia"):
+            counts = dev_cache.counts.get(f"autodoc_{label}")
+            reused = counts.reused if counts else 0
+            new = counts.new if counts else 0
+            summaries.append(f"{label} {reused} reused / {new} new")
+        log_info("dev-cache: " + ", ".join(summaries))
 
     return DocsiteResult(
         output_dir=output_dir,
