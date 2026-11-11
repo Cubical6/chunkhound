@@ -201,6 +201,11 @@ De domeinmodelbesluiten uit `autodoc-c4-design/docs/melly/decisions/2026-10-27-a
 | 2026-11-10 | LLM-beslissingen · commits en toestemming Run 8 | Gebruiker: "ja" op de lokale commit van de databasefix op `main`, de commit van de herstelrichting op `c4/evidence-admission` en Run 8 (kaart 1 + AutoDoc + site). | Commits `4c258791` (main) en `b4112cdd` (branch). Run 8 in een eigen worktree op `b4112cdd`, met dezelfde beginlock als Run 7. | Geen push. |
 | 2026-11-10 | LLM-beslissingen · AutoDoc Run 8 gestopt, vervolgpunten | Gebruiker: "ja, zet person:contributing als vervolgpunt in handoff", daarna "ja, stop de AutoDoc en verwerk de cache probleem ook in handoff als vervolgonderzoek". | De kaart bevat de uitkomsten waar het om gaat; AutoDoc kan die niet herstellen en kost ongeveer een uur quota. Herhaalruns worden nauwelijks sneller door de besliscache, omdat de meeste tijd naar topicresearch en AutoDoc gaat. | AutoDoc van Run 8 onderbroken (exit 130) en een achtergebleven Codex-proces gestopt. `person:contributing` (punt 3) en cache voor herhaalruns (punt 4) staan in `.superpowers/design/omap-open-items-handoff.md`. |
 | 2026-11-10 | LLM-beslissingen · merge en vastleggen | Gebruiker: "ja, leg Run 7 en Run 8 vast in docs/melly. Je mag de branch mergen. Eerst punt 3 oppakken met handoff". | — | `c4/evidence-admission` met een mergecommit in `main` opgenomen (`4737ccb4`, zodat `b4112cdd` uit het Run 8-bewijs geldig blijft); smoke 14 en code mapper 682 passed vóór de commit. Run 7 en Run 8 hieronder vastgelegd. Geen push. Volgende stap: punt 3. |
+| 2026-11-10 | LLM-beslissingen · personenregel en toestemming Run 9 | Gebruiker: bijdragers en maintainers tellen niet als persoon; "nee, laat pi-bolt het voorstel uitvoeren", daarna "ja, commit beide en start Run 9 met alleen kaart 1". | `person:contributing` kwam uit de welkomstzin `CONTRIBUTING.md:3`: extractie maakte van het werkwoord een persoon. `c4_documented.md` en `c4_element.md` krijgen één personenregel (alleen een rol die het draaiende systeem gebruikt, bedient, configureert of er uitvoer van ontvangt; geen ontwikkelaars, bijdragers, reviewers, maintainers of lezers) en een termregel (zelfstandig naamwoord, nooit werkwoord, kop of bestandsnaam). | Gecommit als `9ee88872` op `c4/person-admission`. Run 9 alleen kaart 1 (zie "Run 9 · praktijkbewijs"). Geen push. |
+| 2026-11-11 | LLM-beslissingen · herstelrichting Run 9 | Gebruiker: "Akkoord" op twee fixes. Diagnose uit Run 9: (1) het documentatiebewijs in `candidate_metadata()` werd vanaf het begin op 600 tekens afgekapt, zodat de Gemini-rij uit het tabelcitaat `configuration.md:495-502` wegviel; (2) `c4_element` op `gpt-6-luna`/low week af van de eigen regels (operator-controlled HTTPS endpoint `external`, Watchman en teams `neither`). | Fix 1: een te lang citaat houdt de regels die de elementnaam bevatten plus de eerste regel; weggelaten stukken worden "…", binnen 600 tekens. Fix 2: elke beslisvraag declareert zijn rol; `c4_element` gaat naar synthesis, tabel en rij blijven utility. | Uitgevoerd door pi-bolt op `c4/person-admission`; code mapper 687 passed, 1 skipped; smoke 14; mypy schoon. |
+| 2026-11-11 | LLM-beslissingen · verificatie zonder volledige run | Gebruiker: "Ik wil geen volledige run uitvoeren, kan het ook zonder volledige run?", daarna "ja, voer stap 1 uit" en "ja, commit eerst en draai dan stap 2". | Stap 1 (zonder provider): de nieuwe citaatfunctie op de documentatiecitaten uit de Run 9-besliscache toegepast. 22 citaten, 10 gewijzigd; Gemini, OpenAI, DeepSeek, OpenRouter, OrcaRouter, Requesty, Opper en API Route krijgen hun eigen tabelrij terug; geen citaat verliest zijn naam. Stap 2: kaart 1 met `--minimal` (één topic; de C4-analyse is onafhankelijk van `--comprehensiveness`) op de besliscache van Run 9. | Fixes gecommit als `cbdafbe9` na smoke 14. Run 10 (zie "Run 10 · praktijkbewijs"). Geen push. |
+| 2026-11-11 | LLM-beslissingen · clientbibliotheekregel en Run 11 | Gebruiker vroeg "Wat beveel je aan" en zei daarna "ja, voer stap 1 en 2 uit". In Run 10 zag `c4_pair` de Gemini-rij wel, maar antwoordde toch `different`: de prompt rekent verwante systemen tot `different`, en een SDK-pakket naast de dienst is dan een randgeval. | `c4_pair.md` krijgt één algemene regel: een clientbibliotheek of SDK waarvan het bewijs toont dat hij het survivorsysteem aanroept, is dat systeem; een bibliotheek die geen client van de survivor is (algemene HTTP-, parse- of hulpbibliotheek) blijft `different`. Geen leveranciersnamen. | Uitgevoerd door pi-bolt, gecommit als `f5b775ce` na C4-tests 590 en smoke 14. Run 11 (zie "Run 11 · praktijkbewijs"). Geen push. |
+| 2026-11-11 | LLM-beslissingen · merge en vastleggen Run 9–11 | Gebruiker: "ja, merge en leg Run 9–11 vast". | — | `c4/person-admission` met een mergecommit in `main` opgenomen (`945a50be`, zodat `9ee88872`, `cbdafbe9` en `f5b775ce` uit het runbewijs geldig blijven); smoke 14 en C4-tests 590 passed vóór de commit. Run 9, 10 en 11 hieronder vastgelegd. Geen push. |
 
 ## Run 6 · praktijkbewijs
 
@@ -299,3 +304,69 @@ Uitgevoerd op 2026-11-10, commit `b4112cdd` (identiteitsbewijs en één admissie
 - Punt 3 in `.superpowers/design/omap-open-items-handoff.md`: diagnose en generiek voorstel voor `person:contributing` en de schommelende personenlijst.
 - Punt 4 in dezelfde handoff: onderzoek naar een cache voor topicresearch en AutoDoc. Kaart 1 duurde in Run 7 en Run 8 elk ongeveer een uur, en AutoDoc in Run 7 nog een uur.
 - Een volledige acceptatierun (kaart 1, kaart 2, AutoDoc en site) volgt pas na punt 3 en vraagt eerst toestemming.
+
+## Run 9 · praktijkbewijs
+
+Uitgevoerd op 2026-11-10/11, commit `9ee88872` (personenregel; via `945a50be` in `main`), in `/home/disorder/orca/workspaces/chunkhound/omap-run9`. Bewijs onder `.scratch/omap-a9/` in die worktree. De configuratie is gelijk aan Run 7 en Run 8. **Niet geaccepteerd:** `person:contributing` is weg, maar google is weer niet samengevoegd en de elementvraag wijkt af van de eigen regels.
+
+### Uitvoering en bewijs
+
+- Beginlock identiek aan die van Run 7 en Run 8; de overrides zijn vóór en na de kaart leeg (`map.lock.after-map1.json`).
+- Index: 52.840 chunks, 4 min 35 s (`index.log`).
+- Alleen kaart 1: 23:22 → 00:20, exit 0. Alle C4-beslissingen opnieuw gevraagd: tabellen 65, rijen 15, elementen 33, groepen 2, survivors 2 en pairs 3. Geen fallback. Contract: 49 elementen, 116 relaties, 13 topics.
+
+### Uitkomsten
+
+| Criterium | Uitkomst | Bewijs |
+| --- | --- | --- |
+| `person:contributing` weg | Gehaald | Personen: `AI assistant` (`README.md:27`, `cli-reference.md:244`) en `operators` (`operations/watchman_live_indexing.md:3`). |
+| google opgegaan in Gemini | Niet gehaald | `c4_group` groepeerde Gemini, google en google-genai en `c4_survivor` koos Gemini, maar beide `c4_pair`-vragen gaven `different`. Het survivorcitaat `configuration.md:495-502` was na 600 tekens afgekapt en bevatte de Gemini-rij (r. 502) niet. |
+| Elementvraag volgt de eigen regels | Niet gehaald | Op `gpt-6-luna`/low: `operator-controlled HTTPS endpoint` werd `external`; Watchman, teams en your agent werden `neither`. |
+
+## Run 10 · praktijkbewijs
+
+Uitgevoerd op 2026-11-11, commit `cbdafbe9` (citaatfix en elementvraag op synthesis), in `/home/disorder/orca/workspaces/chunkhound/omap-run10`. Bewijs onder `.scratch/omap-a10/`. Doel: de twee fixes controleren zonder volledige run. **Fix 2 gehaald; google nog niet samengevoegd.**
+
+### Uitvoering en bewijs
+
+- Kaart 1 met `--minimal`: één topic in plaats van tien, met de volledige C4-analyse. De besliscache van Run 9 is gekopieerd; de beginlock is gelijk aan die van Run 9.
+- De gekopieerde database van Run 9 weigerde te openen onder een andere root (sidecar `chunks.db.root.json`). Die beveiliging is niet omzeild; er is opnieuw geïndexeerd.
+- De eerste index sloeg dit besluitenlog (475 KB) over door de parse-timeout van 3 s. Daarom eenmalig opnieuw geïndexeerd met `CHUNKHOUND_INDEXING__PER_FILE_TIMEOUT_SECONDS=60`: 1206 bestanden, 52.852 chunks, 5 min 33 s.
+- Kaart: 20:10 → 20:26, exit 0. Tabellen 65 en rijen 15 uit de cache. Opnieuw gevraagd: 33 elementen (nieuwe rol, dus nieuwe sleutel), groepen 2, survivors 2 en 3 van de 4 pairs. Contract: 50 elementen, 117 relaties, 2 topics.
+- Lock en extractiecache van de hoofdrepo zijn onveranderd (SHA-256 vóór en na gelijk).
+
+### Uitkomsten
+
+| Criterium | Uitkomst | Bewijs |
+| --- | --- | --- |
+| Gemini-rij in het pairbewijs | Gehaald | Het survivorcitaat is nu de tabelkop, "…" en de Gemini-rij met "Google Gemini API". |
+| google opgegaan in Gemini | Niet gehaald | Beide `c4_pair`-vragen antwoordden toch `different` (sol/medium). In Run 8 gaf vrijwel hetzelfde bewijs `same`. Het verschil zit in het oordeel over SDK tegenover dienst, niet in het bewijs. |
+| Elementvraag volgt de eigen regels | Gehaald | `operator-controlled HTTPS endpoint` weg; Watchman extern systeem; teams persoon; your agent opgegaan in AI assistant. |
+| `person:contributing` blijft weg | Gehaald | Personen: AI assistant, operators en teams. |
+
+## Run 11 · praktijkbewijs
+
+Uitgevoerd op 2026-11-11, commit `f5b775ce` (clientbibliotheekregel in `c4_pair.md`), in dezelfde worktree als Run 10. Bewijs onder `.scratch/omap-a11/`; de besliscache na Run 10 is bewaard in `.scratch/omap-a10/extraction-after-run10/`. **Doelen van de herstelrichting gehaald; nog niet geaccepteerd als eindrun**, omdat alleen een kaart met één topic is gedraaid en AutoDoc en site ontbreken.
+
+### Uitvoering en bewijs
+
+- Worktree naar `f5b775ce` gezet; de beginlock teruggezet naar die van Run 9 en Run 10. Incrementele index: 1 bestand verwerkt, 1205 overgeslagen.
+- Kaart 1 met `--minimal`: 20:33 → 20:49, exit 0. Alleen de 4 pairvragen opnieuw gevraagd; tabellen, rijen, elementen, groepen en survivors kwamen uit de cache. Contract: 49 elementen, 117 relaties, 2 topics.
+- Overrides vóór en na leeg. Lock en extractiecache van de hoofdrepo onveranderd.
+
+### Uitkomsten
+
+| Criterium | Uitkomst | Bewijs |
+| --- | --- | --- |
+| google opgegaan in Gemini zonder lockregel | Gehaald | Samengevoegd: google → Gemini en google-genai → Gemini; 0 paren apart gehouden. Alleen `rusty-s3` blijft weg wegens ontbrekende relatie. |
+| Geen onterechte samenvoeging | Gehaald | Verder alleen agents → AI assistant en your agent → AI assistant. |
+| Elementen en personen gelijk aan Run 10 | Gehaald | Externe systemen gelijk aan Run 10, op google na. Personen: AI assistant, operators en teams. |
+| Stabiliteit over meerdere runs | Niet gemeten | Eén run per variant. |
+| AutoDoc en site-build | Niet uitgevoerd | Buiten de scope van deze controle. |
+
+### Vervolg
+
+- De relatie van operators met het systeem blijft open (punt 3 in `.superpowers/design/omap-open-items-handoff.md`).
+- Punt 4 (cache voor topicresearch en AutoDoc) blijft open. `--minimal` blijkt een bruikbare goedkope diagnoseroute voor C4: ongeveer 16 minuten in plaats van ongeveer een uur.
+- De parse-timeout van 3 s kan grote markdownbestanden onder belasting overslaan, waardoor een index per run kan verschillen. Nog niet onderzocht.
+- Een volledige acceptatierun (kaart 1, kaart 2, AutoDoc en site) vraagt eerst toestemming.

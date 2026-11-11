@@ -10,7 +10,7 @@
 
 **Spec:** [2026-11-06-omap-llm-beslissingen-design.md](../specs/2026-11-06-omap-llm-beslissingen-design.md) §1–§13. **Model:** [map-structuuranalyse.md](../models/map-structuuranalyse.md) R17–R23, §2–§5. **Besluiten:** [2026-10-27-map-structuuranalyse.md](../decisions/2026-10-27-map-structuuranalyse.md), rijen van 2026-11-06 vanaf “Domeinmodel · personen”.
 
-**Status:** goedgekeurd 2026-11-06 (besluit: Planreview · goedkeuring). Uitgevoerd via de seriële Orca-coordinator; implementatie geaccepteerd op `8757ec33` (2026-11-07) en lokaal geïntegreerd op `main` (2026-11-10, niet gepusht). Run 6 is inhoudelijk niet geaccepteerd (4 van 6 criteria). De herstelrichting na Run 7 is lokaal in `main` opgenomen (`4737ccb4`). Run 8 haalde de google- en Fireworks-doelen, maar is nog geen eindacceptatie (zie besluitenlog). Wijziging van de run-5-overrides en push niet goedgekeurd.
+**Status:** goedgekeurd 2026-11-06 (besluit: Planreview · goedkeuring). Uitgevoerd via de seriële Orca-coordinator; implementatie geaccepteerd op `8757ec33` (2026-11-07) en lokaal geïntegreerd op `main` (2026-11-10, niet gepusht). Run 6 is inhoudelijk niet geaccepteerd (4 van 6 criteria). De herstelrichting na Run 7 is lokaal in `main` opgenomen (`4737ccb4`). Run 8 haalde de google- en Fireworks-doelen, maar is nog geen eindacceptatie (zie besluitenlog). De personenregel, de citaatfix, `c4_element` op synthesis en de clientbibliotheekregel staan via `945a50be` in `main`; Run 11 (`f5b775ce`, alleen kaart 1 met `--minimal`) haalde de C4-doelen. Een volledige acceptatierun met AutoDoc ontbreekt nog. Wijziging van de run-5-overrides en push niet goedgekeurd.
 
 ## Project Commands
 
