@@ -5,9 +5,9 @@ import os
 import random
 from collections import deque
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
@@ -20,12 +20,19 @@ from chunkhound.code_mapper.public_utils import (
     merge_sources_metadata,
 )
 from chunkhound.core.audience import normalize_audience
+from chunkhound.core.config.config import Config
 from chunkhound.core.config.indexing_config import IndexingConfig
+from chunkhound.core.utils import normalize_path_for_lookup
 from chunkhound.database_factory import DatabaseServices
 from chunkhound.embeddings import EmbeddingManager
 from chunkhound.interfaces.llm_provider import LLMProvider
 from chunkhound.llm_manager import LLMManager
 from chunkhound.services.deep_research_service import run_deep_research
+from chunkhound.services.extraction.dev_cache import (
+    DevCache,
+    provider_identity,
+    source_manifest_version,
+)
 
 if TYPE_CHECKING:
     from chunkhound.api.cli.utils.tree_progress import TreeProgressDisplay
@@ -56,6 +63,153 @@ class CodeMapperPipelineResult:
     total_chunks_global: int | None
     scope_total_files: int
     scope_total_chunks: int
+    topic_cache_report: str | None = None
+
+
+class _TopicResearchCache:
+    """Per-run evidence snapshot; hashes come only from the last indexed state."""
+
+    def __init__(
+        self,
+        cache: DevCache,
+        services: DatabaseServices,
+        llm_manager: LLMManager,
+        comprehensiveness: str,
+    ) -> None:
+        self.cache = cache
+        self.provider = services.provider
+        self.version = source_manifest_version(
+            [
+                "chunkhound/services/research/**/*.py",
+                "chunkhound/services/prompts/**/*.py",
+                "chunkhound/services/deep_research_service.py",
+            ],
+            Path(__file__).resolve().parents[2],
+        )
+        self.hashes: dict[str, str | None] = {}
+        self.reused = 0
+        self.researched: set[str] = set()
+        self.evidence_changed: set[str] = set()
+        if self.version is None:
+            return
+        self.base = self.provider.get_base_directory()
+        self.synthesis = provider_identity(llm_manager.get_synthesis_provider())
+        self.settings = {
+            "index_base": str(self.base.absolute()),
+            "comprehensiveness": comprehensiveness,
+            # Match run_deep_research's environment/default configuration, not
+            # just the map planning settings.
+            "research": Config.from_environment().research.model_dump(mode="json"),
+            "synthesis_input_tokens_max": os.getenv(
+                "CHUNKHOUND_SYNTHESIS_INPUT_TOKENS_MAX"
+            ),
+            "synthesis_output_policy": asdict(
+                llm_manager.get_synthesis_provider().synthesis_output_limit_policy
+            ),
+            "utility_provider": asdict(
+                provider_identity(llm_manager.get_utility_provider())
+            ),
+            "synthesis_provider": asdict(self.synthesis),
+        }
+
+    def _files(self, result: Any) -> set[str] | None:
+        if not isinstance(result, dict) or not isinstance(result.get("answer"), str):
+            return None
+        metadata = result.get("metadata")
+        if not isinstance(metadata, dict):
+            return None
+        sources = metadata.get("sources")
+        if not isinstance(sources, dict):
+            return None
+        files = sources.get("files")
+        if not isinstance(files, list) or not files or is_empty_research_result(result):
+            return None
+        normalized = set()
+        for file in files:
+            if not isinstance(file, str) or not file.strip():
+                return None
+            try:
+                path = normalize_path_for_lookup(os.path.normpath(file), self.base)
+            except ValueError:
+                return None
+            if path == "." or ".." in Path(path).parts:
+                return None
+            normalized.add(path)
+        return normalized
+
+    def _hash(self, path: str) -> str | None:
+        if path not in self.hashes:
+            record = self.provider.get_file_by_path(path)
+            value = record.get("content_hash") if isinstance(record, dict) else None
+            self.hashes[path] = value if isinstance(value, str) and value else None
+        return self.hashes[path]
+
+    def get(self, query: str, path_filter: str | None) -> dict[str, Any] | None:
+        if self.version is None:
+            return None
+
+        def validate(answer: Any) -> bool:
+            if not isinstance(answer, dict):
+                return False
+            files = self._files(answer.get("result"))
+            evidence = answer.get("evidence")
+            if (
+                files is None
+                or not isinstance(evidence, dict)
+                or set(evidence) != files
+            ):
+                return False
+            for path in files:
+                saved = evidence[path]
+                if not isinstance(saved, str) or not saved or self._hash(path) != saved:
+                    self.evidence_changed.add(query)
+                    return False
+            return True
+
+        answer = self.cache.get(
+            "topic_research",
+            self.version,
+            self.synthesis,
+            {**self.settings, "section_query": query, "path_filter": path_filter},
+            validate=validate,
+        )
+        if answer is None:
+            self.researched.add(query)
+            return None
+        self.reused += 1
+        return cast(dict[str, Any], answer["result"])
+
+    def put(self, query: str, path_filter: str | None, result: dict[str, Any]) -> None:
+        if self.version is None:
+            return
+        files = self._files(result)
+        if files is None:
+            return
+        evidence = {path: self._hash(path) for path in sorted(files)}
+        if not all(evidence.values()):
+            return
+        self.cache.put(
+            "topic_research",
+            self.version,
+            self.synthesis,
+            {**self.settings, "section_query": query, "path_filter": path_filter},
+            {
+                "result": {"answer": result["answer"], "metadata": result["metadata"]},
+                "evidence": evidence,
+            },
+        )
+
+    def report(self) -> str:
+        if self.version is None:
+            return (
+                "dev-cache: topic cache disabled (research source manifest unavailable)"
+            )
+        changed = len(self.researched & self.evidence_changed)
+        return (
+            f"dev-cache: topics {self.reused} reused / {changed} re-researched "
+            f"(evidence changed) / {len(self.researched) - changed} new; "
+            "run chunkhound index after code changes; unrelated changes may be missed"
+        )
 
 
 def _audience_guidance_lines(*, audience: str) -> list[str]:
@@ -199,6 +353,9 @@ async def run_code_mapper_overview_only(
     out_dir: Path | None,
     map_hyde_provider: LLMProvider | None,
     indexing_cfg: IndexingConfig | None,
+    audience: str = "balanced",
+    dev_cache: DevCache | None = None,
+    refresh_plan: bool = False,
 ) -> tuple[str, list[CodeMapperPOI]]:
     """Run overview-only Code Mapper and return the answer + points."""
     overview_answer, points_of_interest = await run_code_mapper_overview_hyde(
@@ -212,6 +369,9 @@ async def run_code_mapper_overview_only(
         comprehensiveness=comprehensiveness,
         out_dir=out_dir,
         persist_prompt=True,
+        audience=audience,
+        dev_cache=dev_cache,
+        refresh_plan=refresh_plan,
         map_hyde_provider=map_hyde_provider,
         indexing_cfg=indexing_cfg,
     )
@@ -241,11 +401,18 @@ async def run_code_mapper_pipeline(
     poi_jobs: int | None = None,
     progress: TreeProgressDisplay | None = None,
     audience: str = "balanced",
+    dev_cache: DevCache | None = None,
+    refresh_plan: bool = False,
     log_info: Callable[[str], None] | None = None,
     log_warning: Callable[[str], None] | None = None,
     log_error: Callable[[str], None] | None = None,
 ) -> CodeMapperPipelineResult:
     """Run Code Mapper overview + per-point deep research and compute coverage."""
+    topic_cache = (
+        _TopicResearchCache(dev_cache, services, llm_manager, comprehensiveness)
+        if dev_cache is not None and dev_cache.enabled
+        else None
+    )
     overview_answer, points_of_interest = await run_code_mapper_overview_hyde(
         llm_manager=llm_manager,
         target_dir=target_dir,
@@ -256,6 +423,9 @@ async def run_code_mapper_pipeline(
         max_points=max_points,
         comprehensiveness=comprehensiveness,
         out_dir=out_dir,
+        audience=audience,
+        dev_cache=dev_cache,
+        refresh_plan=refresh_plan,
         map_hyde_provider=map_hyde_provider,
         indexing_cfg=indexing_cfg,
     )
@@ -476,6 +646,13 @@ async def run_code_mapper_pipeline(
                     f"[Code Mapper] Processing point of interest {idx}/"
                     f"{len(points_of_interest)}: {heading}"
                 )
+            result = (
+                topic_cache.get(section_query, path_filter)
+                if topic_cache is not None
+                else None
+            )
+            if result is not None:
+                return heading, result, None, False
             result = await run_deep_research(
                 services=services,
                 embedding_manager=embedding_manager,
@@ -492,6 +669,8 @@ async def run_code_mapper_pipeline(
                         "content (will retry)."
                     )
                 return heading, None, "empty result", False
+            if topic_cache is not None:
+                topic_cache.put(section_query, path_filter, result)
             return heading, result, None, False
         except asyncio.CancelledError:
             raise
@@ -623,4 +802,5 @@ async def run_code_mapper_pipeline(
         total_chunks_global=total_chunks_global,
         scope_total_files=scope_total_files,
         scope_total_chunks=scope_total_chunks,
+        topic_cache_report=topic_cache.report() if topic_cache is not None else None,
     )

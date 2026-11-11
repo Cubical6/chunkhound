@@ -73,6 +73,7 @@ from chunkhound.core.exceptions.core import ConfigurationError
 from chunkhound.database_factory import DatabaseServices, create_services
 from chunkhound.embeddings import EmbeddingManager
 from chunkhound.llm_manager import LLMManager
+from chunkhound.services.extraction.dev_cache import DevCache
 from chunkhound.utils.text import safe_scope_label
 
 from ..utils.rich_output import RichOutputFormatter
@@ -275,6 +276,21 @@ async def code_mapper_command(args: argparse.Namespace, config: Config) -> None:
         markdown=getattr(args, "markdown", True),
         trial=getattr(args, "overview_only", False),
     )
+    if getattr(args, "refresh_plan", False) and not getattr(args, "dev_cache", False):
+        formatter.error("--refresh-plan requires --dev-cache.")
+        sys.exit(2)
+    if getattr(args, "c4_only", False) and (
+        getattr(args, "dev_cache", False) or getattr(args, "refresh_plan", False)
+    ):
+        formatter.error(
+            "--c4-only cannot be combined with --dev-cache or --refresh-plan."
+        )
+        sys.exit(2)
+    if getattr(args, "c4_only", False) and (not options.c4 or options.trial):
+        formatter.error(
+            "--c4-only cannot be combined with --no-c4 or --plan (--overview-only)."
+        )
+        sys.exit(2)
     if not options.markdown and (not options.c4 or getattr(args, "combined", False)):
         formatter.error("--no-markdown cannot be combined with --no-c4 or --combined.")
         sys.exit(2)
@@ -335,7 +351,15 @@ async def _run_requested_outputs(
     options: C4Options,
     c4: _C4Run | None,
 ) -> None:
-    if options.trial:
+    if getattr(args, "c4_only", False):
+        assert c4 is not None
+        llm_manager = _create_code_mapper_llm_manager(config, formatter)
+        c4.llm = C4Llm(
+            llm_manager, concurrency=getattr(args, "jobs", None) or 4, trial=False
+        )
+        await c4.finish(await c4.analyze(), None)
+        formatter.info("c4-only: topics skipped")
+    elif options.trial:
         if c4 is not None:
             await c4.finish(await c4.analyze(), None)
         if options.markdown:
@@ -369,6 +393,11 @@ async def _run_overview(
         target_dir=scope.target_dir,
         overview_only=True,
     )
+    dev_cache = (
+        DevCache(scope.target_dir, enabled=True)
+        if getattr(args, "dev_cache", False)
+        else None
+    )
     try:
         overview_answer, points_of_interest = await run_code_mapper_overview_hyde(
             llm_manager=llm_manager,
@@ -381,6 +410,9 @@ async def _run_overview(
             comprehensiveness=run_context.comprehensiveness,
             out_dir=out_dir,
             persist_prompt=True,
+            audience=str(getattr(args, "audience", "balanced") or "balanced"),
+            dev_cache=dev_cache,
+            refresh_plan=getattr(args, "refresh_plan", False),
             map_hyde_provider=meta_bundle.map_hyde_provider,
             indexing_cfg=getattr(config, "indexing", None),
         )
@@ -397,6 +429,7 @@ async def _run_overview(
         print("\n--- Overview answer ---\n")
         print(no_points.overview_answer)
         sys.exit(1)
+    _report_plan_cache(dev_cache, formatter)
     meta_bundle.meta.generation_stats["code_mapper_comprehensiveness"] = (
         run_context.comprehensiveness
     )
@@ -489,6 +522,11 @@ async def _run_full(
     # Phase 1 + 2: run overview (HyDE-based) and per-point deep research with a shared
     # TUI.
 
+    dev_cache = (
+        DevCache(scope.target_dir, enabled=True)
+        if getattr(args, "dev_cache", False)
+        else None
+    )
     with TreeProgressDisplay() as tree_progress:
         try:
             audience = str(getattr(args, "audience", "balanced") or "balanced")
@@ -510,6 +548,8 @@ async def _run_full(
                 poi_jobs=getattr(args, "jobs", None),
                 progress=tree_progress,
                 audience=audience,
+                dev_cache=dev_cache,
+                refresh_plan=getattr(args, "refresh_plan", False),
                 log_info=formatter.info,
                 log_warning=formatter.warning,
                 log_error=formatter.error,
@@ -536,6 +576,9 @@ async def _run_full(
             formatter.error(f"Code Mapper research failed: {e}")
             logger.exception("Full error details:")
             sys.exit(1)
+    _report_plan_cache(dev_cache, formatter)
+    if pipeline_result.topic_cache_report is not None:
+        formatter.info(pipeline_result.topic_cache_report)
     if not options.markdown:
         return
     output_args = copy.copy(args)
@@ -543,6 +586,18 @@ async def _run_full(
     _write_markdown_outputs(
         output_args, formatter, pipeline_result, scope, meta_bundle, services
     )
+
+
+def _report_plan_cache(cache: DevCache | None, formatter: RichOutputFormatter) -> None:
+    if cache is None:
+        return
+    counts = cache.counts.get("hyde_plan")
+    if counts is None:
+        formatter.info("dev-cache: plan cache unavailable")
+    elif counts.reused:
+        formatter.info(f"plan reused (from {cache.created_at['hyde_plan']})")
+    else:
+        formatter.info("plan refreshed")
 
 
 def _write_markdown_outputs(

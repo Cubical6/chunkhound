@@ -78,6 +78,17 @@ def add_map_subparser(subparsers: Any) -> argparse.ArgumentParser:
     )
 
     map_parser.add_argument(
+        "--dev-cache",
+        action="store_true",
+        help="Reuse the HyDE plan during development, even after code changes.",
+    )
+    map_parser.add_argument(
+        "--refresh-plan",
+        action="store_true",
+        help="Generate and store a fresh HyDE plan (requires --dev-cache).",
+    )
+
+    map_parser.add_argument(
         "--audience",
         type=_parse_audience,
         default="balanced",
@@ -110,6 +121,15 @@ def add_map_subparser(subparsers: Any) -> argparse.ArgumentParser:
             "Select formats with --no-c4 or --no-markdown. Use --combined to "
             "also write a combined Markdown file (or set "
             "CH_CODE_MAPPER_WRITE_COMBINED=1 for backward compatibility)."
+        ),
+    )
+
+    map_parser.add_argument(
+        "--c4-only",
+        action="store_true",
+        help=(
+            "Run full C4 analysis without planning or topic research "
+            "(no database or embeddings needed). Existing topic files are kept."
         ),
     )
 

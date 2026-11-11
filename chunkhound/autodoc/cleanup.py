@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib.resources
 import random
 from collections.abc import Callable
@@ -14,6 +15,8 @@ from chunkhound.autodoc.markdown_utils import (
 from chunkhound.autodoc.models import CleanupConfig, CodeMapperTopic
 from chunkhound.core.audience import normalize_audience
 from chunkhound.interfaces.llm_provider import LLMProvider
+from chunkhound.services.extraction.dev_cache import DevCache, provider_identity
+from chunkhound.services.extraction.store import key_from_parts
 
 _PROMPTS_PACKAGE = "chunkhound.autodoc"
 _CLEANUP_SYSTEM_PROMPT_FILE = "cleanup_system_v2.txt"
@@ -76,6 +79,7 @@ async def _cleanup_with_llm(
     config: CleanupConfig,
     log_info: Callable[[str], None] | None,
     log_warning: Callable[[str], None] | None,
+    dev_cache: DevCache | None = None,
 ) -> list[str]:
     system_prompt = _build_cleanup_system_prompt(config)
 
@@ -90,10 +94,43 @@ async def _cleanup_with_llm(
 
     cleaned: list[str | None] = [None] * len(topics)
 
-    indexed: list[_IndexedCleanupInput] = [
-        _IndexedCleanupInput(idx=idx, topic=topic, prompt=prompt)
-        for idx, topic, prompt in zip(range(len(topics)), topics, prompts, strict=True)
-    ]
+    identity = provider_identity(provider) if dev_cache is not None else None
+    version = key_from_parts(
+        {
+            "system": system_prompt,
+            "template": _read_prompt_file(
+                _CLEANUP_USER_PROMPT_FILE_END_USER
+                if normalize_audience(config.audience) == "end-user"
+                else _CLEANUP_USER_PROMPT_FILE
+            ),
+            "max_completion_tokens": config.max_completion_tokens,
+        }
+    )
+    items = [hashlib.sha256(prompt.encode("utf-8")).hexdigest() for prompt in prompts]
+
+    def store(idx: int, response: str) -> None:
+        cleaned[idx] = _normalize_llm_output(response)
+        if dev_cache is not None and identity is not None:
+            dev_cache.put(
+                "autodoc_cleanup", version, identity, items[idx], cleaned[idx]
+            )
+
+    indexed: list[_IndexedCleanupInput] = []
+    for idx, (topic, prompt) in enumerate(zip(topics, prompts, strict=True)):
+        cached = None
+        if dev_cache is not None and identity is not None:
+            cached = dev_cache.get(
+                "autodoc_cleanup",
+                version,
+                identity,
+                items[idx],
+                validate=lambda answer: isinstance(answer, str)
+                and bool(answer.strip()),
+            )
+        if cached is not None:
+            cleaned[idx] = cached
+        else:
+            indexed.append(_IndexedCleanupInput(idx=idx, topic=topic, prompt=prompt))
 
     for batch in _chunked(indexed, config.batch_size):
         batch_prompts = [item.prompt for item in batch]
@@ -122,8 +159,9 @@ async def _cleanup_with_llm(
                 )
 
         if batch_outputs is None:
-            single_outputs: list[str] = []
-            for prompt, topic in zip(batch_prompts, batch_topics, strict=True):
+            for idx, prompt, topic in zip(
+                batch_indices, batch_prompts, batch_topics, strict=True
+            ):
                 try:
                     outputs = await _batch_complete_with_backoff(
                         provider=provider,
@@ -138,19 +176,19 @@ async def _cleanup_with_llm(
                             "LLM cleanup retry returned unexpected response count: "
                             f"{len(outputs)}"
                         )
-                    single_outputs.append(outputs[0])
+                    store(idx, outputs[0])
                 except Exception as exc:  # noqa: BLE001
                     raise RuntimeError(
                         f"AutoDoc cleanup failed for topic {topic.title!r}: {exc}"
                     ) from exc
-            batch_outputs = single_outputs
+            continue
 
         for idx, response in zip(
             batch_indices,
             batch_outputs,
             strict=True,
         ):
-            cleaned[idx] = _normalize_llm_output(response)
+            store(idx, response)
 
     if any(item is None for item in cleaned):
         raise RuntimeError("AutoDoc cleanup produced incomplete results.")

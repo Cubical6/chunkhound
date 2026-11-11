@@ -1,17 +1,28 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
 
-from chunkhound.code_mapper.hyde import build_hyde_scope_prompt, run_hyde_only_query
+from chunkhound.code_mapper.hyde import (
+    build_hyde_scope_prompt,
+    load_hyde_scope_context_template,
+    load_hyde_scope_template,
+    run_hyde_only_query,
+)
 from chunkhound.code_mapper.models import AgentDocMetadata, CodeMapperPOI, HydeConfig
 from chunkhound.code_mapper.scope import collect_scope_files
 from chunkhound.core.config.indexing_config import IndexingConfig
 from chunkhound.interfaces.llm_provider import LLMProvider
 from chunkhound.llm_manager import LLMManager
+from chunkhound.services.extraction.dev_cache import (
+    DevCache,
+    provider_identity,
+)
+from chunkhound.services.extraction.store import key_from_parts
 from chunkhound.utils.text import safe_scope_label
 
 
@@ -129,7 +140,53 @@ def _ensure_operational_quickstart(points: list[str], max_points: int) -> list[s
     return [injected, *points][:max_points]
 
 
-async def run_code_mapper_overview_hyde(
+def _build_overview_prompt(
+    *, scope_prompt: str, mode: str, budget: int, context_text: str
+) -> str:
+    focus = (
+        "architectural areas first"
+        if mode == "architectural"
+        else "operational workflows (setup, local run, troubleshooting) first"
+    )
+    poi_target_line = (
+        f"- Identify up to {budget} points of interest for this scoped project. "
+        f"Prioritize the most important {focus}, but you may include slightly "
+        "less critical topics to use the full budget when appropriate.\n"
+    )
+    context_guard = ""
+    if context_text:
+        context_guard = (
+            "- Use ONLY the user-provided context above; do not infer or assume "
+            "details from repository code.\n"
+        )
+    return (
+        f"{scope_prompt}\n\n"
+        "HyDE objective (override for Code Mapper):\n"
+        "- Ignore any earlier 'HyDE objective' and 'Output format' instructions "
+        "in the scope prompt.\n"
+        f"{context_guard}"
+        "- Instead of writing a full documentation, do a concise planning pass "
+        "for deep code research.\n"
+        f"{poi_target_line}\n"
+        "Output format:\n"
+        "- Produce ONLY a numbered markdown list (1., 2., 3., ...).\n"
+        "- Each item MUST follow this exact shape:\n"
+        "  - `N. **Short Title** — 1–2 sentences. Key files: `path`, `path` "
+        "(optional).`\n"
+        "- Requirements for `**Short Title**`:\n"
+        "  - 3–8 words (max 60 characters).\n"
+        "  - MUST be human-readable and general (no file paths, no module "
+        "names-as-titles).\n"
+        "  - MUST NOT include backticks, parentheses, slashes, or file "
+        "extensions like `.py`.\n"
+        "- If you include key files:\n"
+        "  - Put them after the 1–2 sentence summary as `Key files: ...`.\n"
+        "  - Use backticks around each path and include at most 3 files.\n"
+        "- Do not include any other sections or prose; just the numbered list.\n"
+    )
+
+
+async def _generate_hyde_plan(
     llm_manager: LLMManager | None,
     target_dir: Path,
     scope_path: Path,
@@ -142,8 +199,8 @@ async def run_code_mapper_overview_hyde(
     persist_prompt: bool = False,
     map_hyde_provider: LLMProvider | None = None,
     indexing_cfg: IndexingConfig | None = None,
-) -> tuple[str, list[CodeMapperPOI]]:
-    """Run a HyDE-style overview pass to identify points of interest."""
+) -> tuple[str, str]:
+    """Generate both raw HyDE answers without consulting the development cache."""
     hyde_cfg = HydeConfig.from_env()
 
     # Code Mapper overview should stay well below Codex CLI argv/stdin limits.
@@ -276,58 +333,17 @@ async def run_code_mapper_overview_hyde(
 
     ops_budget = _operational_poi_budget(comprehensiveness)
 
-    def _build_overview_prompt(*, scope_prompt: str, mode: str, budget: int) -> str:
-        focus = (
-            "architectural areas first"
-            if mode == "architectural"
-            else "operational workflows (setup, local run, troubleshooting) first"
-        )
-        poi_target_line = (
-            f"- Identify up to {budget} points of interest for this scoped project. "
-            f"Prioritize the most important {focus}, but you may include slightly "
-            "less critical topics to use the full budget when appropriate.\n"
-        )
-        context_guard = ""
-        if context_text:
-            context_guard = (
-                "- Use ONLY the user-provided context above; do not infer or assume "
-                "details from repository code.\n"
-            )
-        return (
-            f"{scope_prompt}\n\n"
-            "HyDE objective (override for Code Mapper):\n"
-            "- Ignore any earlier 'HyDE objective' and 'Output format' instructions "
-            "in the scope prompt.\n"
-            f"{context_guard}"
-            "- Instead of writing a full documentation, do a concise planning pass "
-            "for deep code research.\n"
-            f"{poi_target_line}\n"
-            "Output format:\n"
-            "- Produce ONLY a numbered markdown list (1., 2., 3., ...).\n"
-            "- Each item MUST follow this exact shape:\n"
-            "  - `N. **Short Title** — 1–2 sentences. Key files: `path`, `path` "
-            "(optional).`\n"
-            "- Requirements for `**Short Title**`:\n"
-            "  - 3–8 words (max 60 characters).\n"
-            "  - MUST be human-readable and general (no file paths, no module "
-            "names-as-titles).\n"
-            "  - MUST NOT include backticks, parentheses, slashes, or file "
-            "extensions like `.py`.\n"
-            "- If you include key files:\n"
-            "  - Put them after the 1–2 sentence summary as `Key files: ...`.\n"
-            "  - Use backticks around each path and include at most 3 files.\n"
-            "- Do not include any other sections or prose; just the numbered list.\n"
-        )
-
     arch_overview_prompt = _build_overview_prompt(
         scope_prompt=hyde_scope_prompt,
         mode="architectural",
         budget=max_points,
+        context_text=context_text,
     )
     ops_overview_prompt = _build_overview_prompt(
         scope_prompt=ops_hyde_scope_prompt,
         mode="operational",
         budget=ops_budget,
+        context_text=context_text,
     )
 
     # Optional debugging/traceability: when out_dir is provided and explicitly
@@ -373,6 +389,108 @@ async def run_code_mapper_overview_hyde(
     )
     if not ok:
         raise CodeMapperHyDEError(ops_overview_answer)
+
+    return arch_overview_answer, ops_overview_answer
+
+
+async def run_code_mapper_overview_hyde(
+    llm_manager: LLMManager | None,
+    target_dir: Path,
+    scope_path: Path,
+    scope_label: str,
+    meta: AgentDocMetadata | None = None,
+    context: str | None = None,
+    max_points: int = 10,
+    comprehensiveness: str = "medium",
+    out_dir: Path | None = None,
+    persist_prompt: bool = False,
+    map_hyde_provider: LLMProvider | None = None,
+    indexing_cfg: IndexingConfig | None = None,
+    audience: str = "balanced",
+    dev_cache: DevCache | None = None,
+    refresh_plan: bool = False,
+) -> tuple[str, list[CodeMapperPOI]]:
+    """Reuse an opt-in frozen plan before any scope discovery or sampling."""
+    ops_budget = _operational_poi_budget(comprehensiveness)
+    cached = None
+    identity = None
+    version = None
+    item = None
+    if dev_cache is not None and dev_cache.enabled:
+        provider = map_hyde_provider or (
+            llm_manager.get_synthesis_provider() if llm_manager else None
+        )
+        if provider is not None:
+            identity = provider_identity(provider)
+            version = key_from_parts(
+                {
+                    "objectives": [
+                        _build_overview_prompt(
+                            scope_prompt="", mode=mode, budget=0, context_text="context"
+                        )
+                        for mode in ("architectural", "operational")
+                    ],
+                    "arch": load_hyde_scope_template(mode="architectural"),
+                    "ops": load_hyde_scope_template(mode="operational"),
+                    "context": load_hyde_scope_context_template(),
+                    "max_completion_tokens": (
+                        HydeConfig.from_env().max_completion_tokens
+                    ),
+                }
+            )
+            item = {
+                "repository": str(target_dir.resolve()),
+                "scope": scope_label,
+                "comprehensiveness": comprehensiveness,
+                "max_points": max_points,
+                "ops_budget": ops_budget,
+                "audience": audience,
+                "context_sha256": (
+                    hashlib.sha256(context.encode("utf-8")).hexdigest()
+                    if context is not None
+                    else None
+                ),
+            }
+            if not refresh_plan:
+                cached = dev_cache.get(
+                    "hyde_plan",
+                    version,
+                    identity,
+                    item,
+                    validate=lambda answer: (
+                        isinstance(answer, dict)
+                        and all(
+                            isinstance(answer.get(mode), str)
+                            and bool(answer[mode].strip())
+                            for mode in ("arch", "ops")
+                        )
+                    ),
+                )
+    if cached is not None:
+        arch_overview_answer, ops_overview_answer = cached["arch"], cached["ops"]
+    else:
+        arch_overview_answer, ops_overview_answer = await _generate_hyde_plan(
+            llm_manager=llm_manager,
+            target_dir=target_dir,
+            scope_path=scope_path,
+            scope_label=scope_label,
+            meta=meta,
+            context=context,
+            max_points=max_points,
+            comprehensiveness=comprehensiveness,
+            out_dir=out_dir,
+            persist_prompt=persist_prompt,
+            map_hyde_provider=map_hyde_provider,
+            indexing_cfg=indexing_cfg,
+        )
+        if dev_cache is not None and identity is not None and version is not None:
+            dev_cache.put(
+                "hyde_plan",
+                version,
+                identity,
+                item,
+                {"arch": arch_overview_answer, "ops": ops_overview_answer},
+            )
 
     # Persist the HyDE overview plan itself (the PoI list and any surrounding
     # context) alongside the prompt when an output directory is available.

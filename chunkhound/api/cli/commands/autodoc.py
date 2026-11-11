@@ -11,6 +11,7 @@ from loguru import logger
 from chunkhound.api.cli.utils.rich_output import RichOutputFormatter
 from chunkhound.autodoc.docsite import write_astro_assets_only
 from chunkhound.core.config.config import Config
+from chunkhound.services.extraction.dev_cache import DevCache
 
 from . import autodoc_autorun as autorun
 from . import autodoc_cleanup as cleanup
@@ -68,7 +69,13 @@ async def autodoc_command(args: argparse.Namespace, config: Config) -> None:
             output_dir=output_dir,
         )
 
+        dev_cache = (
+            DevCache(config.target_dir or Path.cwd(), enabled=True)
+            if bool(getattr(args, "dev_cache", False))
+            else None
+        )
         inputs = generate.DocsiteGenerationInputs(
+            dev_cache=dev_cache,
             map_dir=map_dir,
             output_dir=output_dir,
             llm_manager=llm_manager,

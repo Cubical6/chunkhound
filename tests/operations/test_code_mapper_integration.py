@@ -96,6 +96,7 @@ async def _run_code_mapper_with_stubs(
         out_dir: Path | None = None,
         map_hyde_provider: Any | None = None,
         indexing_cfg: Any | None = None,
+        **_kwargs: Any,
     ) -> tuple[str, list[CodeMapperPOI]]:
         _ = (llm_manager, target_dir, scope_path, scope_label)
         _ = (meta, context, comprehensiveness, out_dir, map_hyde_provider, indexing_cfg)

@@ -35,6 +35,12 @@ def add_autodoc_subparser(subparsers: Any) -> argparse.ArgumentParser:
     )
 
     site_parser.add_argument(
+        "--dev-cache",
+        action="store_true",
+        help="Reuse AutoDoc LLM results from an opt-in development cache.",
+    )
+
+    site_parser.add_argument(
         "--out-dir",
         type=Path,
         required=True,

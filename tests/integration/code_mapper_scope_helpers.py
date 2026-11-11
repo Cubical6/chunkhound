@@ -83,6 +83,7 @@ def patch_code_mapper_dependencies(
         persist_prompt: bool = False,
         map_hyde_provider: Any | None = None,
         indexing_cfg: Any | None = None,
+        **_kwargs: Any,
     ) -> tuple[str, list[CodeMapperPOI]]:
         _ = (llm_manager, target_dir, scope_path, scope_label)
         _ = (
