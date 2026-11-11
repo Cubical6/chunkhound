@@ -78,6 +78,17 @@ def add_map_subparser(subparsers: Any) -> argparse.ArgumentParser:
     )
 
     map_parser.add_argument(
+        "--dev-cache",
+        action="store_true",
+        help="Reuse the HyDE plan during development, even after code changes.",
+    )
+    map_parser.add_argument(
+        "--refresh-plan",
+        action="store_true",
+        help="Generate and store a fresh HyDE plan (requires --dev-cache).",
+    )
+
+    map_parser.add_argument(
         "--audience",
         type=_parse_audience,
         default="balanced",

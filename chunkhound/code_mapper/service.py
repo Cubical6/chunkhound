@@ -26,6 +26,7 @@ from chunkhound.embeddings import EmbeddingManager
 from chunkhound.interfaces.llm_provider import LLMProvider
 from chunkhound.llm_manager import LLMManager
 from chunkhound.services.deep_research_service import run_deep_research
+from chunkhound.services.extraction.dev_cache import DevCache
 
 if TYPE_CHECKING:
     from chunkhound.api.cli.utils.tree_progress import TreeProgressDisplay
@@ -199,6 +200,9 @@ async def run_code_mapper_overview_only(
     out_dir: Path | None,
     map_hyde_provider: LLMProvider | None,
     indexing_cfg: IndexingConfig | None,
+    audience: str = "balanced",
+    dev_cache: DevCache | None = None,
+    refresh_plan: bool = False,
 ) -> tuple[str, list[CodeMapperPOI]]:
     """Run overview-only Code Mapper and return the answer + points."""
     overview_answer, points_of_interest = await run_code_mapper_overview_hyde(
@@ -212,6 +216,9 @@ async def run_code_mapper_overview_only(
         comprehensiveness=comprehensiveness,
         out_dir=out_dir,
         persist_prompt=True,
+        audience=audience,
+        dev_cache=dev_cache,
+        refresh_plan=refresh_plan,
         map_hyde_provider=map_hyde_provider,
         indexing_cfg=indexing_cfg,
     )
@@ -241,6 +248,8 @@ async def run_code_mapper_pipeline(
     poi_jobs: int | None = None,
     progress: TreeProgressDisplay | None = None,
     audience: str = "balanced",
+    dev_cache: DevCache | None = None,
+    refresh_plan: bool = False,
     log_info: Callable[[str], None] | None = None,
     log_warning: Callable[[str], None] | None = None,
     log_error: Callable[[str], None] | None = None,
@@ -256,6 +265,9 @@ async def run_code_mapper_pipeline(
         max_points=max_points,
         comprehensiveness=comprehensiveness,
         out_dir=out_dir,
+        audience=audience,
+        dev_cache=dev_cache,
+        refresh_plan=refresh_plan,
         map_hyde_provider=map_hyde_provider,
         indexing_cfg=indexing_cfg,
     )
