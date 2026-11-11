@@ -159,11 +159,11 @@ async def test_r23_element_cache_reuses_only_unchanged_items(
     assert seen == [{"Astro"}]
     seen.clear()
 
-    synthesis = LLMManager(
-        utility_config=c4_llm_manager.role_config("utility"),
-        synthesis_config={"provider": "other", "model": "other"},
+    utility = LLMManager(
+        utility_config={"provider": "other", "model": "other"},
+        synthesis_config=c4_llm_manager.role_config("synthesis"),
     )
-    await run(tmp_path, synthesis, docs)
+    await run(tmp_path, utility, docs)
     assert seen == []
     for field, value in (
         ("provider", "other"),
@@ -962,11 +962,11 @@ async def test_r23_consolidation_reuses_and_invalidates_per_kind(
     assert set(scripted.question_calls) == {"c4_group", "c4_survivor", "c4_pair"}
 
 
-@pytest.mark.parametrize("step", ["decide", "consolidate"])
+@pytest.mark.parametrize("step", ["decide", "consolidate", "tables"])
 async def test_decision_roles_control_requests_budgets_and_cache(
     tmp_path, monkeypatch, step
 ):
-    role = "synthesis" if step == "consolidate" else "utility"
+    role = "utility" if step == "tables" else "synthesis"
     other = "utility" if role == "synthesis" else "synthesis"
     selected = ScriptedLLM({"c4_element": answer})
     actor_answers(selected)
@@ -991,13 +991,28 @@ async def test_decision_roles_control_requests_budgets_and_cache(
     }
     docs = documents(tmp_path)
     state = actor_state(tmp_path)
+    if step == "tables":
+        (tmp_path / "README.md").write_text(
+            "| Service | Purpose |\n| --- | --- |\n| FableCloud | Remote API |\n"
+        )
+        docs = replace(docs, elements=[], relations=[])
+        selected.answers["c4_table"] = lambda prompt: {
+            "decisions": [
+                {"id": i["id"], "value": "service_list"} for i in decision_items(prompt)
+            ]
+        }
+        selected.answers["c4_row"] = lambda prompt: {
+            "decisions": [
+                {"id": i["id"], "value": "external"} for i in decision_items(prompt)
+            ]
+        }
 
     async def execute(settings):
         manager = LLMManager(
             utility_config=settings["utility"], synthesis_config=settings["synthesis"]
         )
         monkeypatch.setattr(manager, f"get_{other}_provider", wrong_provider)
-        if step == "decide":
+        if step != "consolidate":
             await run(tmp_path, manager, docs)
         else:
             outcome, _ = await consolidate_state(tmp_path, manager, state)
@@ -1010,6 +1025,8 @@ async def test_decision_roles_control_requests_budgets_and_cache(
     questions = (
         {"c4_group", "c4_survivor", "c4_pair"}
         if step == "consolidate"
+        else {"c4_table", "c4_row"}
+        if step == "tables"
         else {"c4_element"}
     )
     assert set(selected.question_calls) == questions
@@ -1368,6 +1385,72 @@ async def test_identity_evidence_reaches_every_question_and_invalidates_cache(
     seen.clear()
     await consolidate_state(tmp_path, manager, state)
     assert not seen
+
+
+@pytest.mark.parametrize("source", ["documentation", "configuration"])
+@pytest.mark.parametrize("named", [True, False])
+async def test_long_table_evidence_keeps_candidate_row_in_group_request(
+    tmp_path, c4_llm_manager, scripted, source, named
+):
+    from chunkhound.code_mapper.c4.curation import CurationState
+    from chunkhound.code_mapper.c4.model import Coverage, Element
+
+    header = "| Integration | Purpose |"
+    row = f"| {'fABLEcLOUD' if named else 'Remote endpoint'} | Optional text service |"
+    lines = (
+        [header, "| --- | --- |"]
+        + [f"| Other {n} | {'Unrelated service details ' * 4}|" for n in range(8)]
+        + [row]
+    )
+    assert len("\n".join(lines[:-1])) > 600
+    (tmp_path / "services.md").write_text("\n".join(lines))
+    elements = {
+        id: Element(
+            id=id,
+            kind="external",
+            name=name,
+            description=None,
+            parent=None,
+            status="documented",
+            markers=[],
+            coverage=Coverage(status="none", topics=[]),
+        )
+        for id, name in (
+            ("external:fablecloud", "FableCloud"),
+            ("external:story-api", "Story API"),
+        )
+    }
+    state = CurationState(
+        elements,
+        {},
+        [
+            Citation(
+                target="external:fablecloud",
+                file="services.md",
+                start_line=1,
+                end_line=len(lines),
+                source=source,
+                verified=True,
+            )
+        ],
+        [],
+        {id: [] for id in elements},
+    )
+    seen = []
+
+    def group(prompt):
+        members = decision_items(prompt)[0]["members"]
+        candidate = next(m for m in members if m["name"] == "FableCloud")
+        evidence = candidate["evidence"][0]
+        assert evidence["quote"] == f"{header}\n…\n{row}"
+        assert len(evidence["quote"]) <= 600
+        assert (evidence["start_line"], evidence["end_line"]) == (1, len(lines))
+        seen.append(prompt)
+        return {"groups": []}
+
+    scripted.answers["c4_group"] = group
+    await consolidate_state(tmp_path, c4_llm_manager, state)
+    assert seen
 
 
 async def test_example_context_is_separate_and_supported_provider_stays(
