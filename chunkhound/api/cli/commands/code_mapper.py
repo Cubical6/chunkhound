@@ -577,6 +577,8 @@ async def _run_full(
             logger.exception("Full error details:")
             sys.exit(1)
     _report_plan_cache(dev_cache, formatter)
+    if pipeline_result.topic_cache_report is not None:
+        formatter.info(pipeline_result.topic_cache_report)
     if not options.markdown:
         return
     output_args = copy.copy(args)
