@@ -59,7 +59,7 @@ Maximaal ~15 regels:
 ---
 
 ## Phase 1: `map --c4-only`
-- [ ] Done
+- [x] Done
 - **Depends on:** none
 - **Model:** `openai-codex/gpt-6.1-sol` / `medium`
 - **Goal:** `chunkhound map --c4-only` draait de volledige C4-analyse met een echte LLM, zonder DB- of embedding-setup, zonder HyDE en zonder topic-research. Daarna schrijft het de C4-uitvoer weg (spec §3, §10).
@@ -86,7 +86,7 @@ Maximaal ~15 regels:
   - `finish_c4` accepteert `topics=None` al (`c4/pipeline.py:762-774,817,883-890`); verander daar niets.
 
 ## Phase 2: DevCache-laag boven `DecisionStore`
-- [ ] Done
+- [x] Done
 - **Depends on:** none
 - **Model:** `openai-codex/gpt-6.1-sol` / `medium`
 - **Goal:** één kleine, herbruikbare module voor alle ontwikkelcaches. Fase 3 tot en met 5 gebruiken alleen deze module (spec §6, §10).
@@ -113,7 +113,7 @@ Maximaal ~15 regels:
 - **Notes:** geen koppeling met C4-typen. Verander het gedrag van `DecisionStore` voor C4 niet.
 
 ## Phase 3: AutoDoc-cache en `autodoc --dev-cache`
-- [ ] Done
+- [x] Done
 - **Depends on:** Phase 2
 - **Model:** `openai-codex/gpt-6.1-sol` / `medium`
 - **Goal:** met `--dev-cache` hergebruikt AutoDoc de cleanup per topic, het homepage-overzicht en de navigatie met woordenlijst (spec §4, §10).
@@ -144,7 +144,7 @@ Maximaal ~15 regels:
 - **Notes:** de interne kaartrun via `autodoc_autorun.py` hoort bij fase 6, niet bij deze fase.
 
 ## Phase 4: `map --dev-cache` voor het HyDE-plan en `--refresh-plan`
-- [ ] Done
+- [x] Done
 - **Depends on:** Phase 2
 - **Model:** `openai-codex/gpt-6.1-sol` / `medium`
 - **Goal:** met `--dev-cache` worden de ruwe HyDE-antwoorden (arch en ops) bewaard en hergebruikt, ook na codewijzigingen. `--refresh-plan` forceert een nieuw plan (spec §5.2, §10).
@@ -177,7 +177,7 @@ Maximaal ~15 regels:
 - **Notes:** de topic-cache hoort bij fase 5. Raak `_run_point_once` in deze fase niet aan.
 
 ## Phase 5: topic-cache met geldigheid op bewijsniveau
-- [ ] Done
+- [x] Done
 - **Depends on:** Phase 4
 - **Model:** `openai-codex/gpt-6.1-sol` / `high`
 - **Goal:** met `--dev-cache` wordt de research per topic hergebruikt zolang de bewijsbestanden ongewijzigd zijn (spec §5.3, §10).
@@ -211,7 +211,7 @@ Maximaal ~15 regels:
   - Kost deze fase meer dan ~150k context, stop dan en meld het. Splits niet zelf.
 
 ## Phase 6: `autodoc --dev-cache` doorgeven aan de interne kaartrun
-- [ ] Done
+- [x] Done
 - **Depends on:** Phase 3, Phase 4 (en Phase 5 voor de volledige winst)
 - **Model:** `openai-codex/gpt-6.1-terra` / `low`
 - **Goal:** `autodoc` zonder `--map-in` geeft `--dev-cache` door aan de map-run die het intern start.
@@ -254,6 +254,16 @@ Maximaal ~15 regels:
 ## Progress log
 | Date | Phase | sessionId | Commit | Notes |
 |---|---|---|---|---|
+| 2026-11-11 | 0 | `01a1cc4c` | – | onderzoek, uitkomst in spec §10 |
+| 2026-11-11 | 1 | `01a1cc58` | `55235c25` | `--c4-only`; code_mapper-tests 692 passed |
+| 2026-11-11 | 2 | `01a1cc59` | `6358a2e2` | `dev_cache.py`; extraction-tests 32 passed |
+| 2026-11-11 | 1+2 → integration | – | `b811c5bb` | merge in `map-cache/integration`; smoke 14 passed |
+| 2026-11-11 | 3 | `01a1cc86` | `4f591e26` | AutoDoc-cache; autodoc-tests 128 passed |
+| 2026-11-11 | 4 | `01a1cc88` | `3d71e624` | plan-cache + `--refresh-plan`; code_mapper-tests 703 passed |
+| 2026-11-11 | 3+4 → integration | – | `8665b317` | 877 passed (smoke, code_mapper, autodoc, extraction) |
+| 2026-11-11 | 5 | `01a1cc98` | `6fc747e1` | topic-cache; code_mapper + smoke 729 passed |
+| 2026-11-11 | 6 | `01a1cc9a` | `a71a6aa5` | autorun geeft `--dev-cache` door; autodoc + smoke 144 passed |
+| 2026-11-11 | 5+6 → integration | – | `3baf0941` | smoke 14 passed; ruff en mypy schoon op gewijzigde bestanden (repo-breed 791/991 bestaande meldingen, gelijk aan `main`) |
 
 ---
 
