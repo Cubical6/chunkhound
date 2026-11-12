@@ -121,6 +121,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B11: de elementsoorten zijn de zeven kennisklassen plus voorbeeldfeiten, met de namen uit het boek. Kennisgebied is geen element. Governance, processen, beslissingen en berichten komen niet in versie 1.
   - B12: een invulplaats heet naar het begrip (de rol) en is uniek binnen haar sjabloon. De koppeling naar het codeveld staat apart, per repository en met citatie. Een gepland element heeft nog geen koppeling.
   - B13: elke validatieregel is een eigen element met een eigen id. Verplicht en datatype zijn kenmerken van de invulplaats. §7 test ze toch, met een afgeleid id.
+  - B14: een feittype mag zonder voorbeeldfeit, behalve als een mens het op `confirmed` zet. §6 meldt een feittype zonder voorbeeldfeit als waarschuwing.
 - **Inhoud:**
   - Elementsoorten (B11):
     - begripsomschrijving (BO): term, meervoud, definitie, synoniemen;
@@ -140,7 +141,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - ~~welke elementsoorten~~ (besloten, B11);
   - ~~vorm van een zinsjabloon~~ (besloten, B12: invulplaats naar het begrip, koppeling naar het codeveld apart);
   - ~~granulariteit~~ (besloten, B13: één element per validatieregel; verplicht en datatype als kenmerk);
-  - zijn voorbeeldfeiten verplicht of optioneel per feittype;
+  - ~~zijn voorbeeldfeiten verplicht~~ (besloten, B14: alleen bij `confirmed`);
   - hoe de niveaus van de kennisdriehoek in het model terugkomen;
   - het modelbestand voor menselijke invoer (B6): naam, plek per repository, en de vorm. Een mens schrijft het niet zelf maar via Claude Code, en later via een webinterface. Het moet daarom een schema hebben dat een agent kan lezen, en een controle met precieze foutmeldingen waarmee de agent zichzelf kan verbeteren. YAML of JSON?
   - twee assen per element: wie ervoor instaat (U1) en of het in de code is gevonden (gepland of gerealiseerd);
@@ -262,6 +263,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     - elk feittype heeft een uniciteitsregel;
     - elke regel verwijst naar bestaande feittypen;
     - een zinsjabloon dekt alle invulplaatsen;
+    - een feittype zonder voorbeeldfeit is een waarschuwing (B14). Voorstel: een `confirmed` feittype zonder voorbeeldfeit is een fout; of de lader of §6 dat afdwingt, volgt in de spec;
     - elke citatie klopt nog tegen de huidige bron (zoals invariant 4 van de extractielaag).
   - Inhoudelijke conflicten:
     - dezelfde regel met een andere waarde in twee services;
