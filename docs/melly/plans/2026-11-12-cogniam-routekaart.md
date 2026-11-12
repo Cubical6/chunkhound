@@ -35,7 +35,7 @@ Regels:
 
 | § | Sectie | Hangt af van | Status | Spec | Plan |
 |---|---|---|---|---|---|
-| 0 | Kader en besluiten | – | open | n.v.t. | n.v.t. |
+| 0 | Kader en besluiten | – | ontwerp | n.v.t. | n.v.t. |
 | 1 | Metamodel en contract | 0 | open | – | – |
 | 2 | Vaste structuurextractie | 1 | open | – | – |
 | 3 | LLM-extractie | 1 (2 voor ankers) | open | – | – |
@@ -47,7 +47,12 @@ Regels:
 | 9 | MCP-ontsluiting | 8 | open | – | – |
 | 10 | Evaluatie: goudmodel en meetrun | 1 | open | – | – |
 
-Kritiek pad: §0 → §1 → §2 en §3 parallel → §4 → §6 → §7. §5, §8 en §10 lopen ernaast.
+Kritiek pad (B4): §0 → §1 → §2 en §3 parallel → §4 → §5 en §6 parallel → §7. §8 en §10 lopen ernaast.
+
+Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
+- §8 in versie 1 alleen het lockbestand, en JSON als uitvoer van §7;
+- AutoDoc-pagina's, drift en export daarna;
+- §9 (MCP) als laatste.
 
 ## Uitgangspunten (voorstel, bevestigen in §0)
 
@@ -77,16 +82,16 @@ Kritiek pad: §0 → §1 → §2 en §3 parallel → §4 → §6 → §7. §5, �
 
 ## §0 Kader en besluiten
 
-- **Status:** open
+- **Status:** ontwerp
 - **Doel:** vastleggen wat de feature oplevert en voor wie, zodat alle andere secties dezelfde koers volgen.
+- **Besloten:**
+  - B2: de eerste afnemer zijn developers die testspecificaties en regeldekking willen. Versie 1 levert minimaal kandidaat-feittypen en regels (§2, §3), modelcontroles (§6) en testspecificaties met een dekkingsrapport (§7). De AutoDoc-pagina's, export en MCP (§8, §9) volgen later. Het lockbestand uit §8 blijft wel in versie 1, vanwege U8.
+  - B3: de vaste extractie ondersteunt eerst PHP/Laravel, TypeScript/Node en Magento, plus SQL-DDL en SQL-migraties. Python en Java/Kotlin komen later.
+  - B4: versie 1 ondersteunt meerdere repositories in één model. §5 hoort bij het kritieke pad. In §1 bevat elke citatie en elke identiteit de repository.
 - **Te beslissen:**
-  1. Eerste afnemer, en daarmee de volgorde van waarde:
-     - testspecificaties en regeldekking voor developers;
-     - documentatie voor domeinexperts;
-     - export naar Cogniam-tooling;
-     - context voor coding-agents via MCP.
-  2. Eerste talen en frameworks voor §2, bijvoorbeeld SQL-DDL en migraties, PHP/Laravel, Python met Pydantic of SQLAlchemy, TypeScript, Java met JPA.
-  3. Referentiecodebases voor §10, en hoeveel van meerdere repositories in versie 1 zit.
+  1. ~~Eerste afnemer~~ (besloten, B2).
+  2. ~~Eerste talen en frameworks~~ (besloten, B3).
+  3. ~~Meerdere repositories in versie 1~~ (besloten, B4). Nog open: welke referentiecodebases §10 gebruikt. Minstens één set moet uit meerdere repositories bestaan, bijvoorbeeld een Laravel-backend met een Node-service of een Magento-shop met een losse service.
   4. CLI-vorm: meeliften op `chunkhound map` met een vlag (gedeelde research en C4), of een eigen opdracht.
   5. Valt "model als invoer" in versie 1? Dan past een developer eerst het model aan en volgen daaruit de tests voor nieuwe functionaliteit.
   6. Bevestiging of aanpassing van U1 tot en met U8.
@@ -123,16 +128,30 @@ Kritiek pad: §0 → §1 → §2 en §3 parallel → §4 → §6 → §7. §5, �
 
 - **Status:** open · **Hangt af van:** §1
 - **Doel:** kandidaat-feittypen en beperkingsregels zonder LLM afleiden uit schema's en modellen.
-- **Bronnen:**
-  - SQL-DDL en migraties: tabellen, kolommen, `PRIMARY KEY`, `UNIQUE`, `NOT NULL`, `FOREIGN KEY`, `CHECK`;
-  - ORM-modellen;
-  - dataclasses, Pydantic-modellen en validators;
-  - enums.
-- **Uitgangspunt:** `chunkhound/parsers/mappings/sql.py` en de taalmappings. Eerste onderzoeksvraag: bevatten de geïndexeerde chunks genoeg structuur, of is een eigen tree-sitter-pass nodig?
+- **Bronnen per stack (B3):**
+
+  | Stack | Feittypen | Beperkingsregels | Ook nuttig voor |
+  |---|---|---|---|
+  | SQL | `CREATE TABLE`, kolommen | `PRIMARY KEY`, `UNIQUE`, `NOT NULL`, `FOREIGN KEY`, `CHECK` | – |
+  | Laravel | Migraties (`Schema::create`, Blueprint-kolommen), Eloquent-modellen en relaties (`hasMany`, `belongsTo`) | Blueprint-modifiers (`->unique()`, `->nullable()`, `->foreign()`), validatieregels in `FormRequest::rules()` en `Validator::make` (`required\|email\|unique:users`), PHP-enums | §7: validatieregels zijn direct bruikbaar als testgevallen |
+  | TypeScript/Node | Prisma-schema, TypeORM-entities | Opties in `@Column({ unique, nullable })`, Zod-schema's (`z.string().min(1)`), enums en literal-uniontypes | – |
+  | Magento 2 | `etc/db_schema.xml` (declaratief schema), EAV-attributen in data patches (`Setup/Patch/Data/*.php`, `EavSetup::addAttribute`), service contracts (`Api/Data/*Interface.php`) | `nullable`, `length` en constraints in `db_schema.xml`; `required` en `unique` bij EAV-attributen; source models als waardebeperking; validatie in `ui_component/*.xml` | §3: `etc/events.xml` en observers voor gebeurtenisregels. §5: `etc/webapi.xml` als servicegrens |
+
+- **Bevinding (2026-11-12):**
+  - `.xml` wordt als platte tekst geïndexeerd (`chunkhound/core/types/common.py:339`).
+  - `.prisma` staat niet in de extensielijst en wordt dus niet geïndexeerd.
+  - Gevolg: §2 kan niet op de geïndexeerde chunks bouwen. Het leest de bronbestanden zelf:
+    - XML met een veilige XML-parser, zonder externe entiteiten;
+    - PHP en TypeScript met de tree-sitter-grammatica's die al meegeleverd worden;
+    - Prisma met een eigen kleine parser, of als tekst voor §3.
+- **Uitgangspunt:** `chunkhound/parsers/mappings/sql.py`, `php.py` en `typescript.py`.
 - **Te beslissen:**
-  - welke frameworks eerst (volgt uit §0);
-  - wat te doen als bronnen elkaar tegenspreken, bijvoorbeeld DDL tegenover ORM;
-  - hoe technische tabellen worden herkend (migratieadministratie, jobs, caches). De uitsluiting zelf gebeurt in §4.
+  - Magento: alleen eigen modules (`app/code`) of ook kernmodules en modules van derden in `vendor/`;
+  - Magento EAV: wordt elk attribuut een eigen feittype, of komt er één generiek feittype "entiteit heeft attribuutwaarde";
+  - TypeScript: welke ORM en welke validatiebibliotheken eerst (Prisma, TypeORM, Zod, class-validator);
+  - wat te doen als bronnen elkaar tegenspreken, bijvoorbeeld een migratie tegenover een model of `FormRequest`;
+  - de volgorde van migraties: welke migratie geeft de huidige toestand (ook bij `dropColumn` en hernoemingen);
+  - hoe technische tabellen worden herkend: migratieadministratie, jobs, caches, sessies, Magento-indexers. De uitsluiting zelf gebeurt in §4.
 - **Gereed als:**
   - de spec bevat per brontype de vertaling naar §1-elementen, met fixtures;
   - het plan heeft één fase per brontype.
