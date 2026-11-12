@@ -315,6 +315,13 @@ export const llmProviders: ConfiguratorProviderOption[] = [
         svg: OPENCODE_SVG,
         config: { provider: "opencode-cli" },
     },
+    {
+        id: "pi-cli",
+        name: "Pi CLI",
+        svg: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><text x="4" y="19" font-size="22" fill="currentColor">π</text></svg>`,
+        config: { provider: "pi-cli", model: "openai-codex/gpt-6-luna" },
+        setupHint: "# Set llm.model to a provider/id available in your pi installation",
+    },
 ];
 
 export const DEFAULT_EDITOR = "cursor";

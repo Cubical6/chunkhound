@@ -496,6 +496,7 @@ The LLM provider is used for deep code research (`chunkhound research` and the `
 |---|---|---|---|---|---|
 | Claude Code CLI | `claude-code-cli` | -- | `claude-haiku-4-5-20251001` | `claude-haiku-4-5-20251001` | Uses local Claude Code installation |
 | Codex CLI | `codex-cli` | -- | `codex` | `codex` | Uses local Codex CLI installation |
+| Pi CLI | `pi-cli` | -- | Must be set explicitly | Must be set explicitly | Uses local pi CLI as a bare model |
 | OpenCode CLI | `opencode-cli` | -- | `opencode/grok-code` | `opencode/grok-code` | Uses local OpenCode CLI installation |
 | Anthropic | `anthropic` | `CHUNKHOUND_LLM_API_KEY` | `claude-haiku-4-5-20251001` | `claude-sonnet-4-5-20250929` | Direct API access |
 | OpenAI | `openai` | `CHUNKHOUND_LLM_API_KEY` | `gpt-5-nano` | `gpt-5` | Direct API access |
@@ -527,6 +528,22 @@ Some models require reasoning and can still return empty `content` after the pay
 To reset a stale decision, delete the resolved capability cache file (default `~/.cache/chunkhound/llm-capabilities.json`, or `%LOCALAPPDATA%\ChunkHound\llm-capabilities.json` on Windows) and restart. Set `CHUNKHOUND_LLM_CAPABILITY_CACHE` to override the path. Constructing a provider does not renew a lease.
 
 On Windows, a `.cmd` or `.bat` install of Claude Code, Codex, or OpenCode runs through `cmd.exe`. A shim path that still has a space after the 8.3 short name is rejected. Arguments there cannot contain a newline, a percent sign, or a quote, and a value with no spaces cannot contain `&`, `|`, `<`, `>`, `^`, `(`, or `)`.
+
+### Pi CLI
+
+`provider: "pi-cli"` runs pi as a bare model without tools, extensions, context files, or a session. Set a model explicitly in `provider/id` format. ChunkHound uses `pi` from PATH by default; set `CHUNKHOUND_PI_BIN` to a binary name or path, such as `pi-bolt`, to use another compatible build.
+
+The `codex_reasoning_effort` setting (or its role-specific override) is passed as pi's `--thinking` option; supported values are `minimal`, `low`, `medium`, `high`, and `xhigh`. If unset, no thinking option is passed. Pi has no output-token limit flag, so `max_completion_tokens` is ignored.
+
+```json
+{
+  "llm": {
+    "provider": "pi-cli",
+    "model": "openai-codex/gpt-6-luna",
+    "codex_reasoning_effort": "low"
+  }
+}
+```
 
 ### Claude Code CLI
 

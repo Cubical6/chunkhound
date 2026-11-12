@@ -187,7 +187,7 @@ Maximaal ~15 regels:
   - `tests/code_mapper/**` noemt `opencode-cli` alleen als testdata; niet aanpassen.
 
 ## Phase 3: documentatie en opt-in integratietest
-- [ ] Done
+- [x] Done
 - **Depends on:** Phase 2
 - **Model:** `openai-codex/gpt-6.1-terra` / `low`
 - **Goal:** gebruikers vinden `pi-cli` in de docs en de configurator, en er is één integratietest tegen een echte `pi`, die standaard wordt overgeslagen.
@@ -247,6 +247,7 @@ Maximaal ~15 regels:
 | 2026-11-11 | plan | - | - | Plan geschreven op basis van metingen en pi-probes |
 | 2026-11-11 | 1 | 01a1ccc7-8736-742b-987b-d84e7c7053aa | (zie git log) | 34 contracttests groen, ruff en mypy schoon; fixtures inline in de test i.p.v. aparte bestanden |
 | 2026-11-11 | 2 | 01a1cccf-fb1c-742b-987b-d850d8170c8a | (zie git log) | 139 gerichte tests groen; geen nieuwe mypy/ruff-fouten in gewijzigde code. Bestaande `assert_never`-fout (llm_config, providers zonder tak) en E501's zijn ouder dan dit plan |
+| 2026-11-12 | 3 | 01a1ccd6-a65a-742b-987b-d8531b2932ab | (zie git log) | Docs + configurator + opt-in integratietest (skipt zonder `CHUNKHOUND_TEST_PI_MODEL`). Site-build door Claude geverifieerd: 7 pagina's gebouwd |
 
 ---
 
