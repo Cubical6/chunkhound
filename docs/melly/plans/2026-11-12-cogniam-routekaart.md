@@ -59,7 +59,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - **U1 Concept, geen volledigheid.** Elk element heeft twee eigenschappen.
   - Wie ervoor instaat: `extracted` (vast afgeleid), `proposed` (LLM) of `confirmed` (mens). Alleen een mens zet `confirmed`.
   - Of het in de code is gevonden: *gepland* (alleen als menselijke invoer in de database, B15) of *gerealiseerd* (met een citatie uit code).
-- **U2 Geen element zonder bron.** Elk element heeft minstens één bron: een citatie uit code (repository, pad, regelbereik en commit), of een record met menselijke invoer in de database van ChunkHound (B15). Hoe bij zo'n record de auteur blijkt, volgt in §1. Gewijzigd door B15; volgens B7 was dit een regel in het modelbestand, met de auteur uit Git.
+- **U2 Geen element zonder bron.** Elk element heeft minstens één bron: een citatie uit code (repository, pad, regelbereik en commit), of een record met menselijke invoer in de database van ChunkHound (B15). Zo'n record heeft een auteur (de Git-identiteit van de machine), een tijdstip en een ingang (B18). Gewijzigd door B15; volgens B7 was dit een regel in het modelbestand, met de auteur uit Git.
 - **U3 Vast gaat voor LLM.** Spreekt een LLM-uitkomst een vaste uitkomst tegen, dan wordt dat een conflict, geen vervanging.
 - **U4 Domein, geen techniek.** Technische regels (retry, cache, logging, infrastructuur) komen niet in het model, of staan er apart gemarkeerd in.
 - **U5 Opt-in zonder bijwerking.** Cogniam heeft een eigen opdracht (B5). Zonder die opdracht blijft de uitvoer van `map` en `autodoc` byte-gelijk.
@@ -125,6 +125,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B15: menselijke invoer (geplande elementen, voorbeeldfeiten, bevestigingen en correcties) staat in de database van ChunkHound. Claude Code schrijft haar via ChunkHound. Er is geen modelbestand en geen curatiebestand. Dat wijzigt B6 en U2.
   - B16: die invoer staat in eigen tabellen in de index-database (`.chunkhound/db`), niet in een apart bestand. Compactie en migraties moeten de tabellen meenemen.
   - B17: één schrijfdienst in `chunkhound/domain_model/`, met twee ingangen: een MCP-tool (als de daemon draait) en een CLI-opdracht (zonder daemon: CI, scripts, §10). Draait de daemon wel, dan geeft de CLI de bestaande lockmelding.
+  - B18: elk record met menselijke invoer krijgt een auteur, een tijdstip en de ingang. De auteur is de Git-identiteit van de machine (`user.name`, `user.email`), anders de gebruikersnaam van het besturingssysteem. Een agent kan de auteur niet invullen.
 - **Inhoud:**
   - Elementsoorten (B11):
     - begripsomschrijving (BO): term, meervoud, definitie, synoniemen;
@@ -162,7 +163,8 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
       - `--force-reindex` laat de database staan (`chunkhound/pipeline_bridge.py:890`). Alleen wie `.chunkhound/` weggooit, verliest de invoer. Dat hoort bij de vraag over delen en back-up.
     - ~~**Schrijfroute**~~ (besloten, B17: een MCP-tool én een CLI-opdracht op één schrijfdienst). Achtergrond: Claude Code schrijft via een CLI-opdracht of een MCP-tool. Een draaiende daemon (MCP) houdt de exclusieve lock op de index-database, en de CLI weigert dan (`chunkhound/api/cli/commands/run.py:134`, `_handle_daemon_lock_conflict`). Dat geldt vandaag ook voor `map`, dat de database zelf opent (`chunkhound/api/cli/commands/code_mapper.py:499`). Geen CLI-opdracht stuurt werk door naar de daemon. De daemon spreekt MCP over een socket (`chunkhound/daemon/server.py:305`). MCP komt volgens B2 als laatste (§9).
     - **Controle bij het schrijven.** Een schema dat een agent kan lezen, en precieze foutmeldingen waarmee de agent zichzelf kan verbeteren.
-    - **Auteur en tijdstip** per record (U2), nu Git die niet meer levert.
+    - ~~**Auteur en tijdstip** per record (U2)~~ (besloten, B18: de Git-identiteit van de machine, met tijdstip en ingang).
+    - **Wie `confirmed` zet.** Volgens U1 zet alleen een mens `confirmed`. Via de MCP-tool (B17) schrijft echter een agent. Hoe blijkt dat een mens bevestigde? Tijdens een Claude Code-sessie draait de daemon, dus bevestigen alleen via de CLI kan dan niet.
     - **Delen en back-up.** De invoer staat per machine (B15). Hoe krijgen collega's en CI haar, en hoe maakt een mens een back-up? Bijvoorbeeld met een export en een import;
   - twee assen per element: wie ervoor instaat (U1) en of het in de code is gevonden (gepland of gerealiseerd);
   - de Engelse termen en de woordenlijst Nederlands–Engels (B8) voor de zeven kennisklassen en het voorbeeldfeit. Liefst de termen die de Engelstalige CogNIAM-literatuur zelf gebruikt.
