@@ -205,7 +205,13 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - Koppeling van feittype aan C4-element: welke container is bron of eigenaar.
   - API-schema's als grens: OpenAPI, AsyncAPI, protobuf, eventschema's.
   - Hetzelfde begrip in meerdere services.
-- **Eerste stap:** nagaan hoe C4 nu met meerdere repositories omgaat. Dat is nog niet van begin tot eind getest.
+- **Bevinding (2026-11-12, uit de code gelezen, niet gedraaid):** ChunkHound werkt met meerdere repositories via een hoofdmap.
+  - Er is één index per hoofdmap (`config.target_dir`). Meerdere losse indexen samenvoegen kan niet.
+  - Onder de hoofdmap wordt elke Git-repository herkend aan een `.git`-map of -bestand (`chunkhound/utils/ignore_engine.py:246`). Submodules en worktrees vallen daar dus ook onder. De hoofdmap hoeft zelf geen repository te zijn.
+  - Elke repository is een grens voor `.gitignore`-regels: regels van de bovenliggende map gelden er niet (`ignore_engine.py:345`, `:378`). De bestanden worden per repository opgehaald (`services/indexing_coordinator.py:2468-2481`).
+  - `search` en `code_research` kunnen met `path` tot één repository beperkt worden (`mcp_server/tools.py:676`, `:793`).
+  - C4 wijst elk pad toe aan de diepste repository op zijn route (`repository_lookup`, `c4/contract.py:498`). Per repository legt het een eigen HEAD-commit en remote vast (`with_git_data`, `:601`; `:588`).
+- **Eerste stap:** een `map`-run op een hoofdmap met twee of meer repositories, om te zien of C4 dit van begin tot eind goed doet.
 - **Te beslissen:**
   - hoe repositories worden aangeleverd: één index met meerdere roots, of meerdere indexen;
   - of API-schema's in versie 1 in scope zijn;
