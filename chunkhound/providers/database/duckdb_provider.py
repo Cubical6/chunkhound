@@ -1216,7 +1216,7 @@ class DuckDBProvider(SerialDatabaseProvider):
 
     def _compact_copy_data(
         self, backup_path: Path, compacted_path: Path, state: dict[str, Any]
-    ) -> tuple[list[tuple[str]], bool]:
+    ) -> tuple[list[tuple[str]], list[dict[str, Any]]]:
         """Step 3: rebuild the compacted DB from ChunkHound-owned canonical tables.
 
         Compaction intentionally preserves only the canonical ChunkHound schema:
@@ -1225,10 +1225,10 @@ class DuckDBProvider(SerialDatabaseProvider):
         not a generic DuckDB passthrough.
 
         HNSW indexes are NOT created during copy — they are rebuilt eagerly
-        after the atomic swap in ``_compact_finalize`` only if the original DB
-        had HNSW indexes before compaction began (``had_hnsw`` flag).
+        after the atomic swap in ``_compact_finalize`` using the original
+        descriptors, including their verified metrics.
 
-        Returns (embedding_table_names, had_hnsw).
+        Returns (embedding_table_names, original_indexes).
         """
         tgt_conn = duckdb.connect(str(compacted_path))
         try:
@@ -1271,13 +1271,8 @@ class DuckDBProvider(SerialDatabaseProvider):
             # Compaction only restores HNSW when the pre-compaction source DB
             # had one, so a false negative here would silently degrade search.
             # Treat source-catalog discovery as fatal instead of best-effort.
-            had_hnsw = (
-                len(
-                    self._executor_get_existing_vector_indexes_from_catalog(
-                        tgt_conn, catalog="src", fail_on_error=True
-                    )
-                )
-                > 0
+            original_indexes = self._executor_get_existing_vector_indexes_from_catalog(
+                tgt_conn, catalog="src", fail_on_error=True
             )
 
             tgt_conn.execute(
@@ -1353,7 +1348,7 @@ class DuckDBProvider(SerialDatabaseProvider):
                     )
 
             tgt_conn.execute("CHECKPOINT")
-            return emb_tables, had_hnsw
+            return emb_tables, original_indexes
         finally:
             tgt_conn.close()
 
@@ -1364,7 +1359,7 @@ class DuckDBProvider(SerialDatabaseProvider):
         compacted_path: Path,
         backup_path: Path,
         original_size: int,
-        had_hnsw: bool,
+        original_indexes: list[dict[str, Any]],
         _t0: float,
     ) -> int:
         """Steps 4-8: atomic swap, reconnect, restore indexes, cleanup.
@@ -1390,8 +1385,8 @@ class DuckDBProvider(SerialDatabaseProvider):
         # Only recreate HNSW if the original DB had it before compaction.
         # During batch CLI indexing, HNSW is dropped at the start (bookends)
         # and intermediate compactions must not recreate it mid-pipeline.
-        if had_hnsw:
-            self._executor_ensure_all_hnsw_indexes(new_conn, state)
+        for index_info in original_indexes:
+            self._executor_recreate_vector_index_from_info(new_conn, state, index_info)
 
         backup_path.unlink(missing_ok=True)
 
@@ -1486,13 +1481,13 @@ class DuckDBProvider(SerialDatabaseProvider):
         backup_path = db_path.with_suffix(db_path.suffix + ".compact_backup")
         compacted_path = db_path.with_suffix(db_path.suffix + ".compact_new")
         original_size = 0
-        had_hnsw = False
+        original_indexes: list[dict[str, Any]] = []
 
         try:
             original_size = self._compact_prepare(
                 conn, state, db_path, backup_path, compacted_path
             )
-            _, had_hnsw = self._compact_copy_data(
+            _, original_indexes = self._compact_copy_data(
                 backup_path, compacted_path, state
             )
             return self._compact_finalize(
@@ -1501,7 +1496,7 @@ class DuckDBProvider(SerialDatabaseProvider):
                 compacted_path,
                 backup_path,
                 original_size,
-                had_hnsw,
+                original_indexes,
                 _t0,
             )
         except Exception as e:
@@ -1509,7 +1504,7 @@ class DuckDBProvider(SerialDatabaseProvider):
             try:
                 self._compact_restore(
                     backup_path, compacted_path, db_path, state,
-                    had_hnsw=had_hnsw,
+                    had_hnsw=bool(original_indexes),
                 )
             except Exception as restore_err:
                 log_if_not_mcp(
@@ -2106,7 +2101,9 @@ class DuckDBProvider(SerialDatabaseProvider):
         DuckDB strips the ``WITH (metric = '...')`` clause from
         ``duckdb_indexes().sql``, so we cannot recover the metric from
         the CREATE INDEX DDL.  ``pragma_hnsw_index_info()`` returns the
-        live metric regardless.  The pragma scans ALL attached catalogs
+        live metric regardless. If unavailable, only a builder-format name
+        encoding a supported metric is accepted; otherwise discovery fails.
+        The pragma scans ALL attached catalogs
         (not just ``main``), so it works correctly during compaction when
         the backup DB is ATTACHed as ``src``.
         """
@@ -2116,12 +2113,28 @@ class DuckDBProvider(SerialDatabaseProvider):
                 [index_name],
             ).fetchone()
             if row:
-                return str(row[0])
-        except Exception:
-            logger.debug(
-                f"Could not query HNSW metric for {index_name}, defaulting to cosine"
+                return self._normalize_hnsw_metric(str(row[0]))
+            cause: Exception = RuntimeError("pragma_hnsw_index_info() returned no row")
+        except Exception as error:
+            cause = error
+
+        # Only builder-format names encode a verified metric. Standard
+        # idx_hnsw_<dims> names (and arbitrary names) carry no such information.
+        match = re.fullmatch(
+            r"hnsw_[A-Za-z_][A-Za-z0-9_]*_[A-Za-z_][A-Za-z0-9_]*_[0-9]+_([a-z0-9]+)",
+            index_name,
+        )
+        if match and match.group(1) in self._SUPPORTED_HNSW_METRICS:
+            metric = self._normalize_hnsw_metric(match.group(1))
+            logger.warning(
+                f"Could not query HNSW metric for {index_name}: {cause}; "
+                f"using name-encoded metric {metric}"
             )
-        return "cosine"
+            return metric
+        raise DatabaseError(
+            operation="read HNSW metric",
+            reason=f"Cannot determine metric for index {index_name!r}: {cause}",
+        ) from cause
 
     def _extract_custom_hnsw_identity(
         self, index_name: str
@@ -2222,7 +2235,7 @@ class DuckDBProvider(SerialDatabaseProvider):
 
         except Exception as e:
             logger.error(f"Failed to get existing vector indexes: {e}")
-            return []
+            raise
 
     def _executor_get_existing_vector_indexes_from_catalog(
         self,
@@ -2289,6 +2302,9 @@ class DuckDBProvider(SerialDatabaseProvider):
                 )
 
             return indexes
+        except DatabaseError:
+            # Unknown metrics must never masquerade as an empty catalog.
+            raise
         except Exception as e:
             msg = f"Failed to get existing vector indexes from catalog {catalog}: {e}"
             if fail_on_error:

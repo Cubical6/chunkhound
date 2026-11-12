@@ -1295,7 +1295,8 @@ class TestHNSWCatalogAwareContracts:
             db.compact_database()
 
             remaining_indexes = _fetch_index_names(db.db_path)
-            assert "idx_hnsw_3" in remaining_indexes
+            assert "alt_live_idx" in remaining_indexes
+            assert "idx_hnsw_3" not in remaining_indexes
         finally:
             db.disconnect()
 
@@ -3299,5 +3300,85 @@ def test_non_cosine_hnsw_metric_survives_index_rebuild(
         after = [i for i in db.get_existing_vector_indexes() if i["index_name"] == "idx_hnsw_3"]
         assert len(after) == 1
         assert after[0]["metric"] == "l2sq"
+    finally:
+        db.disconnect()
+
+
+@pytest.mark.parametrize("metric", ["l2sq", "ip"])
+@pytest.mark.parametrize("custom_name", [True, False], ids=["encoded", "standard"])
+@pytest.mark.parametrize("pragma_failure", ["error", "no_row"])
+@pytest.mark.parametrize("operation", ["delete", "compact"])
+def test_unreadable_non_cosine_metric_never_silently_changes_on_rebuild(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    metric: str,
+    custom_name: bool,
+    pragma_failure: str,
+    operation: str,
+) -> None:
+    """Rebuilds preserve a verified metric or fail with the original index intact."""
+    db = DuckDBProvider(tmp_path / "unreadable_metric.duckdb", base_directory=tmp_path)
+    db.connect()
+    try:
+        _, chunk_id = _seed_embedding_dims_3(db)
+        _seed_embedding_dims_3(db, "survivor.py")
+        if "idx_hnsw_3" not in _fetch_index_names(db.db_path):
+            pytest.skip("DuckDB HNSW indexes are unavailable in this environment")
+        db.execute_query("DROP INDEX idx_hnsw_3", [])
+        index_name = (
+            f"hnsw_test_model_with_underscores_3_{metric}"
+            if custom_name else "idx_hnsw_3"
+        )
+        db.execute_query(
+            f"CREATE INDEX {index_name} ON embeddings_3 USING HNSW (embedding) "
+            f"WITH (metric = '{metric}')",
+            [],
+        )
+
+        class UnreadableMetricConnection:
+            """Inject only the external pragma failure; all other SQL stays real."""
+
+            def __init__(self, conn: Any) -> None:
+                self.conn = conn
+
+            def execute(self, sql: str, params: Any = None) -> Any:
+                if "pragma_hnsw_index_info()" in sql:
+                    if pragma_failure == "error":
+                        raise duckdb.CatalogException("HNSW metric pragma unavailable")
+                    return SimpleNamespace(fetchone=lambda: None)
+                return self.conn.execute(sql, params)
+
+        extract_metric = db._extract_hnsw_metric
+        # Wrap only the connection at the metric-query boundary, including the
+        # attached source-catalog connection used by compaction.
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                db,
+                "_extract_hnsw_metric",
+                lambda conn, name: extract_metric(
+                    UnreadableMetricConnection(conn), name
+                ),
+            )
+            if custom_name:
+                if operation == "compact":
+                    db.compact_database()
+                else:
+                    db.delete_chunks_batch([chunk_id])
+            else:
+                cause = "pragma unavailable" if pragma_failure == "error" else "no row"
+                with pytest.raises(DatabaseError, match=f"{index_name}.*{cause}"):
+                    if operation == "compact":
+                        db.compact_database()
+                    else:
+                        db.delete_chunks_batch([chunk_id])
+
+        indexes = db.get_existing_vector_indexes()
+        assert [(i["index_name"], i["metric"]) for i in indexes] == [
+            (index_name, metric)
+        ]
+        expected_chunks = 1 if custom_name and operation == "delete" else 2
+        assert (
+            _fetch_scalar(db.db_path, "SELECT COUNT(*) FROM chunks") == expected_chunks
+        )
     finally:
         db.disconnect()
