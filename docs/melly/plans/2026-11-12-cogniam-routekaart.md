@@ -58,8 +58,8 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 
 - **U1 Concept, geen volledigheid.** Elk element heeft twee eigenschappen.
   - Wie ervoor instaat: `extracted` (vast afgeleid), `proposed` (LLM) of `confirmed` (mens). Alleen een mens zet `confirmed`.
-  - Of het in de code is gevonden: *gepland* (alleen in het modelbestand) of *gerealiseerd* (met een citatie uit code).
-- **U2 Geen element zonder bron.** Elk element heeft minstens één bron: een citatie uit code (repository, pad, regelbereik en commit), of een regel in het modelbestand. Bij een regel in het modelbestand blijkt de auteur uit Git.
+  - Of het in de code is gevonden: *gepland* (alleen als menselijke invoer in de database, B15) of *gerealiseerd* (met een citatie uit code).
+- **U2 Geen element zonder bron.** Elk element heeft minstens één bron: een citatie uit code (repository, pad, regelbereik en commit), of een record met menselijke invoer in de database van ChunkHound (B15). Hoe bij zo'n record de auteur blijkt, volgt in §1. Gewijzigd door B15; volgens B7 was dit een regel in het modelbestand, met de auteur uit Git.
 - **U3 Vast gaat voor LLM.** Spreekt een LLM-uitkomst een vaste uitkomst tegen, dan wordt dat een conflict, geen vervanging.
 - **U4 Domein, geen techniek.** Technische regels (retry, cache, logging, infrastructuur) komen niet in het model, of staan er apart gemarkeerd in.
 - **U5 Opt-in zonder bijwerking.** Cogniam heeft een eigen opdracht (B5). Zonder die opdracht blijft de uitvoer van `map` en `autodoc` byte-gelijk.
@@ -92,7 +92,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B3: de vaste extractie ondersteunt eerst PHP/Laravel, TypeScript/Node en Magento, plus SQL-DDL en SQL-migraties. Python en Java/Kotlin komen later.
   - B4: versie 1 ondersteunt meerdere repositories in één model. §5 hoort bij het kritieke pad. In §1 bevat elke citatie en elke identiteit de repository.
   - B5: Cogniam krijgt een eigen opdracht (naam: zie B8). Net als `autodoc` leest de opdracht bestaande `map`-uitvoer, als die er is. Zonder C4-uitvoer vervalt alleen de koppeling met C4 (§5). Hoort de C4-uitvoer bij een andere commit, dan meldt de opdracht dat. `map` blijft ongewijzigd.
-  - B6: een mens geeft invoer via Claude Code, later ook via een webinterface. Het model is in versie 1 ook invoer: geplande feittypen en regels staan in een modelbestand in de repository. ChunkHound leest dat bestand als bron en schrijft er nooit in. Een element uit dat bestand zonder citatie uit code is *gepland*, met zo'n citatie *gerealiseerd*. Dat werkt net als `documented` tegenover `found` bij C4. Een lezer voor het COGNiam-dossier (`.cogniam/`) komt na versie 1. Onderbouwing: [onderzoek](../research/2026-11-12-cogniam-model-als-invoer.md).
+  - B6: een mens geeft invoer via Claude Code, later ook via een webinterface. Het model is in versie 1 ook invoer: geplande feittypen en regels staan in een modelbestand in de repository. ChunkHound leest dat bestand als bron en schrijft er nooit in. Een element uit dat bestand zonder citatie uit code is *gepland*, met zo'n citatie *gerealiseerd*. Dat werkt net als `documented` tegenover `found` bij C4. Een lezer voor het COGNiam-dossier (`.cogniam/`) komt na versie 1. Onderbouwing: [onderzoek](../research/2026-11-12-cogniam-model-als-invoer.md). **Gewijzigd door B15:** er is geen modelbestand. De menselijke invoer staat in de database van ChunkHound, en ChunkHound schrijft haar zelf, in opdracht van Claude Code. Gepland tegenover gerealiseerd blijft gelden.
   - B8: de opdracht heet `chunkhound domain <hoofdmap>`, de module `chunkhound/domain_model/`. Code, JSON-sleutels en CLI-uitvoer zijn Engels, en de docs krijgen een woordenlijst Nederlands–Engels. "CogNIAM" komt alleen voor in de docs en in de latere export naar het dossier.
   - B9: het goudmodel voor §10 is de praktijkcasus Micromundo uit het CogNIAM-boek (microleningen). Code voor Micromundo bestaat nog niet. §10 schrijft daarom een referentie-implementatie, verdeeld over minstens twee repositories.
   - B10: alleen het CogNIAM-boek bepaalt de methodiek. melly en melly-slim zijn geen voorbeeld voor het metamodel, het goudmodel of de conventies. Het v4-dossier telt alleen voor de latere export en de dossierlezer.
@@ -101,7 +101,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   2. ~~Eerste talen en frameworks~~ (besloten, B3).
   3. ~~Meerdere repositories in versie 1~~ (besloten, B4). ~~Referentiecodebases voor §10~~ (besloten, B9: Micromundo; de verdere uitwerking staat in §10).
   4. ~~CLI-vorm~~ (besloten, B5: eigen opdracht).
-  5. ~~Model als invoer in versie 1~~ (besloten, B6: beperkt, via een modelbestand; dossierlezer later).
+  5. ~~Model als invoer in versie 1~~ (besloten, B6: beperkt; dossierlezer later. B15: de invoer staat in de database, niet in een modelbestand).
   6. ~~Bevestiging van U1 tot en met U8~~ (besloten, B7).
   7. ~~Naamgeving in code en uitvoer~~ (besloten, B8: `chunkhound domain`, Engelse termen).
 - **Gereed als:** de besluiten staan in het log en deze routekaart is bijgewerkt: scope, volgorde en de vragen per sectie. §0 krijgt geen spec en geen plan.
@@ -122,6 +122,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B12: een invulplaats heet naar het begrip (de rol) en is uniek binnen haar sjabloon. De koppeling naar het codeveld staat apart, per repository en met citatie. Een gepland element heeft nog geen koppeling.
   - B13: elke validatieregel is een eigen element met een eigen id. Verplicht en datatype zijn kenmerken van de invulplaats. §7 test ze toch, met een afgeleid id.
   - B14: een feittype mag zonder voorbeeldfeit, behalve als een mens het op `confirmed` zet. §6 meldt een feittype zonder voorbeeldfeit als waarschuwing.
+  - B15: menselijke invoer (geplande elementen, voorbeeldfeiten, bevestigingen en correcties) staat in de database van ChunkHound. Claude Code schrijft haar via ChunkHound. Er is geen modelbestand en geen curatiebestand. Dat wijzigt B6 en U2.
 - **Inhoud:**
   - Elementsoorten (B11):
     - begripsomschrijving (BO): term, meervoud, definitie, synoniemen;
@@ -137,18 +138,36 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     - de twee assen van U1.
   - Stabiele identiteiten tussen runs. Les uit C4: bestandsnamen en URL's zijn geen stabiele identiteit.
   - Een JSON-contract met schemaversie, en een lader die de vorm bepaalt (patroon `autodoc/architecture/loader.py`).
+  - Opslag van menselijke invoer in de database (B15), met schrijfopdrachten die de invoer controleren.
 - **Te beslissen:**
   - ~~welke elementsoorten~~ (besloten, B11);
   - ~~vorm van een zinsjabloon~~ (besloten, B12: invulplaats naar het begrip, koppeling naar het codeveld apart);
   - ~~granulariteit~~ (besloten, B13: één element per validatieregel; verplicht en datatype als kenmerk);
   - ~~zijn voorbeeldfeiten verplicht~~ (besloten, B14: alleen bij `confirmed`);
-  - hoe de niveaus van de kennisdriehoek in het model terugkomen;
-  - het modelbestand voor menselijke invoer (B6): naam, plek per repository, en de vorm. Een mens schrijft het niet zelf maar via Claude Code, en later via een webinterface. Het moet daarom een schema hebben dat een agent kan lezen, en een controle met precieze foutmeldingen waarmee de agent zichzelf kan verbeteren. YAML of JSON?
+  - hoe de niveaus van de kennisdriehoek in het model terugkomen. **Voorstel**, volgens het boek (p.5, figuur 1.1); geen besluit van de gebruiker:
+    - niveau I zijn de voorbeeldfeiten;
+    - niveau II zijn de elementen van het model;
+    - niveau III, de generieke regelgeving ("van een feittype wordt genoteerd welke variabele op welke positie staat"), is het schema van het contract met de controles van de lader en §6.
+
+    Er komt dus geen veld `level` per element;
+  - ~~het modelbestand voor menselijke invoer~~ (besloten, B15: geen bestand; de invoer staat in de database). Daaruit volgen deze vragen:
+    - **Waar in de database.** Bevindingen in de code:
+      - De compactie gooit onbekende tabellen weg, met opzet. Dat geldt voor de Python-route (`chunkhound/providers/database/duckdb_provider.py:1217`, `_compact_copy_data`) en voor de Rust-route (`src/db/duckdb_backend/compaction.rs:23`). Die kopiëren alleen `schema_version`, `files`, `chunks` en `embeddings_*`.
+      - Compactie draait ook vanzelf: na een schrijfactie start ze met een kans van 1 op 100 (`chunkhound/providers/database/serial_executor.py:49` en `:106`).
+      - Bij het openen verwijdert ChunkHound een WAL-bestand dat ouder is dan 24 uur (`duckdb_provider.py:530`).
+      - ChunkHound heeft een tweede backend, LanceDB (`chunkhound/providers/database/lancedb_provider.py`).
+
+      Eigen tabellen in de index-database gaan dus bij gewoon indexeren verloren, tenzij beide compacties, de migraties en LanceDB ze meenemen. Het alternatief is een eigen databasebestand voor menselijke invoer in `.chunkhound/`, los van de index.
+    - **Schrijfroute.** Claude Code schrijft via een CLI-opdracht of een MCP-tool. Een draaiende daemon (MCP) houdt de exclusieve lock op de index-database, en de CLI weigert dan (`chunkhound/api/cli/commands/run.py:134`, `_handle_daemon_lock_conflict`). MCP komt volgens B2 als laatste (§9).
+    - **Controle bij het schrijven.** Een schema dat een agent kan lezen, en precieze foutmeldingen waarmee de agent zichzelf kan verbeteren.
+    - **Auteur en tijdstip** per record (U2), nu Git die niet meer levert.
+    - **Delen en back-up.** De invoer staat per machine (B15). Hoe krijgen collega's en CI haar, en hoe maakt een mens een back-up? Bijvoorbeeld met een export en een import;
   - twee assen per element: wie ervoor instaat (U1) en of het in de code is gevonden (gepland of gerealiseerd);
   - de Engelse termen en de woordenlijst Nederlands–Engels (B8) voor de zeven kennisklassen en het voorbeeldfeit. Liefst de termen die de Engelstalige CogNIAM-literatuur zelf gebruikt.
 - **Gereed als:**
-  - de spec bevat dataclasses, een JSON-voorbeeld, een voorbeeld van het modelbestand, identiteitsregels en laadfouten;
-  - het plan heeft fasen voor model, lader en contracttests.
+  - de spec bevat dataclasses, een JSON-voorbeeld, identiteitsregels en laadfouten;
+  - de spec bevat ook de opslag van menselijke invoer (B15): de tabellen, de schrijfopdrachten met een voorbeeld en hun foutmeldingen, en hoe de invoer compactie, herindexering en upgrades overleeft;
+  - het plan heeft fasen voor model, lader, opslag van menselijke invoer en contracttests.
 
 ## §2 Vaste structuurextractie
 
@@ -221,9 +240,9 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - **Uitgangspunt:** C4 `merge.py`, `consolidation.py`, `identity.py`, `curation.py` en `decisions.py`. Dat laatste bestand slaat LLM-beslissingen op via `DecisionStore`.
 - **Te beslissen:**
   - welke beslissingen vast gebeuren (op naam of structuur) en welke via de LLM;
-  - hoe menselijke correcties (bevestigd, verworpen, samengevoegd) worden opgeslagen, zodat ze een nieuwe run overleven, bijvoorbeeld in een curatiebestand;
-  - of een bevestigd element verhuist naar het modelbestand (B6), zodat alle kennis waar een mens voor instaat op één plek in Git staat, of als oordeel in het curatiebestand blijft;
-  - hoe een gepland element uit het modelbestand wordt gekoppeld aan de code die het later implementeert.
+  - hoe menselijke correcties (bevestigd, verworpen, samengevoegd) in de database staan (B15), zodat ze een nieuwe run overleven, ook als de gevonden elementen een andere vorm krijgen;
+  - of een bevestiging een oordeel blijft over een gevonden element, of het element als menselijke invoer opslaat, zodat alle kennis waar een mens voor instaat op één plek staat;
+  - hoe een gepland element uit de menselijke invoer wordt gekoppeld aan de code die het later implementeert.
 - **Gereed als:**
   - de spec bevat de regels voor samenvoegen, de opslag van correcties en het gedrag bij een conflict;
   - het plan heeft fasen voor vaste consolidatie, LLM-beslissingen en curatie.
@@ -356,7 +375,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     - bijlage B (begrippenlijst), C (regelgevingdiagram) en D (gestructureerd Nederlands).
     De OCR van het boek is niet gecorrigeerd, dus elk item krijgt een paginabron en wordt tegen de scan gecontroleerd. Melly heeft al een afgeleid register en dossier van deze casus. Die zijn volgens B10 geen bron.
   - Een referentie-implementatie van Micromundo in de stacks van B3, verdeeld over minstens twee repositories (B4). Code die het model implementeert, bestaat nog niet.
-  - Precisie en recall per elementsoort, alleen over de items die de referentie-implementatie echt bevat. Items die alleen in het modelbestand staan, testen de as gepland/gerealiseerd van U1.
+  - Precisie en recall per elementsoort, alleen over de items die de referentie-implementatie echt bevat. Items die alleen als menselijke invoer bestaan, testen de as gepland/gerealiseerd van U1. De meting schrijft die items daarom eerst via de schrijfopdrachten van §1 in een lege database (B15).
   - Eén providerrun, alleen met toestemming van de gebruiker.
 - **Te beslissen:**
   - de verdeling over repositories. De casus vormt één samenhangend vocabulaire, dus een splitsing per deelgebied is kunstmatig. Een splitsing per laag ligt meer voor de hand, bijvoorbeeld een Laravel-backend voor aanvraag, lening en aflossing (met migraties) en een TypeScript/Node-service voor investeerders of betalingen;
@@ -376,7 +395,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - Koppeling aan wetgeving en beleid. Kan alleen als die documenten mee geïndexeerd zijn; later.
 - Testcode genereren in doelrepositories (U7).
 - Grafische feittypediagrammen in ORM-notatie.
-- Een webinterface voor menselijke invoer (B6). Die volgt later en leest en schrijft hetzelfde modelbestand. Het is nog niet besloten of dat een eigen interface wordt of de browser van de COGNiam-toolkit.
+- Een webinterface voor menselijke invoer (B6). Die volgt later en leest en schrijft dezelfde menselijke invoer in de database (B15). Het is nog niet besloten of dat een eigen interface wordt of de browser van de COGNiam-toolkit.
 - Een lezer voor het COGNiam-dossier (`.cogniam/`, alleen-lezen) als tweede bron (B6).
 - Het COGNiam-dossier als bron van waarheid waartegen de code wordt getoetst.
 

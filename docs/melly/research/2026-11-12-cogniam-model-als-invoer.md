@@ -2,6 +2,8 @@
 
 Vastgelegd op 2026-11-12 als onderbouwing van [B6](../decisions/2026-11-12-cogniam-model.md). Dit is een bronnenoverzicht, geen spec. Bron, interpretatie en voorstel zijn gescheiden. De citaten zijn op 2026-11-12 in de genoemde bestanden nagelezen.
 
+> **Achterhaald op één punt (B15):** dit onderzoek adviseert een modelbestand in Git. De gebruiker koos in §1, vraag 5 voor de database van ChunkHound als bron van menselijke invoer. Dat het model in versie 1 ook invoer is, blijft gelden.
+
 ## Vraag
 
 Moet versie 1 het model ook als invoer accepteren? Dan voegt een mens eerst een gepland feittype of een geplande regel toe, en volgen de testspecificaties voordat de code bestaat. Het alternatief is dat versie 1 het model alleen uit code afleidt.
