@@ -90,12 +90,13 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B3: de vaste extractie ondersteunt eerst PHP/Laravel, TypeScript/Node en Magento, plus SQL-DDL en SQL-migraties. Python en Java/Kotlin komen later.
   - B4: versie 1 ondersteunt meerdere repositories in één model. §5 hoort bij het kritieke pad. In §1 bevat elke citatie en elke identiteit de repository.
   - B5: Cogniam krijgt een eigen opdracht, met werknaam `chunkhound model <hoofdmap>`. Net als `autodoc` leest de opdracht bestaande `map`-uitvoer, als die er is. Zonder C4-uitvoer vervalt alleen de koppeling met C4 (§5). Hoort de C4-uitvoer bij een andere commit, dan meldt de opdracht dat. `map` blijft ongewijzigd.
+  - B6: een mens geeft invoer via Claude Code, later ook via een webinterface. Het model is in versie 1 ook invoer: geplande feittypen en regels staan in een modelbestand in de repository. ChunkHound leest dat bestand als bron en schrijft er nooit in. Een element uit dat bestand zonder citatie uit code is *gepland*, met zo'n citatie *gerealiseerd*. Dat werkt net als `documented` tegenover `found` bij C4. Een lezer voor het COGNiam-dossier (`.cogniam/`) komt na versie 1. Onderbouwing: [onderzoek](../research/2026-11-12-cogniam-model-als-invoer.md).
 - **Te beslissen:**
   1. ~~Eerste afnemer~~ (besloten, B2).
   2. ~~Eerste talen en frameworks~~ (besloten, B3).
   3. ~~Meerdere repositories in versie 1~~ (besloten, B4). Nog open: welke referentiecodebases §10 gebruikt. Minstens één set moet uit meerdere repositories bestaan, bijvoorbeeld een Laravel-backend met een Node-service of een Magento-shop met een losse service.
   4. ~~CLI-vorm~~ (besloten, B5: eigen opdracht).
-  5. Valt "model als invoer" in versie 1? Dan past een developer eerst het model aan en volgen daaruit de tests voor nieuwe functionaliteit.
+  5. ~~Model als invoer in versie 1~~ (besloten, B6: beperkt, via een modelbestand; dossierlezer later).
   6. Bevestiging of aanpassing van U1 tot en met U8.
   7. Naamgeving in code en uitvoer: Nederlandse of Engelse termen, `cogniam` of een neutrale naam zoals `knowledge`.
 - **Gereed als:** de besluiten staan in het log en deze routekaart is bijgewerkt: scope, volgorde en de vragen per sectie. §0 krijgt geen spec en geen plan.
@@ -121,9 +122,12 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - granulariteit: één regel per beperking, of beperkingen gegroepeerd per feittype;
   - vorm van een verwoording: een zin met rolplaatsen (FCO-IM-stijl) of vrije tekst;
   - zijn voorbeeldfeiten verplicht of optioneel per feittype;
-  - hoe de niveaus van de kennisdriehoek in het model terugkomen.
+  - hoe de niveaus van de kennisdriehoek in het model terugkomen;
+  - het modelbestand voor menselijke invoer (B6): naam, plek per repository, en de vorm. Een mens schrijft het niet zelf maar via Claude Code, en later via een webinterface. Het moet daarom een schema hebben dat een agent kan lezen, en een controle met precieze foutmeldingen waarmee de agent zichzelf kan verbeteren. YAML of JSON?
+  - twee assen per element: wie ervoor instaat (U1) en of het in de code is gevonden (gepland of gerealiseerd);
+  - vertaling van de statussen naar het COGNiam-dossier: `extracted`/`proposed` → `hypothesis`, `confirmed` → `validated` (zie [onderzoek](../research/2026-11-12-cogniam-model-als-invoer.md)).
 - **Gereed als:**
-  - de spec bevat dataclasses, een JSON-voorbeeld, identiteitsregels en laadfouten;
+  - de spec bevat dataclasses, een JSON-voorbeeld, een voorbeeld van het modelbestand, identiteitsregels en laadfouten;
   - het plan heeft fasen voor model, lader en contracttests.
 
 ## §2 Vaste structuurextractie
@@ -193,7 +197,9 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - **Uitgangspunt:** C4 `merge.py`, `consolidation.py`, `identity.py`, `curation.py` en `decisions.py`. Dat laatste bestand slaat LLM-beslissingen op via `DecisionStore`.
 - **Te beslissen:**
   - welke beslissingen vast gebeuren (op naam of structuur) en welke via de LLM;
-  - hoe menselijke correcties (bevestigd, verworpen, samengevoegd) worden opgeslagen, zodat ze een nieuwe run overleven, bijvoorbeeld in een curatiebestand.
+  - hoe menselijke correcties (bevestigd, verworpen, samengevoegd) worden opgeslagen, zodat ze een nieuwe run overleven, bijvoorbeeld in een curatiebestand;
+  - of een bevestigd element verhuist naar het modelbestand (B6), zodat alle kennis waar een mens voor instaat op één plek in Git staat, of als oordeel in het curatiebestand blijft;
+  - hoe een gepland element uit het modelbestand wordt gekoppeld aan de code die het later implementeert.
 - **Gereed als:**
   - de spec bevat de regels voor samenvoegen, de opslag van correcties en het gedrag bij een conflict;
   - het plan heeft fasen voor vaste consolidatie, LLM-beslissingen en curatie.
@@ -236,7 +242,8 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     - elke citatie klopt nog tegen de huidige bron (zoals invariant 4 van de extractielaag).
   - Inhoudelijke conflicten:
     - dezelfde regel met een andere waarde in twee services;
-    - documentatie of specificatie tegenover code.
+    - documentatie of specificatie tegenover code;
+    - een gepland element (B6) dat nog niet in de code staat. Dat is een bevinding, geen fout.
 - **Te beslissen:**
   - welke controles fouten zijn en welke waarschuwingen;
   - of een conflict de publicatie blokkeert;
@@ -261,7 +268,9 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     | Afleidingsregel | Voorbeeldinvoer met verwachte uitkomst |
     | Gebeurtenisregel | Toegestane en verboden toestandsovergangen |
 
-  - Given/When/Then met concrete data uit voorbeeldfeiten.
+  - Given/When/Then met concrete data uit voorbeeldfeiten. Een testspecificatie is een concreet voorbeeld met een verwachte uitkomst: geldig, of welke regel het overtreedt. Zo doen het boek (p.234) en de `tests` in het COGNiam-dossier het ook.
+  - Ook voor geplande regels (B6): de testspecificatie bestaat voordat de code er is.
+  - Het id van de regel staat in de testnaam (conventie uit melly-slim).
   - Koppeling van bestaande tests aan regels.
   - Een regeldekkingsrapport.
   - Contracttestspecificaties per C4-relatie.
@@ -334,7 +343,9 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - Koppeling aan wetgeving en beleid. Kan alleen als die documenten mee geïndexeerd zijn; later.
 - Testcode genereren in doelrepositories (U7).
 - Grafische feittypediagrammen in ORM-notatie.
-- "Model als invoer", tenzij §0 dit naar versie 1 haalt.
+- Een webinterface voor menselijke invoer (B6). Die volgt later en leest en schrijft hetzelfde modelbestand. Het is nog niet besloten of dat een eigen interface wordt of de browser van de COGNiam-toolkit.
+- Een lezer voor het COGNiam-dossier (`.cogniam/`, alleen-lezen) als tweede bron (B6).
+- Het COGNiam-dossier als bron van waarheid waartegen de code wordt getoetst.
 
 ## Handoff-opdracht per sectie
 
