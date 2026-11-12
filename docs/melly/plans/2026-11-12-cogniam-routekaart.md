@@ -6,7 +6,7 @@
 
 ## Doel
 
-ChunkHound leidt uit één of meer codebases een Cogniam-kennismodel af. Het model bevat begrippen, feittypen met verwoordingen, voorbeeldfeiten, beperkingsregels, afleidingsregels en gebeurtenisregels, elk met een bronverwijzing.
+ChunkHound leidt uit één of meer codebases een Cogniam-kennismodel af. Het model volgt de zeven kennisklassen van het CogNIAM-boek (B11): begripsomschrijvingen, invulplaatsen, zinsjablonen (feittypen), validatieregels, afleidingsregels, uitwisselingsregels en eventregels, plus voorbeeldfeiten. Elk element heeft een bronverwijzing.
 
 Developers gebruiken het model om:
 - regels terug te vinden;
@@ -111,27 +111,38 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - **Status:** ontwerp · **Hangt af van:** §0
 - **Doel:** de datavorm van het kennismodel. Alle andere secties bouwen hierop.
 - **Basis (B10):** het metamodel volgt het CogNIAM-boek, zie het [onderzoek naar het metamodel in het boek](../research/2026-11-12-cogniam-boek-metamodel.md): zeven kennisklassen (BO, VAR, ZS, VR, AR, UR, ER) plus de feiten op niveau I. Het [onderzoek naar het v4-dossiermodel](../research/2026-11-12-cogniam-v4-metamodel.md) is geen voorbeeld voor §1. Het is alleen achtergrond voor de export in §8.
+- **Praktijkvoorbeeld (B11):** de [CEM-werkwijze van de gebruiker](../research/2026-11-12-cem-werkwijze.md) laat zien hoe de methode op software landt:
+  - een invulplaats in een zinsjabloon draagt de naam van een veld in de code;
+  - een samengesteld feittype is één tabel;
+  - "bestaande tabel" tegenover een nieuwe tabel is *gerealiseerd* tegenover *gepland*;
+  - de validatieregels zijn uniciteit, deelverzameling, waardenregel, verplichte rol en datatype, genummerd in blokken per soort;
+  - populaties met varianten toetsen de regels.
+- **Besloten:**
+  - B11: de elementsoorten zijn de zeven kennisklassen plus voorbeeldfeiten, met de namen uit het boek. Kennisgebied is geen element. Governance, processen, beslissingen en berichten komen niet in versie 1.
 - **Inhoud:**
-  - Elementen:
-    - kennisgebied;
-    - begrip: term, definitie, synoniemen;
-    - feittype: rollen, objecttypen, verwoordingen;
-    - voorbeeldfeit;
-    - beperkingsregel: uniciteit, totaliteit, waardebeperking, subset, gelijkheid, uitsluiting;
-    - afleidingsregel;
-    - gebeurtenisregel: toestand, overgang, aanleiding;
-    - citatie: repository, pad, regelbereik, commit;
-    - status en herkomst: vast, LLM of mens.
+  - Elementsoorten (B11):
+    - begripsomschrijving (BO): term, meervoud, definitie, synoniemen;
+    - variabele of invulplaats (VAR): een rol in een feittype, met begrip, datatype en koppeling naar een codeveld;
+    - zinsjabloon (ZS): het feittype met zijn invulplaatsen, en het identificerende sjabloon van een objecttype;
+    - validatieregel (VR): onder meer uniciteit, deelverzameling, waardenregel en verplichte rol;
+    - afleidingsregel (AR);
+    - uitwisselingsregel (UR): hoe feiten worden toegevoegd, gewijzigd of verwijderd;
+    - eventregel (ER): wanneer een uitwisselings- of afleidingsregel start;
+    - voorbeeldfeit (niveau I): de populatie van een feittype.
+  - Geen eigen elementsoort, maar eigenschappen van elk element:
+    - citaties (repository, pad, regelbereik, commit);
+    - de twee assen van U1.
   - Stabiele identiteiten tussen runs. Les uit C4: bestandsnamen en URL's zijn geen stabiele identiteit.
   - Een JSON-contract met schemaversie, en een lader die de vorm bepaalt (patroon `autodoc/architecture/loader.py`).
 - **Te beslissen:**
-  - granulariteit: één regel per beperking, of beperkingen gegroepeerd per feittype;
-  - vorm van een verwoording: een zin met rolplaatsen (FCO-IM-stijl) of vrije tekst;
+  - ~~welke elementsoorten~~ (besloten, B11);
+  - vorm van een zinsjabloon: invulplaatsen naar de rol (het begrip) met een aparte koppeling naar het codeveld, of naar het codeveld zelf zoals in de CEM. In de CEM komt `<id>` soms meerdere keren in één sjabloon voor;
+  - granulariteit: één regel per validatieregel met een eigen id in een blok per soort (zoals in het boek en de CEM), of regels gegroepeerd per feittype;
   - zijn voorbeeldfeiten verplicht of optioneel per feittype;
   - hoe de niveaus van de kennisdriehoek in het model terugkomen;
   - het modelbestand voor menselijke invoer (B6): naam, plek per repository, en de vorm. Een mens schrijft het niet zelf maar via Claude Code, en later via een webinterface. Het moet daarom een schema hebben dat een agent kan lezen, en een controle met precieze foutmeldingen waarmee de agent zichzelf kan verbeteren. YAML of JSON?
   - twee assen per element: wie ervoor instaat (U1) en of het in de code is gevonden (gepland of gerealiseerd);
-  - de Engelse termen en de woordenlijst Nederlands–Engels (B8): begrip, feittype, verwoording, voorbeeldfeit, beperkingsregel, afleidingsregel, gebeurtenisregel en kennisgebied. Liefst de termen die de Engelstalige CogNIAM- en FCO-IM-literatuur zelf gebruikt.
+  - de Engelse termen en de woordenlijst Nederlands–Engels (B8) voor de zeven kennisklassen en het voorbeeldfeit. Liefst de termen die de Engelstalige CogNIAM-literatuur zelf gebruikt.
 - **Gereed als:**
   - de spec bevat dataclasses, een JSON-voorbeeld, een voorbeeld van het modelbestand, identiteitsregels en laadfouten;
   - het plan heeft fasen voor model, lader en contracttests.
@@ -139,15 +150,18 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 ## §2 Vaste structuurextractie
 
 - **Status:** open · **Hangt af van:** §1
-- **Doel:** kandidaat-feittypen en beperkingsregels zonder LLM afleiden uit schema's en modellen.
+- **Doel:** kandidaat-feittypen, invulplaatsen en validatieregels zonder LLM afleiden uit schema's en modellen.
+- **Gevolg van B11:**
+  - Uitwisselingsregels horen bij versie 1. Routes, controllers, endpoints en commands zijn daarvoor de bronnen. Of §2 hun structuur vast leest en §3 de betekenis aanvult, is nog te beslissen.
+  - De CEM-werkwijze ([onderzoek](../research/2026-11-12-cem-werkwijze.md)) laat zien wat vast te lezen is: uniciteit, deelverzameling (*foreign key*), waardenregel, verplichte rol en datatype. Vaste waarden in de code zijn kandidaten voor een waardenregel.
 - **Bronnen per stack (B3):**
 
-  | Stack | Feittypen | Beperkingsregels | Ook nuttig voor |
+  | Stack | Feittypen | Validatieregels | Ook nuttig voor |
   |---|---|---|---|
   | SQL | `CREATE TABLE`, kolommen | `PRIMARY KEY`, `UNIQUE`, `NOT NULL`, `FOREIGN KEY`, `CHECK` | – |
   | Laravel | Migraties (`Schema::create`, Blueprint-kolommen), Eloquent-modellen en relaties (`hasMany`, `belongsTo`) | Blueprint-modifiers (`->unique()`, `->nullable()`, `->foreign()`), validatieregels in `FormRequest::rules()` en `Validator::make` (`required\|email\|unique:users`), PHP-enums | §7: validatieregels zijn direct bruikbaar als testgevallen |
   | TypeScript/Node | Prisma-schema, TypeORM-entities | Opties in `@Column({ unique, nullable })`, Zod-schema's (`z.string().min(1)`), enums en literal-uniontypes | – |
-  | Magento 2 | `etc/db_schema.xml` (declaratief schema), EAV-attributen in data patches (`Setup/Patch/Data/*.php`, `EavSetup::addAttribute`), service contracts (`Api/Data/*Interface.php`) | `nullable`, `length` en constraints in `db_schema.xml`; `required` en `unique` bij EAV-attributen; source models als waardebeperking; validatie in `ui_component/*.xml` | §3: `etc/events.xml` en observers voor gebeurtenisregels. §5: `etc/webapi.xml` als servicegrens |
+  | Magento 2 | `etc/db_schema.xml` (declaratief schema), EAV-attributen in data patches (`Setup/Patch/Data/*.php`, `EavSetup::addAttribute`), service contracts (`Api/Data/*Interface.php`) | `nullable`, `length` en constraints in `db_schema.xml`; `required` en `unique` bij EAV-attributen; source models als waardebeperking; validatie in `ui_component/*.xml` | §3: `etc/events.xml` en observers voor eventregels. §5: `etc/webapi.xml` als servicegrens |
 
 - **Bevinding (2026-11-12):**
   - `.xml` wordt als platte tekst geïndexeerd (`chunkhound/core/types/common.py:339`).
@@ -173,9 +187,10 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - **Status:** open · **Hangt af van:** §1, en §2 voor ankers
 - **Doel:** extraheren wat niet vast af te leiden is:
   - begrippen en definities;
-  - verwoordingen;
+  - zinsjablonen;
   - afleidingsregels;
-  - gebeurtenisregels;
+  - uitwisselingsregels (de betekenis; de structuur mogelijk uit §2);
+  - eventregels;
   - voorbeeldfeiten uit tests en documentatie.
 - **Uitgangspunt:**
   - de gedeelde extractielaag (`services/extraction/`): begrensde aanvragen, bundels, persistente opslag en dev-cache;
@@ -244,7 +259,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - Structurele controles:
     - elk feittype heeft een uniciteitsregel;
     - elke regel verwijst naar bestaande feittypen;
-    - een verwoording dekt alle rollen;
+    - een zinsjabloon dekt alle invulplaatsen;
     - elke citatie klopt nog tegen de huidige bron (zoals invariant 4 van de extractielaag).
   - Inhoudelijke conflicten:
     - dezelfde regel met een andere waarde in twee services;
@@ -272,7 +287,8 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     | Waardebeperking | Grenswaarden net binnen en net buiten |
     | Subset en uitsluiting | Verboden combinaties aanbieden |
     | Afleidingsregel | Voorbeeldinvoer met verwachte uitkomst |
-    | Gebeurtenisregel | Toegestane en verboden toestandsovergangen |
+    | Uitwisselingsregel | Feit toevoegen, wijzigen of verwijderen, en de populatie daarna controleren |
+    | Eventregel | Toegestane en verboden toestandsovergangen |
 
   - Given/When/Then met concrete data uit voorbeeldfeiten. Een testspecificatie is een concreet voorbeeld met een verwachte uitkomst: geldig, of welke regel het overtreedt. Zo doet het boek het ook (p.234).
   - Ook voor geplande regels (B6): de testspecificatie bestaat voordat de code er is.
@@ -293,7 +309,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - **Status:** open · **Hangt af van:** §1, §4
 - **Doel:** het model zichtbaar en vergelijkbaar maken.
 - **Inhoud:**
-  - AutoDoc-pagina's: begrippenlijst, feittypen per kennisgebied, regels, dekking.
+  - AutoDoc-pagina's: begrippenlijst, feittypen per groep (label, B11), regels, dekking.
   - Een lockbestand, zodat een volgende run alleen gewijzigde delen opnieuw doet (patroon `c4/lockfile.py`).
   - Drift tussen twee runs of commits, bijvoorbeeld "deze PR wijzigt regel R12".
   - Export: JSON in versie 1. ORM/NORMA-XML of SBVR later, afhankelijk van §0.
