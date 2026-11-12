@@ -119,6 +119,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - populaties met varianten toetsen de regels.
 - **Besloten:**
   - B11: de elementsoorten zijn de zeven kennisklassen plus voorbeeldfeiten, met de namen uit het boek. Kennisgebied is geen element. Governance, processen, beslissingen en berichten komen niet in versie 1.
+  - B12: een invulplaats heet naar het begrip (de rol) en is uniek binnen haar sjabloon. De koppeling naar het codeveld staat apart, per repository en met citatie. Een gepland element heeft nog geen koppeling.
 - **Inhoud:**
   - Elementsoorten (B11):
     - begripsomschrijving (BO): term, meervoud, definitie, synoniemen;
@@ -136,7 +137,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - Een JSON-contract met schemaversie, en een lader die de vorm bepaalt (patroon `autodoc/architecture/loader.py`).
 - **Te beslissen:**
   - ~~welke elementsoorten~~ (besloten, B11);
-  - vorm van een zinsjabloon: invulplaatsen naar de rol (het begrip) met een aparte koppeling naar het codeveld, of naar het codeveld zelf zoals in de CEM. In de CEM komt `<id>` soms meerdere keren in één sjabloon voor;
+  - ~~vorm van een zinsjabloon~~ (besloten, B12: invulplaats naar het begrip, koppeling naar het codeveld apart);
   - granulariteit: één regel per validatieregel met een eigen id in een blok per soort (zoals in het boek en de CEM), of regels gegroepeerd per feittype;
   - zijn voorbeeldfeiten verplicht of optioneel per feittype;
   - hoe de niveaus van de kennisdriehoek in het model terugkomen;
