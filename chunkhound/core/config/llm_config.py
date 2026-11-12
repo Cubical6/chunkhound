@@ -42,6 +42,7 @@ REASONING_EFFORT_PROVIDERS: tuple[str, ...] = (
     "grok",
     "openai",
     "opencode-cli",
+    "pi-cli",
 )
 
 OPENAI_REASONING_EFFORTS: tuple[str, ...] = ("minimal", "low", "medium", "high")
@@ -128,6 +129,7 @@ NO_KEY_PROVIDERS: tuple[str, ...] = (
     "claude-code-cli",
     "codex-cli",
     "opencode-cli",
+    "pi-cli",
 )
 
 LLMProviderLiteral = Literal[
@@ -145,6 +147,7 @@ LLMProviderLiteral = Literal[
     "api-route",
     "opper",
     "opencode-cli",
+    "pi-cli",
 ]
 
 _PROVIDER_CHOICES: list[str] = list(get_args(LLMProviderLiteral))
@@ -187,6 +190,7 @@ CLI_PROVIDER_CHOICES = (
     "api-route",
     "opper",
     "opencode-cli",
+    "pi-cli",
 )
 
 
@@ -316,21 +320,21 @@ class LLMConfig(BaseSettings):
         default=None,
         description=(
             "Default reasoning effort forwarded to codex-cli, grok, openai, "
-            "and opencode-cli providers"
+            "opencode-cli, and pi-cli providers"
         ),
     )
     codex_reasoning_effort_utility: ReasoningEffortLiteral | None = Field(
         default=None,
         description=(
             "Reasoning effort override for utility-stage operations "
-            "(codex-cli, grok, openai, opencode-cli)"
+            "(codex-cli, grok, openai, opencode-cli, pi-cli)"
         ),
     )
     codex_reasoning_effort_synthesis: ReasoningEffortLiteral | None = Field(
         default=None,
         description=(
             "Reasoning effort override for synthesis-stage operations "
-            "(codex-cli, grok, openai, opencode-cli)"
+            "(codex-cli, grok, openai, opencode-cli, pi-cli)"
         ),
     )
 
@@ -651,7 +655,7 @@ class LLMConfig(BaseSettings):
         """
         self._propagate_default_models()
         self._validate_provider_switches_require_model()
-        self._validate_opencode_model_formats()
+        self._validate_cli_model_formats()
         self._validate_reasoning_effort_values()
 
     def _propagate_default_models(self) -> None:
@@ -690,8 +694,8 @@ class LLMConfig(BaseSettings):
                     f"{resolved_synthesis_provider!r} to {role_provider!r}."
                 )
 
-    def _validate_opencode_model_formats(self) -> None:
-        """OpenCode CLI models must be in ``provider/model`` format."""
+    def _validate_cli_model_formats(self) -> None:
+        """OpenCode and pi CLI models must be in ``provider/model`` format."""
         resolved_synthesis_provider = self.synthesis_provider or self.provider
 
         for role, provider_name, role_model in (
@@ -708,24 +712,29 @@ class LLMConfig(BaseSettings):
                 self.autodoc_cleanup_model or self.synthesis_model,
             ),
         ):
-            if provider_name != "opencode-cli":
+            if provider_name not in {"opencode-cli", "pi-cli"}:
                 continue
             model_name = role_model or ""
             if not model_name or "/" not in model_name:
+                example = (
+                    "opencode/gpt-5-nano"
+                    if provider_name == "opencode-cli"
+                    else "openai-codex/gpt-6-luna"
+                )
                 raise ValueError(
-                    f"opencode-cli requires a model in provider/model format "
-                    f"for {role} (e.g., opencode/gpt-5-nano). "
+                    f"{provider_name} requires a model in provider/model format "
+                    f"for {role} (e.g., {example}). "
                     f"Got: {model_name!r}"
                 )
             model_provider_name, model_part = model_name.split("/", 1)
             if not model_provider_name.strip():
                 raise ValueError(
-                    f"opencode-cli model for {role} has an empty provider segment "
+                    f"{provider_name} model for {role} has an empty provider segment "
                     f"before '/'. Got: {model_name!r}"
                 )
             if not model_part.strip():
                 raise ValueError(
-                    f"opencode-cli model for {role} has an empty model segment "
+                    f"{provider_name} model for {role} has an empty model segment "
                     f"after '/'. Got: {model_name!r}"
                 )
 
@@ -1044,6 +1053,8 @@ class LLMConfig(BaseSettings):
             # OpenCode CLI: No universal default — model depends on user config.
             # User must set model in provider/model format.
             return ("", "")
+        elif provider == "pi-cli":
+            return ("", "")
         else:
             # Type-level exhaustiveness check — mypy will flag if a new
             # LLMProviderLiteral variant is added without a matching branch.
@@ -1193,7 +1204,7 @@ class LLMConfig(BaseSettings):
         The current config model has a single top-level base_url shared by
         OpenAI-compatible roles. Non-OpenAI-compatible providers ignore it.
         """
-        if provider in {"claude-code-cli", "codex-cli", "opencode-cli"}:
+        if provider in {"claude-code-cli", "codex-cli", "opencode-cli", "pi-cli"}:
             return False
         if provider in OPENAI_COMPATIBLE_LLM_PROVIDERS:
             return is_official_openai_endpoint(self._base_url_for_provider(provider))
@@ -1333,7 +1344,7 @@ class LLMConfig(BaseSettings):
             choices=["minimal", "low", "medium", "high", "xhigh"],
             help=(
                 "Codex CLI reasoning effort (thinking depth) "
-                "when using codex-cli, opencode-cli, or openai provider "
+                "when using codex-cli, opencode-cli, pi-cli, or openai provider "
                 "(openai and grok exclude xhigh)"
             ),
         )

@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import os
 from pathlib import Path
@@ -9,6 +10,50 @@ from chunkhound.core.config.llm_config import LLMConfig
 from chunkhound.core.exceptions.core import ConfigurationError
 from chunkhound.llm_manager import LLMManager
 from tests.helpers import DummyProc
+
+
+def test_pi_cli_needs_no_api_key_but_requires_model(monkeypatch):
+    monkeypatch.delenv("CHUNKHOUND_LLM_API_KEY", raising=False)
+    cfg = LLMConfig(provider="pi-cli", model="openai-codex/gpt-6-luna")
+    assert cfg.is_provider_configured()
+    assert not cfg.get_missing_config()
+    assert cfg.get_default_models() == ("", "")
+    for model in ("", "model", "/model", "provider/"):
+        with pytest.raises(ValueError, match="pi-cli"):
+            LLMConfig(provider="pi-cli", model=model)
+
+
+@pytest.mark.parametrize(
+    "role", ["utility", "synthesis", "map_hyde", "autodoc_cleanup"]
+)
+def test_pi_cli_role_model_validation(role):
+    kwargs = {f"{role}_provider": "pi-cli", f"{role}_model": "invalid"}
+    with pytest.raises(ValueError, match=f"pi-cli requires a model.*{role}"):
+        LLMConfig(provider="openai", model="gpt-5", **kwargs)
+    kwargs[f"{role}_model"] = "openai-codex/gpt-6-luna"
+    cfg = LLMConfig(provider="openai", model="gpt-5", **kwargs)
+    assert cfg.get_provider_config_for_role(role)["provider"] == "pi-cli"
+
+
+def test_pi_cli_env_and_cli_provider_selection(monkeypatch):
+    monkeypatch.setenv("CHUNKHOUND_LLM_PROVIDER", "pi-cli")
+    monkeypatch.setenv("CHUNKHOUND_LLM_MODEL", "openai-codex/gpt-6-luna")
+    assert LLMConfig().get_provider_configs()[0]["provider"] == "pi-cli"
+    parser = argparse.ArgumentParser()
+    LLMConfig.add_cli_arguments(parser)
+    args = parser.parse_args(["--llm-provider", "pi-cli"])
+    assert args.llm_provider == "pi-cli"
+
+
+def test_pi_cli_reasoning_effort_reaches_provider():
+    cfg = LLMConfig(
+        provider="pi-cli",
+        model="openai-codex/gpt-6-luna",
+        codex_reasoning_effort="xhigh",
+    )
+    manager = LLMManager(*cfg.get_provider_configs())
+    provider = manager.get_utility_provider()
+    assert provider._reasoning_effort == "xhigh"
 
 
 def test_llm_config_per_role_provider_overrides():

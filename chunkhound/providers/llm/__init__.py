@@ -7,6 +7,7 @@ from .codex_cli_provider import CodexCLIProvider
 from .gemini_llm_provider import GeminiLLMProvider
 from .openai_llm_provider import OpenAILLMProvider
 from .opencode_cli_provider import OpenCodeCLIProvider
+from .pi_cli_provider import PiCLIProvider
 
 __all__ = [
     "AnthropicLLMProvider",
@@ -16,4 +17,5 @@ __all__ = [
     "GeminiLLMProvider",
     "OpenAILLMProvider",
     "OpenCodeCLIProvider",
+    "PiCLIProvider",
 ]

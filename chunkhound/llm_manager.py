@@ -22,6 +22,7 @@ from chunkhound.providers.llm.gemini_llm_provider import GeminiLLMProvider
 from chunkhound.providers.llm.openai_compatible_provider import OpenAICompatibleProvider
 from chunkhound.providers.llm.openai_llm_provider import OpenAILLMProvider
 from chunkhound.providers.llm.opencode_cli_provider import OpenCodeCLIProvider
+from chunkhound.providers.llm.pi_cli_provider import PiCLIProvider
 
 
 class LLMManager:
@@ -40,6 +41,7 @@ class LLMManager:
         "codex-cli": CodexCLIProvider,
         "gemini": GeminiLLMProvider,
         "opencode-cli": OpenCodeCLIProvider,
+        "pi-cli": PiCLIProvider,
     }
 
     def __init__(
