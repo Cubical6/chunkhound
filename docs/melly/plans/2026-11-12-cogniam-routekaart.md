@@ -54,10 +54,12 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - AutoDoc-pagina's, drift en export daarna;
 - §9 (MCP) als laatste.
 
-## Uitgangspunten (voorstel, bevestigen in §0)
+## Uitgangspunten (bevestigd, B7)
 
-- **U1 Concept, geen volledigheid.** Elk element heeft een status: `extracted` (vast afgeleid), `proposed` (LLM) of `confirmed` (mens). Alleen een mens zet `confirmed`.
-- **U2 Geen element zonder bron.** Elk element heeft minstens één citatie: repository, pad, regelbereik en commit.
+- **U1 Concept, geen volledigheid.** Elk element heeft twee eigenschappen.
+  - Wie ervoor instaat: `extracted` (vast afgeleid), `proposed` (LLM) of `confirmed` (mens). Alleen een mens zet `confirmed`.
+  - Of het in de code is gevonden: *gepland* (alleen in het modelbestand) of *gerealiseerd* (met een citatie uit code).
+- **U2 Geen element zonder bron.** Elk element heeft minstens één bron: een citatie uit code (repository, pad, regelbereik en commit), of een regel in het modelbestand. Bij een regel in het modelbestand blijkt de auteur uit Git.
 - **U3 Vast gaat voor LLM.** Spreekt een LLM-uitkomst een vaste uitkomst tegen, dan wordt dat een conflict, geen vervanging.
 - **U4 Domein, geen techniek.** Technische regels (retry, cache, logging, infrastructuur) komen niet in het model, of staan er apart gemarkeerd in.
 - **U5 Opt-in zonder bijwerking.** Cogniam heeft een eigen opdracht (B5). Zonder die opdracht blijft de uitvoer van `map` en `autodoc` byte-gelijk.
@@ -97,7 +99,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   3. ~~Meerdere repositories in versie 1~~ (besloten, B4). Nog open: welke referentiecodebases §10 gebruikt. Minstens één set moet uit meerdere repositories bestaan, bijvoorbeeld een Laravel-backend met een Node-service of een Magento-shop met een losse service.
   4. ~~CLI-vorm~~ (besloten, B5: eigen opdracht).
   5. ~~Model als invoer in versie 1~~ (besloten, B6: beperkt, via een modelbestand; dossierlezer later).
-  6. Bevestiging of aanpassing van U1 tot en met U8.
+  6. ~~Bevestiging van U1 tot en met U8~~ (besloten, B7).
   7. Naamgeving in code en uitvoer: Nederlandse of Engelse termen, `cogniam` of een neutrale naam zoals `knowledge`.
 - **Gereed als:** de besluiten staan in het log en deze routekaart is bijgewerkt: scope, volgorde en de vragen per sectie. §0 krijgt geen spec en geen plan.
 
