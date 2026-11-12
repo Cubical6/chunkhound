@@ -35,7 +35,7 @@ Regels:
 
 | § | Sectie | Hangt af van | Status | Spec | Plan |
 |---|---|---|---|---|---|
-| 0 | Kader en besluiten | – | ontwerp | n.v.t. | n.v.t. |
+| 0 | Kader en besluiten | – | gereed | n.v.t. | n.v.t. |
 | 1 | Metamodel en contract | 0 | open | – | – |
 | 2 | Vaste structuurextractie | 1 | open | – | – |
 | 3 | LLM-extractie | 1 (2 voor ankers) | open | – | – |
@@ -85,7 +85,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 
 ## §0 Kader en besluiten
 
-- **Status:** ontwerp
+- **Status:** gereed
 - **Doel:** vastleggen wat de feature oplevert en voor wie, zodat alle andere secties dezelfde koers volgen.
 - **Besloten:**
   - B2: de eerste afnemer zijn developers die testspecificaties en regeldekking willen. Versie 1 levert minimaal kandidaat-feittypen en regels (§2, §3), modelcontroles (§6) en testspecificaties met een dekkingsrapport (§7). De AutoDoc-pagina's, export en MCP (§8, §9) volgen later. Het lockbestand uit §8 blijft wel in versie 1, vanwege U8.
@@ -94,10 +94,11 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B5: Cogniam krijgt een eigen opdracht (naam: zie B8). Net als `autodoc` leest de opdracht bestaande `map`-uitvoer, als die er is. Zonder C4-uitvoer vervalt alleen de koppeling met C4 (§5). Hoort de C4-uitvoer bij een andere commit, dan meldt de opdracht dat. `map` blijft ongewijzigd.
   - B6: een mens geeft invoer via Claude Code, later ook via een webinterface. Het model is in versie 1 ook invoer: geplande feittypen en regels staan in een modelbestand in de repository. ChunkHound leest dat bestand als bron en schrijft er nooit in. Een element uit dat bestand zonder citatie uit code is *gepland*, met zo'n citatie *gerealiseerd*. Dat werkt net als `documented` tegenover `found` bij C4. Een lezer voor het COGNiam-dossier (`.cogniam/`) komt na versie 1. Onderbouwing: [onderzoek](../research/2026-11-12-cogniam-model-als-invoer.md).
   - B8: de opdracht heet `chunkhound domain <hoofdmap>`, de module `chunkhound/domain_model/`. Code, JSON-sleutels en CLI-uitvoer zijn Engels, en de docs krijgen een woordenlijst Nederlands–Engels. "CogNIAM" komt alleen voor in de docs en in de latere export naar het dossier.
+  - B9: het goudmodel voor §10 is de praktijkcasus Micromundo uit het CogNIAM-boek (microleningen), met het referentieregister van melly als vertrekpunt. Code voor Micromundo bestaat nog niet. §10 schrijft daarom een referentie-implementatie, verdeeld over minstens twee repositories.
 - **Te beslissen:**
   1. ~~Eerste afnemer~~ (besloten, B2).
   2. ~~Eerste talen en frameworks~~ (besloten, B3).
-  3. ~~Meerdere repositories in versie 1~~ (besloten, B4). Nog open: welke referentiecodebases §10 gebruikt. Minstens één set moet uit meerdere repositories bestaan, bijvoorbeeld een Laravel-backend met een Node-service of een Magento-shop met een losse service.
+  3. ~~Meerdere repositories in versie 1~~ (besloten, B4). ~~Referentiecodebases voor §10~~ (besloten, B9: Micromundo; de verdere uitwerking staat in §10).
   4. ~~CLI-vorm~~ (besloten, B5: eigen opdracht).
   5. ~~Model als invoer in versie 1~~ (besloten, B6: beperkt, via een modelbestand; dossierlezer later).
   6. ~~Bevestiging van U1 tot en met U8~~ (besloten, B7).
@@ -328,13 +329,16 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - **Status:** open · **Hangt af van:** §1. Mag starten zodra de contractvorm in de §1-spec vastligt en loopt daarna parallel.
 - **Doel:** meten of de feature werkt.
 - **Inhoud:**
-  - Referentiecodebases met een handmatig goudmodel. Een deel van het model is genoeg.
-  - Precisie en recall per elementsoort.
+  - Goudmodel (B9): de praktijkcasus Micromundo uit het CogNIAM-boek, op basis van `melly/COGNiam/evals/micromundo/reference/register.json` (contentVersion 2). Dat register heeft 140 items met paginabron, waarvan 93 kritiek. Per soort: 29 begrippen, 12 feittypen, 11 toestanden, 29 cardinaliteiten, 4 identificaties, 2 formules, 8 overgangen en 18 bedrijfsregels. Ook het ingevulde dossier `melly/COGNiam/studie/micromundo-inspectie-v3/` bevat dit model, al in dossierformaat, in vier delen: Onderneming, Aanvraag, Lening en Aflossing.
+  - Een referentie-implementatie van Micromundo in de stacks van B3, verdeeld over minstens twee repositories (B4). Het register meet nu een agent die het model uit de boektekst haalt, niet uit code. Code die het model implementeert bestaat nog niet.
+  - Precisie en recall per elementsoort, alleen over de items die de referentie-implementatie echt bevat. Items die alleen in het modelbestand staan, testen de as gepland/gerealiseerd van U1.
   - Eén providerrun, alleen met toestemming van de gebruiker.
 - **Te beslissen:**
-  - welke codebases;
-  - de omvang van het goudmodel;
-  - het meetscript.
+  - de verdeling over repositories. Volgens de inventaris vormen de vier delen één samenhangend vocabulaire, dus een splitsing per deel is kunstmatig. Een splitsing per laag ligt meer voor de hand, bijvoorbeeld een Laravel-backend voor aanvraag, lening en aflossing (met migraties) en een TypeScript/Node-service voor investeerders of betalingen;
+  - Nederlandse of Engelse domeinnamen in de referentiecode. Bij Engelse namen heeft de meting een koppeltabel naar de Nederlandse namen in het register nodig;
+  - waar het goudmodel en de referentiecode staan. Het boek heeft geen licentievermelding, en het register en de OCR bevatten letterlijke boektekst. Advies: zet ze niet in de publieke ChunkHound-repository, maar in een privérepository. Neem in ChunkHound alleen het meetscript en de scores op, plus een eigen samenvatting met verwijzing naar het boek;
+  - de omvang: alle 140 items, of alleen de 93 kritieke;
+  - het meetscript, bijvoorbeeld naar het voorbeeld van `assess.ts` uit de melly-eval of van `make bench-cluster`.
 - **Gereed als:**
   - het goudmodel staat in het contractformaat;
   - er is een meetopdracht;
