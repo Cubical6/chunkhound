@@ -161,6 +161,13 @@ def isolated_user_config(tmp_path_factory, monkeypatch, request):
         return
     # Keep caches written by subprocesses outside the tree a test may index.
     home = tmp_path_factory.mktemp("home")
+    # Share the 31 MB vss extension per worker instead of installing it per test.
+    shared_duckdb_home = tmp_path_factory.getbasetemp() / "shared-duckdb-home"
+    shared_duckdb_home.mkdir(parents=True, exist_ok=True)
+    try:
+        os.symlink(shared_duckdb_home, home / ".duckdb", target_is_directory=True)
+    except OSError:
+        pass
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
 
