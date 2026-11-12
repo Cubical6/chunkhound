@@ -212,7 +212,7 @@ Maximaal ~15 regels:
 - **Notes:** draai de integratietest niet zelf met een echt model. Dat doet Claude in fase 4.
 
 ## Phase 4: meting en vergelijking (Claude, niet pi-bolt)
-- [ ] Done
+- [x] Done
 - **Depends on:** Phase 3
 - **Goal:** bevestigen dat de winst uit de Context ook binnen ChunkHound optreedt, en dat de antwoordkwaliteit vergelijkbaar is.
 - **Steps:**
@@ -235,11 +235,11 @@ Maximaal ~15 regels:
 - **Hogere concurrency.** `get_synthesis_concurrency()` blijft 3.
 
 ## Final verification (Claude, na alle fasen)
-- [ ] Smoke: `uv run pytest tests/test_smoke.py -v -n auto`
-- [ ] Volledige suite: `uv run pytest tests/ -v` (als achtergrondtaak)
-- [ ] Lint / typecheck: `uv run ruff check chunkhound && uv run mypy chunkhound`
-- [ ] Volledige diff nagelopen tegen het Goal en de besluiten
-- [ ] `.pi-handoff/` verwijderd en daar niets van gecommit
+- [x] Smoke: `uv run pytest tests/test_smoke.py -v -n auto`
+- [x] Volledige suite: `uv run pytest tests/ -v` (als achtergrondtaak). 60 failed + 73 errors, exact dezelfde test-ID's als op baseline `b37ec31e` (site-tests zonder `node_modules`, daemon/MCP/index-simulate). Geen nieuwe fouten
+- [x] Lint / typecheck: `uv run ruff check chunkhound && uv run mypy chunkhound`. Gewijzigde bestanden schoon; de overige meldingen bestonden al vóór dit plan
+- [x] Volledige diff nagelopen tegen het Goal en de besluiten
+- [x] `.pi-handoff/` verwijderd en daar niets van gecommit
 
 ## Progress log
 | Date | Phase | sessionId | Commit | Notes |
@@ -248,6 +248,7 @@ Maximaal ~15 regels:
 | 2026-11-11 | 1 | 01a1ccc7-8736-742b-987b-d84e7c7053aa | (zie git log) | 34 contracttests groen, ruff en mypy schoon; fixtures inline in de test i.p.v. aparte bestanden |
 | 2026-11-11 | 2 | 01a1cccf-fb1c-742b-987b-d850d8170c8a | (zie git log) | 139 gerichte tests groen; geen nieuwe mypy/ruff-fouten in gewijzigde code. Bestaande `assert_never`-fout (llm_config, providers zonder tak) en E501's zijn ouder dan dit plan |
 | 2026-11-12 | 3 | 01a1ccd6-a65a-742b-987b-d8531b2932ab | (zie git log) | Docs + configurator + opt-in integratietest (skipt zonder `CHUNKHOUND_TEST_PI_MODEL`). Site-build door Claude geverifieerd: 7 pagina's gebouwd |
+| 2026-11-12 | 4 | - | (zie git log) | Integratietest met pi-bolt + `openai-codex/gpt-6-luna`: groen in 3,1 s. Research-vraag (luna/low, DB-kopie, sequentieel): **pi-cli 213,7 s / 31 calls / gem. 6,0 s per call** tegen **codex-cli 290,9 s / 23 calls / gem. 18,3 s per call**, dus 26,5% sneller. 0 mislukte calls bij beide; codex had 1 JSON-parsefout in gap detection. Beide rapporten draaien om `codex_cli_provider.py` en `test_codex_exec_help.py` en trekken dezelfde conclusies (CODEX_HOME-overlay, read-only sandbox, `--skip-git-repo-check`-fallback, begrensde retry in `_run_exec`). Let op: per-rol providers in de gebruikersconfig gaan vóór `--llm-provider`, dus ook `--llm-utility-provider`/`--llm-synthesis-provider` meegeven |
 
 ---
 
