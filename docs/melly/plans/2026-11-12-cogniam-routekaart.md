@@ -120,6 +120,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - **Besloten:**
   - B11: de elementsoorten zijn de zeven kennisklassen plus voorbeeldfeiten, met de namen uit het boek. Kennisgebied is geen element. Governance, processen, beslissingen en berichten komen niet in versie 1.
   - B12: een invulplaats heet naar het begrip (de rol) en is uniek binnen haar sjabloon. De koppeling naar het codeveld staat apart, per repository en met citatie. Een gepland element heeft nog geen koppeling.
+  - B13: elke validatieregel is een eigen element met een eigen id. Verplicht en datatype zijn kenmerken van de invulplaats. §7 test ze toch, met een afgeleid id.
 - **Inhoud:**
   - Elementsoorten (B11):
     - begripsomschrijving (BO): term, meervoud, definitie, synoniemen;
@@ -138,7 +139,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - **Te beslissen:**
   - ~~welke elementsoorten~~ (besloten, B11);
   - ~~vorm van een zinsjabloon~~ (besloten, B12: invulplaats naar het begrip, koppeling naar het codeveld apart);
-  - granulariteit: één regel per validatieregel met een eigen id in een blok per soort (zoals in het boek en de CEM), of regels gegroepeerd per feittype;
+  - ~~granulariteit~~ (besloten, B13: één element per validatieregel; verplicht en datatype als kenmerk);
   - zijn voorbeeldfeiten verplicht of optioneel per feittype;
   - hoe de niveaus van de kennisdriehoek in het model terugkomen;
   - het modelbestand voor menselijke invoer (B6): naam, plek per repository, en de vorm. Een mens schrijft het niet zelf maar via Claude Code, en later via een webinterface. Het moet daarom een schema hebben dat een agent kan lezen, en een controle met precieze foutmeldingen waarmee de agent zichzelf kan verbeteren. YAML of JSON?
@@ -284,7 +285,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     | Regel | Testvorm |
     |---|---|
     | Uniciteit | Duplicaat aanbieden, afwijzing verwachten |
-    | Totaliteit | Verplichte waarde weglaten, afwijzing verwachten |
+    | Verplichte rol (kenmerk, B13) | Verplichte waarde weglaten, afwijzing verwachten |
     | Waardebeperking | Grenswaarden net binnen en net buiten |
     | Subset en uitsluiting | Verboden combinaties aanbieden |
     | Afleidingsregel | Voorbeeldinvoer met verwachte uitkomst |
@@ -293,7 +294,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 
   - Given/When/Then met concrete data uit voorbeeldfeiten. Een testspecificatie is een concreet voorbeeld met een verwachte uitkomst: geldig, of welke regel het overtreedt. Zo doet het boek het ook (p.234).
   - Ook voor geplande regels (B6): de testspecificatie bestaat voordat de code er is.
-  - Voorstel: het id van de regel staat in de testnaam, zodat de dekking per regel te meten is.
+  - Voorstel: het id van de regel staat in de testnaam, zodat de dekking per regel te meten is. Voor verplicht en datatype (kenmerken, B13) is dat een afgeleid id: feittype, invulplaats en kenmerk.
   - Koppeling van bestaande tests aan regels.
   - Een regeldekkingsrapport.
   - Contracttestspecificaties per C4-relatie.
