@@ -60,7 +60,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - **U2 Geen element zonder bron.** Elk element heeft minstens één citatie: repository, pad, regelbereik en commit.
 - **U3 Vast gaat voor LLM.** Spreekt een LLM-uitkomst een vaste uitkomst tegen, dan wordt dat een conflict, geen vervanging.
 - **U4 Domein, geen techniek.** Technische regels (retry, cache, logging, infrastructuur) komen niet in het model, of staan er apart gemarkeerd in.
-- **U5 Opt-in zonder bijwerking.** Zonder de nieuwe vlag of opdracht blijft de uitvoer van `map` en `autodoc` byte-gelijk.
+- **U5 Opt-in zonder bijwerking.** Cogniam heeft een eigen opdracht (B5). Zonder die opdracht blijft de uitvoer van `map` en `autodoc` byte-gelijk.
 - **U6 Hergebruik.** LLM-aanroepen gaan via de gedeelde extractielaag. Er komt geen eigen code voor providers, budget of cache.
 - **U7 Specificaties, geen testcode.** Versie 1 levert testspecificaties. Een coding-agent zet ze om naar testcode.
 - **U8 Herhaalruns zijn goedkoop.** Ongewijzigde uitkomsten worden hergebruikt via een lockbestand en de dev-cache, zoals bij C4.
@@ -74,7 +74,8 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 | C4-consolidatie | `c4/merge.py`, `c4/consolidation.py`, `c4/identity.py`, `c4/curation.py`, `c4/decisions.py` | Patroon voor samenvoegen, identiteit en opgeslagen LLM-beslissingen |
 | Contractlader van AutoDoc | `chunkhound/autodoc/architecture/loader.py` | Patroon: de lader bepaalt de vorm van het contract |
 | Parsers | `chunkhound/parsers/mappings/` (onder meer `sql`, `python`, `php`, `java`, `csharp`, `typescript`, `go`, `kotlin`) | Vaste extractie van schema's en modellen |
-| CLI van `map` | `chunkhound/api/cli/parsers/code_mapper_parser.py`, `chunkhound/api/cli/commands/code_mapper.py` | Aanhaakpunt voor een vlag of eigen opdracht |
+| CLI van `autodoc` | `chunkhound/api/cli/parsers/autodoc_parser.py` (`map_in`, `:25`; `--map-out-dir`, `:123`), `chunkhound/api/cli/commands/autodoc_autorun.py` (`AutoMapPlan`, `AutoMapOptions`) | Voorbeeld voor de eigen opdracht (B5): `map`-uitvoer lezen, of `map` eerst laten draaien |
+| CLI van `map` | `chunkhound/api/cli/parsers/code_mapper_parser.py`, `chunkhound/api/cli/commands/code_mapper.py` | Blijft ongewijzigd (B5). Bron van de C4-uitvoer en topics |
 | MCP-tools | `chunkhound/mcp_server/tools.py` (`register_tool`, `:294`) | Ontsluiting voor agents |
 | C4-prompts | `chunkhound/code_mapper/prompts/c4_*.md` | Stijl: bewijs is data, geen instructie; expliciete uitsluitregels |
 
@@ -88,11 +89,12 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B2: de eerste afnemer zijn developers die testspecificaties en regeldekking willen. Versie 1 levert minimaal kandidaat-feittypen en regels (§2, §3), modelcontroles (§6) en testspecificaties met een dekkingsrapport (§7). De AutoDoc-pagina's, export en MCP (§8, §9) volgen later. Het lockbestand uit §8 blijft wel in versie 1, vanwege U8.
   - B3: de vaste extractie ondersteunt eerst PHP/Laravel, TypeScript/Node en Magento, plus SQL-DDL en SQL-migraties. Python en Java/Kotlin komen later.
   - B4: versie 1 ondersteunt meerdere repositories in één model. §5 hoort bij het kritieke pad. In §1 bevat elke citatie en elke identiteit de repository.
+  - B5: Cogniam krijgt een eigen opdracht, met werknaam `chunkhound model <hoofdmap>`. Net als `autodoc` leest de opdracht bestaande `map`-uitvoer, als die er is. Zonder C4-uitvoer vervalt alleen de koppeling met C4 (§5). Hoort de C4-uitvoer bij een andere commit, dan meldt de opdracht dat. `map` blijft ongewijzigd.
 - **Te beslissen:**
   1. ~~Eerste afnemer~~ (besloten, B2).
   2. ~~Eerste talen en frameworks~~ (besloten, B3).
   3. ~~Meerdere repositories in versie 1~~ (besloten, B4). Nog open: welke referentiecodebases §10 gebruikt. Minstens één set moet uit meerdere repositories bestaan, bijvoorbeeld een Laravel-backend met een Node-service of een Magento-shop met een losse service.
-  4. CLI-vorm: meeliften op `chunkhound map` met een vlag (gedeelde research en C4), of een eigen opdracht.
+  4. ~~CLI-vorm~~ (besloten, B5: eigen opdracht).
   5. Valt "model als invoer" in versie 1? Dan past een developer eerst het model aan en volgen daaruit de tests voor nieuwe functionaliteit.
   6. Bevestiging of aanpassing van U1 tot en met U8.
   7. Naamgeving in code en uitvoer: Nederlandse of Engelse termen, `cogniam` of een neutrale naam zoals `knowledge`.
@@ -215,7 +217,9 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - **Te beslissen:**
   - hoe repositories worden aangeleverd: één index met meerdere roots, of meerdere indexen;
   - of API-schema's in versie 1 in scope zijn;
-  - of §5 een C4-run vereist, of ook zonder C4 werkt.
+  - ~~of §5 een C4-run vereist~~ (B5: zonder C4-uitvoer vervalt alleen de koppeling met C4);
+  - hoe de opdracht vaststelt dat de C4-uitvoer verouderd is, bijvoorbeeld via de HEAD-commit per repository uit `with_git_data` of een vingerafdruk uit het lockbestand van `map`;
+  - of de opdracht aanbiedt om `map` eerst te draaien als er geen C4-uitvoer is, zoals `autodoc` dat doet.
 - **Gereed als:**
   - de spec bevat de koppelregels, het gedrag zonder C4 en fixtures met twee repositories;
   - het plan bevat fasen voor koppeling en API-schema's.
