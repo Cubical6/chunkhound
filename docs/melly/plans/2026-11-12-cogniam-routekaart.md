@@ -128,6 +128,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B18: elk record met menselijke invoer krijgt een auteur, een tijdstip en de ingang. De auteur is de Git-identiteit van de machine (`user.name`, `user.email`), anders de gebruikersnaam van het besturingssysteem. Een agent kan de auteur niet invullen.
   - B19: de schrijftool accepteert ook `confirmed`; een opdracht van de mens in Claude Code geldt als bevestiging. De schrijfdienst controleert wel B14 (minstens één voorbeeldfeit).
   - B20: versie 1 heeft geen export en geen import van menselijke invoer. De gebruiker maakt zelf een back-up van `.chunkhound/db`. In CI is er geen menselijke invoer.
+  - B21: het id is een sleutel uit soort, repository en naam, zoals bij C4, bijvoorbeeld `uniqueness:backend/role-assignment/user+role`. Het is overal gelijk en komt in testnamen. Een hernoeming geeft een nieuw id, en §4 herkent dat als hernoeming. Een nummer per soort als label kan later bij de export.
 - **Inhoud:**
   - Elementsoorten (B11):
     - begripsomschrijving (BO): term, meervoud, definitie, synoniemen;
@@ -149,6 +150,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - ~~vorm van een zinsjabloon~~ (besloten, B12: invulplaats naar het begrip, koppeling naar het codeveld apart);
   - ~~granulariteit~~ (besloten, B13: één element per validatieregel; verplicht en datatype als kenmerk);
   - ~~zijn voorbeeldfeiten verplicht~~ (besloten, B14: alleen bij `confirmed`);
+  - ~~vorm van het id~~ (besloten, B21: sleutel uit soort, repository en naam). Voor de spec blijft open: welke repository een gepland element in zijn id krijgt als nog niet vaststaat waar het komt, en hoe de sleutel van elke elementsoort precies is opgebouwd;
   - hoe de niveaus van de kennisdriehoek in het model terugkomen. **Voorstel**, volgens het boek (p.5, figuur 1.1); geen besluit van de gebruiker:
     - niveau I zijn de voorbeeldfeiten;
     - niveau II zijn de elementen van het model;
@@ -248,7 +250,8 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - welke beslissingen vast gebeuren (op naam of structuur) en welke via de LLM;
   - hoe menselijke correcties (bevestigd, verworpen, samengevoegd) in de database staan (B15), zodat ze een nieuwe run overleven, ook als de gevonden elementen een andere vorm krijgen;
   - of een bevestiging een oordeel blijft over een gevonden element, of het element als menselijke invoer opslaat, zodat alle kennis waar een mens voor instaat op één plek staat;
-  - hoe een gepland element uit de menselijke invoer wordt gekoppeld aan de code die het later implementeert.
+  - hoe een gepland element uit de menselijke invoer wordt gekoppeld aan de code die het later implementeert;
+  - hoe een hernoeming wordt herkend, zodat een nieuw id (B21) niet als een verwijderd en een nieuw element telt. Voorbeeld: `detect_renames` in `code_mapper/c4/identity.py:29`.
 - **Gereed als:**
   - de spec bevat de regels voor samenvoegen, de opslag van correcties en het gedrag bij een conflict;
   - het plan heeft fasen voor vaste consolidatie, LLM-beslissingen en curatie.
