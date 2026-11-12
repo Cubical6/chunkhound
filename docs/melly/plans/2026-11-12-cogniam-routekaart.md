@@ -52,7 +52,7 @@ Kritiek pad (B4): §0 → §1 → §2 en §3 parallel → §4 → §5 en §6 par
 Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - §8 in versie 1 alleen het lockbestand, en JSON als uitvoer van §7;
 - AutoDoc-pagina's, drift en export daarna;
-- §9 (MCP) als laatste.
+- §9 (MCP) als laatste. De MCP-tool voor het schrijven van menselijke invoer komt wel in versie 1 (B17), als onderdeel van §1.
 
 ## Uitgangspunten (bevestigd, B7)
 
@@ -124,6 +124,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B14: een feittype mag zonder voorbeeldfeit, behalve als een mens het op `confirmed` zet. §6 meldt een feittype zonder voorbeeldfeit als waarschuwing.
   - B15: menselijke invoer (geplande elementen, voorbeeldfeiten, bevestigingen en correcties) staat in de database van ChunkHound. Claude Code schrijft haar via ChunkHound. Er is geen modelbestand en geen curatiebestand. Dat wijzigt B6 en U2.
   - B16: die invoer staat in eigen tabellen in de index-database (`.chunkhound/db`), niet in een apart bestand. Compactie en migraties moeten de tabellen meenemen.
+  - B17: één schrijfdienst in `chunkhound/domain_model/`, met twee ingangen: een MCP-tool (als de daemon draait) en een CLI-opdracht (zonder daemon: CI, scripts, §10). Draait de daemon wel, dan geeft de CLI de bestaande lockmelding.
 - **Inhoud:**
   - Elementsoorten (B11):
     - begripsomschrijving (BO): term, meervoud, definitie, synoniemen;
@@ -159,7 +160,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
       - De nieuwe tabellen krijgen een migratie via `schema_version`.
       - ChunkHound heeft een tweede backend, LanceDB (`chunkhound/providers/database/lancedb_provider.py`). **Voorstel:** versie 1 ondersteunt menselijke invoer alleen op DuckDB, de standaard. Op LanceDB meldt `chunkhound domain` dat duidelijk.
       - `--force-reindex` laat de database staan (`chunkhound/pipeline_bridge.py:890`). Alleen wie `.chunkhound/` weggooit, verliest de invoer. Dat hoort bij de vraag over delen en back-up.
-    - **Schrijfroute.** Claude Code schrijft via een CLI-opdracht of een MCP-tool. Een draaiende daemon (MCP) houdt de exclusieve lock op de index-database, en de CLI weigert dan (`chunkhound/api/cli/commands/run.py:134`, `_handle_daemon_lock_conflict`). Dat geldt vandaag ook voor `map`, dat de database zelf opent (`chunkhound/api/cli/commands/code_mapper.py:499`). Geen CLI-opdracht stuurt werk door naar de daemon. De daemon spreekt MCP over een socket (`chunkhound/daemon/server.py:305`). MCP komt volgens B2 als laatste (§9).
+    - ~~**Schrijfroute**~~ (besloten, B17: een MCP-tool én een CLI-opdracht op één schrijfdienst). Achtergrond: Claude Code schrijft via een CLI-opdracht of een MCP-tool. Een draaiende daemon (MCP) houdt de exclusieve lock op de index-database, en de CLI weigert dan (`chunkhound/api/cli/commands/run.py:134`, `_handle_daemon_lock_conflict`). Dat geldt vandaag ook voor `map`, dat de database zelf opent (`chunkhound/api/cli/commands/code_mapper.py:499`). Geen CLI-opdracht stuurt werk door naar de daemon. De daemon spreekt MCP over een socket (`chunkhound/daemon/server.py:305`). MCP komt volgens B2 als laatste (§9).
     - **Controle bij het schrijven.** Een schema dat een agent kan lezen, en precieze foutmeldingen waarmee de agent zichzelf kan verbeteren.
     - **Auteur en tijdstip** per record (U2), nu Git die niet meer levert.
     - **Delen en back-up.** De invoer staat per machine (B15). Hoe krijgen collega's en CI haar, en hoe maakt een mens een back-up? Bijvoorbeeld met een export en een import;
@@ -349,6 +350,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 
 - **Status:** open · **Hangt af van:** §8
 - **Doel:** coding-agents vragen regels op tijdens hun werk.
+- **Al in versie 1 (B17):** de schrijftool voor menselijke invoer. Die hoort bij §1 en wacht niet op §8. §9 gaat alleen over het lezen.
 - **Inhoud:**
   - Vragen als:
     - "regels voor begrip X";
