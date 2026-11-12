@@ -36,7 +36,7 @@ Regels:
 | § | Sectie | Hangt af van | Status | Spec | Plan |
 |---|---|---|---|---|---|
 | 0 | Kader en besluiten | – | gereed | n.v.t. | n.v.t. |
-| 1 | Metamodel en contract | 0 | open | – | – |
+| 1 | Metamodel en contract | 0 | ontwerp | – | – |
 | 2 | Vaste structuurextractie | 1 | open | – | – |
 | 3 | LLM-extractie | 1 (2 voor ankers) | open | – | – |
 | 4 | Consolidatie en identiteit | 2, 3 | open | – | – |
@@ -107,8 +107,9 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 
 ## §1 Metamodel en contract
 
-- **Status:** open · **Hangt af van:** §0
+- **Status:** ontwerp · **Hangt af van:** §0
 - **Doel:** de datavorm van het kennismodel. Alle andere secties bouwen hierop.
+- **Onderzoek:** [het v4-model van de COGNiam-toolkit](../research/2026-11-12-cogniam-v4-metamodel.md). Volgt §1 dat model, dan zijn de Engelse termen, de granulariteit, de vorm van verwoordingen, de voorbeeldfeiten en de niveaus van de kennisdriehoek meteen beslist.
 - **Inhoud:**
   - Elementen:
     - kennisgebied;
