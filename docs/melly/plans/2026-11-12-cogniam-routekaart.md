@@ -123,6 +123,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B13: elke validatieregel is een eigen element met een eigen id. Verplicht en datatype zijn kenmerken van de invulplaats. §7 test ze toch, met een afgeleid id.
   - B14: een feittype mag zonder voorbeeldfeit, behalve als een mens het op `confirmed` zet. §6 meldt een feittype zonder voorbeeldfeit als waarschuwing.
   - B15: menselijke invoer (geplande elementen, voorbeeldfeiten, bevestigingen en correcties) staat in de database van ChunkHound. Claude Code schrijft haar via ChunkHound. Er is geen modelbestand en geen curatiebestand. Dat wijzigt B6 en U2.
+  - B16: die invoer staat in eigen tabellen in de index-database (`.chunkhound/db`), niet in een apart bestand. Compactie en migraties moeten de tabellen meenemen.
 - **Inhoud:**
   - Elementsoorten (B11):
     - begripsomschrijving (BO): term, meervoud, definitie, synoniemen;
@@ -151,14 +152,14 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 
     Er komt dus geen veld `level` per element;
   - ~~het modelbestand voor menselijke invoer~~ (besloten, B15: geen bestand; de invoer staat in de database). Daaruit volgen deze vragen:
-    - **Waar in de database.** Bevindingen in de code:
-      - De compactie gooit onbekende tabellen weg, met opzet. Dat geldt voor de Python-route (`chunkhound/providers/database/duckdb_provider.py:1217`, `_compact_copy_data`) en voor de Rust-route (`src/db/duckdb_backend/compaction.rs:23`). Die kopiëren alleen `schema_version`, `files`, `chunks` en `embeddings_*`.
-      - Compactie draait ook vanzelf: na een schrijfactie start ze met een kans van 1 op 100 (`chunkhound/providers/database/serial_executor.py:49` en `:106`).
-      - Bij het openen verwijdert ChunkHound een WAL-bestand dat ouder is dan 24 uur (`duckdb_provider.py:530`).
-      - ChunkHound heeft een tweede backend, LanceDB (`chunkhound/providers/database/lancedb_provider.py`).
-
-      Eigen tabellen in de index-database gaan dus bij gewoon indexeren verloren, tenzij beide compacties, de migraties en LanceDB ze meenemen. Het alternatief is een eigen databasebestand voor menselijke invoer in `.chunkhound/`, los van de index.
-    - **Schrijfroute.** Claude Code schrijft via een CLI-opdracht of een MCP-tool. Een draaiende daemon (MCP) houdt de exclusieve lock op de index-database, en de CLI weigert dan (`chunkhound/api/cli/commands/run.py:134`, `_handle_daemon_lock_conflict`). MCP komt volgens B2 als laatste (§9).
+    - ~~**Waar in de database**~~ (besloten, B16: eigen tabellen in de index-database). De spec moet deze bevindingen in de code oplossen:
+      - De compactie gooit onbekende tabellen weg, met opzet. Dat geldt voor de Python-route (`chunkhound/providers/database/duckdb_provider.py:1217`, `_compact_copy_data`) en voor de Rust-route (`src/db/duckdb_backend/compaction.rs:23`). Die kopiëren alleen `schema_version`, `files`, `chunks` en `embeddings_*`. Beide moeten de nieuwe tabellen meekopiëren, met een test die bewijst dat menselijke invoer een compactie overleeft. Voor de Rust-wijziging gelden de `RUST_RULES` uit `AGENTS.md`.
+      - Compactie draait ook vanzelf: na een schrijfactie start ze met een kans van 1 op 100 (`chunkhound/providers/database/serial_executor.py:49` en `:106`). Zonder die wijziging gaat menselijke invoer dus bij gewoon indexeren verloren.
+      - Bij het openen verwijdert ChunkHound een WAL-bestand dat ouder is dan 24 uur (`duckdb_provider.py:530`). **Voorstel:** na elke schrijfactie met menselijke invoer volgt een `CHECKPOINT`.
+      - De nieuwe tabellen krijgen een migratie via `schema_version`.
+      - ChunkHound heeft een tweede backend, LanceDB (`chunkhound/providers/database/lancedb_provider.py`). **Voorstel:** versie 1 ondersteunt menselijke invoer alleen op DuckDB, de standaard. Op LanceDB meldt `chunkhound domain` dat duidelijk.
+      - `--force-reindex` laat de database staan (`chunkhound/pipeline_bridge.py:890`). Alleen wie `.chunkhound/` weggooit, verliest de invoer. Dat hoort bij de vraag over delen en back-up.
+    - **Schrijfroute.** Claude Code schrijft via een CLI-opdracht of een MCP-tool. Een draaiende daemon (MCP) houdt de exclusieve lock op de index-database, en de CLI weigert dan (`chunkhound/api/cli/commands/run.py:134`, `_handle_daemon_lock_conflict`). Dat geldt vandaag ook voor `map`, dat de database zelf opent (`chunkhound/api/cli/commands/code_mapper.py:499`). Geen CLI-opdracht stuurt werk door naar de daemon. De daemon spreekt MCP over een socket (`chunkhound/daemon/server.py:305`). MCP komt volgens B2 als laatste (§9).
     - **Controle bij het schrijven.** Een schema dat een agent kan lezen, en precieze foutmeldingen waarmee de agent zichzelf kan verbeteren.
     - **Auteur en tijdstip** per record (U2), nu Git die niet meer levert.
     - **Delen en back-up.** De invoer staat per machine (B15). Hoe krijgen collega's en CI haar, en hoe maakt een mens een back-up? Bijvoorbeeld met een export en een import;
