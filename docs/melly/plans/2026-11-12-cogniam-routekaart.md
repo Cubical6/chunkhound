@@ -91,8 +91,9 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B2: de eerste afnemer zijn developers die testspecificaties en regeldekking willen. Versie 1 levert minimaal kandidaat-feittypen en regels (§2, §3), modelcontroles (§6) en testspecificaties met een dekkingsrapport (§7). De AutoDoc-pagina's, export en MCP (§8, §9) volgen later. Het lockbestand uit §8 blijft wel in versie 1, vanwege U8.
   - B3: de vaste extractie ondersteunt eerst PHP/Laravel, TypeScript/Node en Magento, plus SQL-DDL en SQL-migraties. Python en Java/Kotlin komen later.
   - B4: versie 1 ondersteunt meerdere repositories in één model. §5 hoort bij het kritieke pad. In §1 bevat elke citatie en elke identiteit de repository.
-  - B5: Cogniam krijgt een eigen opdracht, met werknaam `chunkhound model <hoofdmap>`. Net als `autodoc` leest de opdracht bestaande `map`-uitvoer, als die er is. Zonder C4-uitvoer vervalt alleen de koppeling met C4 (§5). Hoort de C4-uitvoer bij een andere commit, dan meldt de opdracht dat. `map` blijft ongewijzigd.
+  - B5: Cogniam krijgt een eigen opdracht (naam: zie B8). Net als `autodoc` leest de opdracht bestaande `map`-uitvoer, als die er is. Zonder C4-uitvoer vervalt alleen de koppeling met C4 (§5). Hoort de C4-uitvoer bij een andere commit, dan meldt de opdracht dat. `map` blijft ongewijzigd.
   - B6: een mens geeft invoer via Claude Code, later ook via een webinterface. Het model is in versie 1 ook invoer: geplande feittypen en regels staan in een modelbestand in de repository. ChunkHound leest dat bestand als bron en schrijft er nooit in. Een element uit dat bestand zonder citatie uit code is *gepland*, met zo'n citatie *gerealiseerd*. Dat werkt net als `documented` tegenover `found` bij C4. Een lezer voor het COGNiam-dossier (`.cogniam/`) komt na versie 1. Onderbouwing: [onderzoek](../research/2026-11-12-cogniam-model-als-invoer.md).
+  - B8: de opdracht heet `chunkhound domain <hoofdmap>`, de module `chunkhound/domain_model/`. Code, JSON-sleutels en CLI-uitvoer zijn Engels, en de docs krijgen een woordenlijst Nederlands–Engels. "CogNIAM" komt alleen voor in de docs en in de latere export naar het dossier.
 - **Te beslissen:**
   1. ~~Eerste afnemer~~ (besloten, B2).
   2. ~~Eerste talen en frameworks~~ (besloten, B3).
@@ -100,7 +101,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   4. ~~CLI-vorm~~ (besloten, B5: eigen opdracht).
   5. ~~Model als invoer in versie 1~~ (besloten, B6: beperkt, via een modelbestand; dossierlezer later).
   6. ~~Bevestiging van U1 tot en met U8~~ (besloten, B7).
-  7. Naamgeving in code en uitvoer: Nederlandse of Engelse termen, `cogniam` of een neutrale naam zoals `knowledge`.
+  7. ~~Naamgeving in code en uitvoer~~ (besloten, B8: `chunkhound domain`, Engelse termen).
 - **Gereed als:** de besluiten staan in het log en deze routekaart is bijgewerkt: scope, volgorde en de vragen per sectie. §0 krijgt geen spec en geen plan.
 
 ## §1 Metamodel en contract
@@ -127,7 +128,8 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - hoe de niveaus van de kennisdriehoek in het model terugkomen;
   - het modelbestand voor menselijke invoer (B6): naam, plek per repository, en de vorm. Een mens schrijft het niet zelf maar via Claude Code, en later via een webinterface. Het moet daarom een schema hebben dat een agent kan lezen, en een controle met precieze foutmeldingen waarmee de agent zichzelf kan verbeteren. YAML of JSON?
   - twee assen per element: wie ervoor instaat (U1) en of het in de code is gevonden (gepland of gerealiseerd);
-  - vertaling van de statussen naar het COGNiam-dossier: `extracted`/`proposed` → `hypothesis`, `confirmed` → `validated` (zie [onderzoek](../research/2026-11-12-cogniam-model-als-invoer.md)).
+  - vertaling van de statussen naar het COGNiam-dossier: `extracted`/`proposed` → `hypothesis`, `confirmed` → `validated` (zie [onderzoek](../research/2026-11-12-cogniam-model-als-invoer.md));
+  - de Engelse termen en de woordenlijst Nederlands–Engels (B8): begrip, feittype, verwoording, voorbeeldfeit, beperkingsregel, afleidingsregel, gebeurtenisregel en kennisgebied. Liefst de termen die de Engelstalige CogNIAM- en FCO-IM-literatuur zelf gebruikt.
 - **Gereed als:**
   - de spec bevat dataclasses, een JSON-voorbeeld, een voorbeeld van het modelbestand, identiteitsregels en laadfouten;
   - het plan heeft fasen voor model, lader en contracttests.
