@@ -1,7 +1,7 @@
 # Routekaart: Cogniam-kennismodel uit code
 
 - Datum: 2026-11-12 · Basis: `main` op `f89044d9` · Branch: `worktree-cogniam-plan`
-- **Status:** concept. Sectie 0 is de eerstvolgende stap. Deze routekaart geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
+- **Status:** concept. §0 is gereed. In §1 zijn alle ontwerpvragen beantwoord (B11 tot en met B23); de spec is de eerstvolgende stap. Deze routekaart geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
 - Besluitenlog: [2026-11-12-cogniam-model.md](../decisions/2026-11-12-cogniam-model.md)
 
 ## Doel
@@ -130,6 +130,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B20: versie 1 heeft geen export en geen import van menselijke invoer. De gebruiker maakt zelf een back-up van `.chunkhound/db`. In CI is er geen menselijke invoer.
   - B21: het id is een sleutel uit soort, repository en naam, zoals bij C4, bijvoorbeeld `fact_type:backend/role-assignment`. Met de termen van B22 begint het id van een regel met `validation_rule:`; hoe de soort regel (zoals uniciteit) in de sleutel komt, volgt in de spec. Het is overal gelijk en komt in testnamen. Een hernoeming geeft een nieuw id, en §4 herkent dat als hernoeming. Een nummer per soort als label kan later bij de export.
   - B22: de Engelse termen komen uit de CogNIAM-literatuur; zie de woordenlijst hieronder.
+  - B23: geen veld `level` (kennisdriehoek); gepland of gerealiseerd wordt afgeleid uit citaties; `CHECKPOINT` na elke schrijfactie met menselijke invoer; menselijke invoer in versie 1 alleen op DuckDB.
 - **Woordenlijst (B8, B22):**
 
   | Boek (Nederlands) | Code en JSON |
@@ -166,7 +167,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - ~~granulariteit~~ (besloten, B13: één element per validatieregel; verplicht en datatype als kenmerk);
   - ~~zijn voorbeeldfeiten verplicht~~ (besloten, B14: alleen bij `confirmed`);
   - ~~vorm van het id~~ (besloten, B21: sleutel uit soort, repository en naam). Voor de spec blijft open: welke repository een gepland element in zijn id krijgt als nog niet vaststaat waar het komt, en hoe de sleutel van elke elementsoort precies is opgebouwd;
-  - hoe de niveaus van de kennisdriehoek in het model terugkomen. **Voorstel**, volgens het boek (p.5, figuur 1.1); geen besluit van de gebruiker:
+  - ~~hoe de niveaus van de kennisdriehoek in het model terugkomen~~ (besloten, B23), volgens het boek (p.5, figuur 1.1):
     - niveau I zijn de voorbeeldfeiten;
     - niveau II zijn de elementen van het model;
     - niveau III, de generieke regelgeving ("van een feittype wordt genoteerd welke variabele op welke positie staat"), is het schema van het contract met de controles van de lader en §6.
@@ -176,16 +177,16 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     - ~~**Waar in de database**~~ (besloten, B16: eigen tabellen in de index-database). De spec moet deze bevindingen in de code oplossen:
       - De compactie gooit onbekende tabellen weg, met opzet. Dat geldt voor de Python-route (`chunkhound/providers/database/duckdb_provider.py:1217`, `_compact_copy_data`) en voor de Rust-route (`src/db/duckdb_backend/compaction.rs:23`). Die kopiëren alleen `schema_version`, `files`, `chunks` en `embeddings_*`. Beide moeten de nieuwe tabellen meekopiëren, met een test die bewijst dat menselijke invoer een compactie overleeft. Voor de Rust-wijziging gelden de `RUST_RULES` uit `AGENTS.md`.
       - Compactie draait ook vanzelf: na een schrijfactie start ze met een kans van 1 op 100 (`chunkhound/providers/database/serial_executor.py:49` en `:106`). Zonder die wijziging gaat menselijke invoer dus bij gewoon indexeren verloren.
-      - Bij het openen verwijdert ChunkHound een WAL-bestand dat ouder is dan 24 uur (`duckdb_provider.py:530`). **Voorstel:** na elke schrijfactie met menselijke invoer volgt een `CHECKPOINT`.
+      - Bij het openen verwijdert ChunkHound een WAL-bestand dat ouder is dan 24 uur (`duckdb_provider.py:530`). Besloten (B23): na elke schrijfactie met menselijke invoer volgt een `CHECKPOINT`.
       - De nieuwe tabellen krijgen een migratie via `schema_version`.
-      - ChunkHound heeft een tweede backend, LanceDB (`chunkhound/providers/database/lancedb_provider.py`). **Voorstel:** versie 1 ondersteunt menselijke invoer alleen op DuckDB, de standaard. Op LanceDB meldt `chunkhound domain` dat duidelijk.
+      - ChunkHound heeft een tweede backend, LanceDB (`chunkhound/providers/database/lancedb_provider.py`). Besloten (B23): versie 1 ondersteunt menselijke invoer alleen op DuckDB, de standaard. Op LanceDB meldt `chunkhound domain` dat duidelijk.
       - `--force-reindex` laat de database staan (`chunkhound/pipeline_bridge.py:890`). Alleen wie `.chunkhound/` weggooit, verliest de invoer; daar is in versie 1 geen export voor (B20).
     - ~~**Schrijfroute**~~ (besloten, B17: een MCP-tool én een CLI-opdracht op één schrijfdienst). Achtergrond: Claude Code schrijft via een CLI-opdracht of een MCP-tool. Een draaiende daemon (MCP) houdt de exclusieve lock op de index-database, en de CLI weigert dan (`chunkhound/api/cli/commands/run.py:134`, `_handle_daemon_lock_conflict`). Dat geldt vandaag ook voor `map`, dat de database zelf opent (`chunkhound/api/cli/commands/code_mapper.py:499`). Geen CLI-opdracht stuurt werk door naar de daemon. De daemon spreekt MCP over een socket (`chunkhound/daemon/server.py:305`). MCP komt volgens B2 als laatste (§9).
-    - **Controle bij het schrijven.** Een schema dat een agent kan lezen, en precieze foutmeldingen waarmee de agent zichzelf kan verbeteren.
+    - **Controle bij het schrijven** (eis voor de spec, geen keuze). Een schema dat een agent kan lezen, en precieze foutmeldingen waarmee de agent zichzelf kan verbeteren.
     - ~~**Auteur en tijdstip** per record (U2)~~ (besloten, B18: de Git-identiteit van de machine, met tijdstip en ingang).
     - ~~**Wie `confirmed` zet**~~ (besloten, B19: één schrijftool; een opdracht van de mens in Claude Code geldt als bevestiging). Achtergrond: volgens U1 zet alleen een mens `confirmed`. Via de MCP-tool (B17) schrijft echter een agent. Hoe blijkt dat een mens bevestigde? Tijdens een Claude Code-sessie draait de daemon, dus bevestigen alleen via de CLI kan dan niet.
     - ~~**Delen en back-up**~~ (besloten, B20: geen export of import in versie 1; de gebruiker maakt zelf een back-up van `.chunkhound/db`);
-  - twee assen per element: wie ervoor instaat (U1) en of het in de code is gevonden (gepland of gerealiseerd);
+  - ~~twee assen per element~~ (besloten, B23: wie ervoor instaat wordt opgeslagen; gepland of gerealiseerd wordt afgeleid uit de citaties uit code);
   - ~~de Engelse termen en de woordenlijst Nederlands–Engels~~ (besloten, B22; zie de woordenlijst).
 - **Gereed als:**
   - de spec bevat dataclasses, een JSON-voorbeeld, identiteitsregels en laadfouten;
