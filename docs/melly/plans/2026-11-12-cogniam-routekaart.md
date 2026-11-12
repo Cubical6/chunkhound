@@ -128,7 +128,22 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B18: elk record met menselijke invoer krijgt een auteur, een tijdstip en de ingang. De auteur is de Git-identiteit van de machine (`user.name`, `user.email`), anders de gebruikersnaam van het besturingssysteem. Een agent kan de auteur niet invullen.
   - B19: de schrijftool accepteert ook `confirmed`; een opdracht van de mens in Claude Code geldt als bevestiging. De schrijfdienst controleert wel B14 (minstens één voorbeeldfeit).
   - B20: versie 1 heeft geen export en geen import van menselijke invoer. De gebruiker maakt zelf een back-up van `.chunkhound/db`. In CI is er geen menselijke invoer.
-  - B21: het id is een sleutel uit soort, repository en naam, zoals bij C4, bijvoorbeeld `uniqueness:backend/role-assignment/user+role`. Het is overal gelijk en komt in testnamen. Een hernoeming geeft een nieuw id, en §4 herkent dat als hernoeming. Een nummer per soort als label kan later bij de export.
+  - B21: het id is een sleutel uit soort, repository en naam, zoals bij C4, bijvoorbeeld `fact_type:backend/role-assignment`. Met de termen van B22 begint het id van een regel met `validation_rule:`; hoe de soort regel (zoals uniciteit) in de sleutel komt, volgt in de spec. Het is overal gelijk en komt in testnamen. Een hernoeming geeft een nieuw id, en §4 herkent dat als hernoeming. Een nummer per soort als label kan later bij de export.
+  - B22: de Engelse termen komen uit de CogNIAM-literatuur; zie de woordenlijst hieronder.
+- **Woordenlijst (B8, B22):**
+
+  | Boek (Nederlands) | Code en JSON |
+  |---|---|
+  | begripsomschrijving (BO) | `concept`, met `definition` |
+  | variabele of invulplaats (VAR) | `role` |
+  | zinsjabloon (ZS) | `fact_type`, met `template` |
+  | validatieregel (VR) | `validation_rule` |
+  | afleidingsregel (AR) | `derivation_rule` |
+  | uitwisselingsregel (UR) | `exchange_rule` |
+  | eventregel (ER) | `event_rule` |
+  | voorbeeldfeit (niveau I) | `ground_fact` |
+
+  De Engelse Wikipedia-pagina over CogNIAM deelt de zeven categorieën anders in dan het boek (onder meer *process descriptions*, *actors* en *services*). De indeling volgt het boek (B10, B11); alleen de Engelse woorden komen uit de literatuur.
 - **Inhoud:**
   - Elementsoorten (B11):
     - begripsomschrijving (BO): term, meervoud, definitie, synoniemen;
@@ -171,7 +186,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     - ~~**Wie `confirmed` zet**~~ (besloten, B19: één schrijftool; een opdracht van de mens in Claude Code geldt als bevestiging). Achtergrond: volgens U1 zet alleen een mens `confirmed`. Via de MCP-tool (B17) schrijft echter een agent. Hoe blijkt dat een mens bevestigde? Tijdens een Claude Code-sessie draait de daemon, dus bevestigen alleen via de CLI kan dan niet.
     - ~~**Delen en back-up**~~ (besloten, B20: geen export of import in versie 1; de gebruiker maakt zelf een back-up van `.chunkhound/db`);
   - twee assen per element: wie ervoor instaat (U1) en of het in de code is gevonden (gepland of gerealiseerd);
-  - de Engelse termen en de woordenlijst Nederlands–Engels (B8) voor de zeven kennisklassen en het voorbeeldfeit. Liefst de termen die de Engelstalige CogNIAM-literatuur zelf gebruikt.
+  - ~~de Engelse termen en de woordenlijst Nederlands–Engels~~ (besloten, B22; zie de woordenlijst).
 - **Gereed als:**
   - de spec bevat dataclasses, een JSON-voorbeeld, identiteitsregels en laadfouten;
   - de spec bevat ook de opslag van menselijke invoer (B15): de tabellen, de schrijfopdrachten met een voorbeeld en hun foutmeldingen, en hoe de invoer compactie, herindexering en upgrades overleeft;
