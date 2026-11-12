@@ -2,7 +2,7 @@
 
 Datum: 2026-11-12. Inventaris door een subagent. Alle paden staan onder `melly/COGNiam/packages/cogniam/`, en `M` staat voor `src/core/model.ts`. Waar de subagent iets afleidde in plaats van het te lezen, staat "afgeleid".
 
-Doel: weten hoe het dossiermodel (schemaVersion 4) eruitziet. ChunkHound exporteert later naar dat model (§8), dus §1 volgt het waar dat kan.
+Doel: weten hoe het dossiermodel (schemaVersion 4) eruitziet, want ChunkHound exporteert later naar dat model (§8). Het is geen basis voor §1 (B10).
 
 ## Vorm van het dossier
 
@@ -41,16 +41,6 @@ Regels:
 - **Niveaus van de kennisdriehoek** staan niet expliciet in het schema. Afgeleid: niveau 1 zijn objecten, feiten en populaties; niveau 2 zijn begrippen, feittypen, regels en identificaties; het schema zelf is niveau 3.
 - **Het echte Micromundo-model** staat in de revisies, niet in `inspectie.json`. Het heeft schemaVersion 2, 30 begrippen, 48 feittypen, 37 regels en 4 submodellen.
 
-## Gevolg voor §1
+## Gebruik
 
-Volgt §1 dit model, dan zijn meteen beslist:
-- de Engelse termen (B8);
-- de granulariteit: één regel per beperking;
-- de vorm van verwoordingen: een `reading` plus templates met rolplaatsen;
-- voorbeeldfeiten: optioneel;
-- de niveaus van de kennisdriehoek: impliciet.
-
-ChunkHound voegt dan alleen toe wat het dossier niet heeft:
-- citaties uit code (repository, pad, regelbereik, commit);
-- de twee assen van U1;
-- stabiele identiteiten die uit code worden afgeleid (§4).
+Volgens B10 is dit model geen voorbeeld voor §1: het metamodel volgt alleen het CogNIAM-boek. Deze notitie dient als achtergrond voor de export naar het dossier (§8) en voor de dossierlezer na versie 1. Waar het metamodel uit §1 afwijkt van v4, moet de export dat verschil overbruggen.
