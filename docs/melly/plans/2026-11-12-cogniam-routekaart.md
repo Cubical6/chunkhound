@@ -127,6 +127,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B17: één schrijfdienst in `chunkhound/domain_model/`, met twee ingangen: een MCP-tool (als de daemon draait) en een CLI-opdracht (zonder daemon: CI, scripts, §10). Draait de daemon wel, dan geeft de CLI de bestaande lockmelding.
   - B18: elk record met menselijke invoer krijgt een auteur, een tijdstip en de ingang. De auteur is de Git-identiteit van de machine (`user.name`, `user.email`), anders de gebruikersnaam van het besturingssysteem. Een agent kan de auteur niet invullen.
   - B19: de schrijftool accepteert ook `confirmed`; een opdracht van de mens in Claude Code geldt als bevestiging. De schrijfdienst controleert wel B14 (minstens één voorbeeldfeit).
+  - B20: versie 1 heeft geen export en geen import van menselijke invoer. De gebruiker maakt zelf een back-up van `.chunkhound/db`. In CI is er geen menselijke invoer.
 - **Inhoud:**
   - Elementsoorten (B11):
     - begripsomschrijving (BO): term, meervoud, definitie, synoniemen;
@@ -161,12 +162,12 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
       - Bij het openen verwijdert ChunkHound een WAL-bestand dat ouder is dan 24 uur (`duckdb_provider.py:530`). **Voorstel:** na elke schrijfactie met menselijke invoer volgt een `CHECKPOINT`.
       - De nieuwe tabellen krijgen een migratie via `schema_version`.
       - ChunkHound heeft een tweede backend, LanceDB (`chunkhound/providers/database/lancedb_provider.py`). **Voorstel:** versie 1 ondersteunt menselijke invoer alleen op DuckDB, de standaard. Op LanceDB meldt `chunkhound domain` dat duidelijk.
-      - `--force-reindex` laat de database staan (`chunkhound/pipeline_bridge.py:890`). Alleen wie `.chunkhound/` weggooit, verliest de invoer. Dat hoort bij de vraag over delen en back-up.
+      - `--force-reindex` laat de database staan (`chunkhound/pipeline_bridge.py:890`). Alleen wie `.chunkhound/` weggooit, verliest de invoer; daar is in versie 1 geen export voor (B20).
     - ~~**Schrijfroute**~~ (besloten, B17: een MCP-tool én een CLI-opdracht op één schrijfdienst). Achtergrond: Claude Code schrijft via een CLI-opdracht of een MCP-tool. Een draaiende daemon (MCP) houdt de exclusieve lock op de index-database, en de CLI weigert dan (`chunkhound/api/cli/commands/run.py:134`, `_handle_daemon_lock_conflict`). Dat geldt vandaag ook voor `map`, dat de database zelf opent (`chunkhound/api/cli/commands/code_mapper.py:499`). Geen CLI-opdracht stuurt werk door naar de daemon. De daemon spreekt MCP over een socket (`chunkhound/daemon/server.py:305`). MCP komt volgens B2 als laatste (§9).
     - **Controle bij het schrijven.** Een schema dat een agent kan lezen, en precieze foutmeldingen waarmee de agent zichzelf kan verbeteren.
     - ~~**Auteur en tijdstip** per record (U2)~~ (besloten, B18: de Git-identiteit van de machine, met tijdstip en ingang).
     - ~~**Wie `confirmed` zet**~~ (besloten, B19: één schrijftool; een opdracht van de mens in Claude Code geldt als bevestiging). Achtergrond: volgens U1 zet alleen een mens `confirmed`. Via de MCP-tool (B17) schrijft echter een agent. Hoe blijkt dat een mens bevestigde? Tijdens een Claude Code-sessie draait de daemon, dus bevestigen alleen via de CLI kan dan niet.
-    - **Delen en back-up.** De invoer staat per machine (B15). Hoe krijgen collega's en CI haar, en hoe maakt een mens een back-up? Bijvoorbeeld met een export en een import;
+    - ~~**Delen en back-up**~~ (besloten, B20: geen export of import in versie 1; de gebruiker maakt zelf een back-up van `.chunkhound/db`);
   - twee assen per element: wie ervoor instaat (U1) en of het in de code is gevonden (gepland of gerealiseerd);
   - de Engelse termen en de woordenlijst Nederlands–Engels (B8) voor de zeven kennisklassen en het voorbeeldfeit. Liefst de termen die de Engelstalige CogNIAM-literatuur zelf gebruikt.
 - **Gereed als:**
@@ -319,7 +320,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     | Eventregel | Toegestane en verboden toestandsovergangen |
 
   - Given/When/Then met concrete data uit voorbeeldfeiten. Een testspecificatie is een concreet voorbeeld met een verwachte uitkomst: geldig, of welke regel het overtreedt. Zo doet het boek het ook (p.234).
-  - Ook voor geplande regels (B6): de testspecificatie bestaat voordat de code er is.
+  - Ook voor geplande regels (B6): de testspecificatie bestaat voordat de code er is. Geplande regels staan alleen in de lokale database (B15, B16); in CI zijn ze er niet (B20).
   - Voorstel: het id van de regel staat in de testnaam, zodat de dekking per regel te meten is. Voor verplicht en datatype (kenmerken, B13) is dat een afgeleid id: feittype, invulplaats en kenmerk.
   - Koppeling van bestaande tests aan regels.
   - Een regeldekkingsrapport.
@@ -403,6 +404,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - Grafische feittypediagrammen in ORM-notatie.
 - Een webinterface voor menselijke invoer (B6). Die volgt later en leest en schrijft dezelfde menselijke invoer in de database (B15). Het is nog niet besloten of dat een eigen interface wordt of de browser van de COGNiam-toolkit.
 - Een lezer voor het COGNiam-dossier (`.cogniam/`, alleen-lezen) als tweede bron (B6).
+- Export en import van menselijke invoer, en het delen ervan met collega's of CI (B20).
 - Het COGNiam-dossier als bron van waarheid waartegen de code wordt getoetst.
 
 ## Handoff-opdracht per sectie
