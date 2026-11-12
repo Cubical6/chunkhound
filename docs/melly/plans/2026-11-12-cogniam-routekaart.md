@@ -1,7 +1,7 @@
 # Routekaart: Cogniam-kennismodel uit code
 
 - Datum: 2026-11-12 · Basis: `main` op `f89044d9` · Branch: `worktree-cogniam-plan`
-- **Status:** concept. §0 is gereed. In §1 zijn alle ontwerpvragen beantwoord (B11 tot en met B23); de spec is de eerstvolgende stap. Deze routekaart geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
+- **Status:** concept. §0 is gereed. In §1 zijn alle ontwerpvragen beantwoord (B11 tot en met B23); spec en plan liggen ter review, met één open punt (een leestool, spec §10). Deze routekaart geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
 - Besluitenlog: [2026-11-12-cogniam-model.md](../decisions/2026-11-12-cogniam-model.md)
 
 ## Doel
@@ -36,7 +36,7 @@ Regels:
 | § | Sectie | Hangt af van | Status | Spec | Plan |
 |---|---|---|---|---|---|
 | 0 | Kader en besluiten | – | gereed | n.v.t. | n.v.t. |
-| 1 | Metamodel en contract | 0 | ontwerp | – | – |
+| 1 | Metamodel en contract | 0 | plan (ter review) | [spec](../specs/2026-11-13-cogniam-1-design.md) | [plan](2026-11-13-cogniam-1.md) |
 | 2 | Vaste structuurextractie | 1 | open | – | – |
 | 3 | LLM-extractie | 1 (2 voor ankers) | open | – | – |
 | 4 | Consolidatie en identiteit | 2, 3 | open | – | – |
@@ -108,7 +108,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 
 ## §1 Metamodel en contract
 
-- **Status:** ontwerp · **Hangt af van:** §0
+- **Status:** plan, ter review: [spec](../specs/2026-11-13-cogniam-1-design.md) en [plan](2026-11-13-cogniam-1.md) · **Hangt af van:** §0
 - **Doel:** de datavorm van het kennismodel. Alle andere secties bouwen hierop.
 - **Basis (B10):** het metamodel volgt het CogNIAM-boek, zie het [onderzoek naar het metamodel in het boek](../research/2026-11-12-cogniam-boek-metamodel.md): zeven kennisklassen (BO, VAR, ZS, VR, AR, UR, ER) plus de feiten op niveau I. Het [onderzoek naar het v4-dossiermodel](../research/2026-11-12-cogniam-v4-metamodel.md) is geen voorbeeld voor §1. Het is alleen achtergrond voor de export in §8.
 - **Praktijkvoorbeeld (B11):** de [CEM-werkwijze van de gebruiker](../research/2026-11-12-cem-werkwijze.md) laat zien hoe de methode op software landt:
