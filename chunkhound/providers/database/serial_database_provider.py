@@ -110,6 +110,23 @@ class SerialDatabaseProvider(ABC):
         return False
 
     @property
+    def supports_domain_input(self) -> bool:
+        """Human-input storage is opt-in for each backend."""
+        return False
+
+    def append_domain_input(self, rows: list[dict[str, Any]]) -> list[int]:
+        """Append one durable batch through the serialized database executor."""
+        return cast(
+            list[int], self._execute_in_db_thread_sync("append_domain_input", rows)
+        )
+
+    def load_domain_input(self) -> list[dict[str, Any]]:
+        """Read human-input records without creating storage."""
+        return cast(
+            list[dict[str, Any]], self._execute_in_db_thread_sync("load_domain_input")
+        )
+
+    @property
     def is_connected(self) -> bool:
         """Check if database connection is active."""
         # For serial providers, we consider it connected if executor exists
