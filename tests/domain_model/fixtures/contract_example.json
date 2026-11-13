@@ -1,0 +1,289 @@
+{
+  "schema_version": 1,
+  "concepts": [
+    {
+      "id": "concept:backend/team",
+      "repository": "backend",
+      "term": "team",
+      "plural": "teams",
+      "definition": "A group of users who handle tickets together.",
+      "synonyms": [],
+      "status": "extracted",
+      "citations": [
+        {
+          "repository": "backend",
+          "path": "backend/app/Models/Team.php",
+          "start_line": 9,
+          "end_line": 41,
+          "commit": "3f2a9c1"
+        }
+      ],
+      "human_sources": []
+    },
+    {
+      "id": "concept:backend/user",
+      "repository": "backend",
+      "term": "user",
+      "plural": "users",
+      "definition": "A person with an account in the ticket system.",
+      "synonyms": [
+        "account holder"
+      ],
+      "status": "extracted",
+      "citations": [
+        {
+          "repository": "backend",
+          "path": "backend/app/Models/User.php",
+          "start_line": 12,
+          "end_line": 48,
+          "commit": "3f2a9c1"
+        }
+      ],
+      "human_sources": []
+    }
+  ],
+  "fact_types": [
+    {
+      "id": "fact_type:backend/team-membership",
+      "repository": "backend",
+      "name": "team membership",
+      "templates": [
+        "User <member> belongs to team <team>."
+      ],
+      "roles": [
+        "role:backend/team-membership/member",
+        "role:backend/team-membership/team"
+      ],
+      "identifies": null,
+      "bindings": [
+        {
+          "repository": "backend",
+          "target": "team_user",
+          "citation": {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_10_create_team_user_table.php",
+            "start_line": 14,
+            "end_line": 22,
+            "commit": "3f2a9c1"
+          }
+        }
+      ],
+      "status": "confirmed",
+      "citations": [
+        {
+          "repository": "backend",
+          "path": "backend/database/migrations/2024_01_10_create_team_user_table.php",
+          "start_line": 14,
+          "end_line": 22,
+          "commit": "3f2a9c1"
+        }
+      ],
+      "human_sources": [
+        {
+          "record": 12,
+          "op": "confirm",
+          "put_status": null,
+          "author_name": "A. Developer",
+          "author_email": "dev@example.com",
+          "entry_point": "mcp",
+          "recorded_at": "2026-11-12T14:03:22Z"
+        }
+      ]
+    }
+  ],
+  "roles": [
+    {
+      "id": "role:backend/team-membership/member",
+      "repository": "backend",
+      "fact_type": "fact_type:backend/team-membership",
+      "name": "member",
+      "concept": "concept:backend/user",
+      "datatype": "bigint",
+      "mandatory": true,
+      "bindings": [
+        {
+          "repository": "backend",
+          "target": "team_user.user_id",
+          "citation": {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_10_create_team_user_table.php",
+            "start_line": 16,
+            "end_line": 16,
+            "commit": "3f2a9c1"
+          }
+        }
+      ],
+      "status": "confirmed",
+      "citations": [
+        {
+          "repository": "backend",
+          "path": "backend/database/migrations/2024_01_10_create_team_user_table.php",
+          "start_line": 16,
+          "end_line": 16,
+          "commit": "3f2a9c1"
+        }
+      ],
+      "human_sources": [
+        {
+          "record": 12,
+          "op": "confirm",
+          "put_status": null,
+          "author_name": "A. Developer",
+          "author_email": "dev@example.com",
+          "entry_point": "mcp",
+          "recorded_at": "2026-11-12T14:03:22Z"
+        }
+      ]
+    },
+    {
+      "id": "role:backend/team-membership/team",
+      "repository": "backend",
+      "fact_type": "fact_type:backend/team-membership",
+      "name": "team",
+      "concept": "concept:backend/team",
+      "datatype": "bigint",
+      "mandatory": true,
+      "bindings": [
+        {
+          "repository": "backend",
+          "target": "team_user.team_id",
+          "citation": {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_10_create_team_user_table.php",
+            "start_line": 17,
+            "end_line": 17,
+            "commit": "3f2a9c1"
+          }
+        }
+      ],
+      "status": "confirmed",
+      "citations": [
+        {
+          "repository": "backend",
+          "path": "backend/database/migrations/2024_01_10_create_team_user_table.php",
+          "start_line": 17,
+          "end_line": 17,
+          "commit": "3f2a9c1"
+        }
+      ],
+      "human_sources": [
+        {
+          "record": 12,
+          "op": "confirm",
+          "put_status": null,
+          "author_name": "A. Developer",
+          "author_email": "dev@example.com",
+          "entry_point": "mcp",
+          "recorded_at": "2026-11-12T14:03:22Z"
+        }
+      ]
+    }
+  ],
+  "validation_rules": [
+    {
+      "id": "validation_rule:backend/team-membership/other/one-lead-per-team",
+      "repository": "backend",
+      "fact_type": "fact_type:backend/team-membership",
+      "rule_kind": "other",
+      "roles": [
+        "role:backend/team-membership/team"
+      ],
+      "superset_fact_type": null,
+      "superset_roles": [],
+      "allowed_values": [],
+      "name": "one lead per team",
+      "statement": "A team has at most one member with the lead role.",
+      "status": "proposed",
+      "citations": [],
+      "human_sources": [
+        {
+          "record": 13,
+          "op": "put",
+          "put_status": "proposed",
+          "author_name": "A. Developer",
+          "author_email": "dev@example.com",
+          "entry_point": "mcp",
+          "recorded_at": "2026-11-12T14:05:10Z"
+        }
+      ]
+    },
+    {
+      "id": "validation_rule:backend/team-membership/uniqueness/member+team",
+      "repository": "backend",
+      "fact_type": "fact_type:backend/team-membership",
+      "rule_kind": "uniqueness",
+      "roles": [
+        "role:backend/team-membership/member",
+        "role:backend/team-membership/team"
+      ],
+      "superset_fact_type": null,
+      "superset_roles": [],
+      "allowed_values": [],
+      "name": null,
+      "statement": null,
+      "status": "extracted",
+      "citations": [
+        {
+          "repository": "backend",
+          "path": "backend/database/migrations/2024_01_10_create_team_user_table.php",
+          "start_line": 19,
+          "end_line": 19,
+          "commit": "3f2a9c1"
+        }
+      ],
+      "human_sources": []
+    }
+  ],
+  "derivation_rules": [],
+  "exchange_rules": [
+    {
+      "id": "exchange_rule:backend/add-team-member",
+      "repository": "backend",
+      "name": "add team member",
+      "statement": "A team lead adds a user to the team.",
+      "operations": [
+        "add"
+      ],
+      "fact_types": [
+        "fact_type:backend/team-membership"
+      ],
+      "status": "proposed",
+      "citations": [
+        {
+          "repository": "backend",
+          "path": "backend/app/Http/Controllers/TeamMemberController.php",
+          "start_line": 21,
+          "end_line": 39,
+          "commit": "3f2a9c1"
+        }
+      ],
+      "human_sources": []
+    }
+  ],
+  "event_rules": [],
+  "ground_facts": [
+    {
+      "id": "ground_fact:backend/team-membership/d0480d33ce24",
+      "repository": "backend",
+      "fact_type": "fact_type:backend/team-membership",
+      "values": {
+        "member": "42",
+        "team": "7"
+      },
+      "violates": [],
+      "status": "proposed",
+      "citations": [],
+      "human_sources": [
+        {
+          "record": 11,
+          "op": "put",
+          "put_status": "proposed",
+          "author_name": "A. Developer",
+          "author_email": "dev@example.com",
+          "entry_point": "mcp",
+          "recorded_at": "2026-11-12T14:02:47Z"
+        }
+      ]
+    }
+  ]
+}
