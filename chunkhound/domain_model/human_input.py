@@ -1,10 +1,11 @@
 """Append-only human input: request contract, final-state checks and replay."""
 
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from threading import Lock
 from typing import Annotated, Any, Literal, Protocol, TypeAlias
 from uuid import uuid4
@@ -12,6 +13,8 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from chunkhound.domain_model import identity
+from chunkhound.domain_model.author import Author as Author
+from chunkhound.domain_model.author import resolve_author
 from chunkhound.domain_model.issues import Issue
 from chunkhound.domain_model.loader import (
     COLLECTIONS,
@@ -32,6 +35,9 @@ from chunkhound.domain_model.model import (
     HumanSource,
     Role,
     ValidationRule,
+)
+from chunkhound.providers.database.serial_executor import (
+    DatabaseTemporarilyUnavailableError,
 )
 
 PutStatus: TypeAlias = Literal["proposed", "confirmed"]
@@ -159,11 +165,6 @@ class WriteRequest(_FrozenModel):
     operations: list[Operation] = Field(min_length=1, max_length=500)
 
 
-class Author(_FrozenModel):
-    name: str
-    email: str | None = None
-
-
 class ElementResult(_FrozenModel):
     id: str
     kind: str
@@ -195,6 +196,38 @@ class DomainInputRejected(ValueError):  # noqa: N818 - public contract name (§9
         super().__init__(f"{len(self.issues)} issues; nothing was written")
 
 
+class DomainInputUnavailable(ValueError):  # noqa: N818 - public contract name (§9.4)
+    def __init__(self, issues: Iterable[Issue]) -> None:
+        self.issues = tuple(issues)
+        super().__init__(f"{len(self.issues)} issues; nothing was written")
+
+
+def _check_backend(provider: object) -> None:
+    if not getattr(provider, "supports_domain_input", False):
+        raise DomainInputUnavailable(
+            [
+                Issue(
+                    "",
+                    "backend_not_supported",
+                    "Backend does not support human input; nothing was written",
+                )
+            ]
+        )
+
+
+def _database_busy() -> DomainInputUnavailable:
+    return DomainInputUnavailable(
+        [
+            Issue(
+                "",
+                "database_busy",
+                "Database is temporarily unavailable; nothing was written. "
+                "Retry in a few seconds.",
+            )
+        ]
+    )
+
+
 class DomainInputProvider(Protocol):
     def load_domain_input(self) -> list[dict[str, Any]]: ...
 
@@ -220,6 +253,15 @@ def _role_ids(identifier: str, body: dict[str, Any] | None) -> list[str]:
     return [identity.role_id(identifier, role["name"]) for role in body["roles"]]
 
 
+def upgrade_payload(version: int, payload: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade a stored payload in memory without rewriting historical rows."""
+    if version == 1:
+        return payload
+    if version > 1:
+        raise ValueError("Human input was written by a newer ChunkHound")
+    raise ValueError(f"Unsupported human-input payload version: {version}")
+
+
 def _apply_record(state: HumanInputState, record: dict[str, Any]) -> None:
     identifier = record["element_id"]
     op = record["op"]
@@ -230,7 +272,7 @@ def _apply_record(state: HumanInputState, record: dict[str, Any]) -> None:
             state.entries.pop(target, None)
         return
     if op == "put":
-        body = json.loads(record["payload"])
+        body = upgrade_payload(record["payload_version"], json.loads(record["payload"]))
         entry.body = body
         entry.confirmed = body["status"] == "confirmed"
         new_roles = _role_ids(identifier, body)
@@ -688,7 +730,11 @@ def _source(record: dict[str, Any]) -> HumanSource:
 
 def load_human_input(provider: DomainInputProvider) -> HumanInputView:
     """Project surviving puts and judgements without requiring extracted elements."""
-    state = replay(provider.load_domain_input())
+    _check_backend(provider)
+    try:
+        state = replay(provider.load_domain_input())
+    except DatabaseTemporarilyUnavailableError as exc:
+        raise _database_busy() from exc
     classes: dict[str, type[BaseModel]] = {
         "concept": Concept,
         "fact_type": FactType,
@@ -750,11 +796,33 @@ def load_human_input(provider: DomainInputProvider) -> HumanInputView:
     return HumanInputView(model=model, judgements=tuple(judgements))
 
 
+def write_human_input(
+    request: WriteRequest | dict[str, Any],
+    *,
+    provider: DomainInputProvider,
+    project_root: Path,
+    entry_point: EntryPoint,
+    dry_run: bool = False,
+) -> WriteResult:
+    """Write human input with environment-derived provenance and backend gating."""
+    _check_backend(provider)
+    try:
+        return apply_write(
+            request,
+            provider=provider,
+            author=lambda keys: resolve_author(project_root, keys),
+            entry_point=entry_point,
+            dry_run=dry_run,
+        )
+    except DatabaseTemporarilyUnavailableError as exc:
+        raise _database_busy() from exc
+
+
 def apply_write(
     request: WriteRequest | dict[str, Any],
     *,
     provider: DomainInputProvider,
-    author: Author,
+    author: Author | Callable[[set[str]], Mapping[str, Author]],
     entry_point: EntryPoint,
     dry_run: bool = False,
 ) -> WriteResult:
@@ -764,14 +832,24 @@ def apply_write(
         planned, issues, warnings = validate(state, request)
         if issues:
             raise DomainInputRejected(issues)
+        repository_keys = {
+            identity.parse_id(record["element_id"])[1] for record in planned
+        }
+        authors = (
+            author(repository_keys)
+            if callable(author)
+            else {key: author for key in repository_keys}
+        )
         batch_id = str(uuid4())
         recorded_at = datetime.now(timezone.utc).replace(tzinfo=None)
         rows = [
             {
                 **{key: value for key, value in record.items() if key != "seq"},
                 "batch_id": batch_id,
-                "author_name": author.name,
-                "author_email": author.email,
+                "author_name": authors[identity.parse_id(record["element_id"])[1]].name,
+                "author_email": authors[
+                    identity.parse_id(record["element_id"])[1]
+                ].email,
                 "entry_point": entry_point,
                 "recorded_at": recorded_at,
             }
