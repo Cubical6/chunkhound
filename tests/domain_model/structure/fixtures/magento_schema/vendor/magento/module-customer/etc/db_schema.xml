@@ -1,0 +1,12 @@
+<schema xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <table name="customer_entity">
+    <column xsi:type="int" name="entity_id" nullable="false"/>
+    <column xsi:type="int" name="group_id"/>
+    <constraint xsi:type="primary" referenceId="PRIMARY"><column name="entity_id"/></constraint>
+    <constraint xsi:type="foreign" referenceId="CUSTOMER_GROUP" column="group_id" referenceTable="customer_group" referenceColumn="id"/>
+  </table>
+  <table name="customer_group">
+    <column xsi:type="int" name="id"/>
+    <constraint xsi:type="primary" referenceId="PRIMARY"><column name="id"/></constraint>
+  </table>
+</schema>

@@ -1,0 +1,16 @@
+<schema xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <table name="sales_order">
+    <column xsi:type="int" name="entity_id" nullable="false"/>
+    <column xsi:type="int" name="customer_id"/>
+    <constraint xsi:type="foreign" referenceId="ORDER_CUSTOMER" column="customer_id" referenceTable="customer_entity" referenceColumn="entity_id"/>
+    <column xsi:type="varchar" name="old_column" length="20"/>
+    <constraint xsi:type="primary" referenceId="PRIMARY"><column name="entity_id"/></constraint>
+    <constraint xsi:type="unique" referenceId="OLD_UNIQUE"><column name="old_column"/></constraint>
+  </table>
+  <table name="removed_table">
+    <column xsi:type="int" name="id"/>
+  </table>
+  <table name="untouched_vendor">
+    <column xsi:type="int" name="id"/>
+  </table>
+</schema>

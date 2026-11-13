@@ -1,0 +1,10 @@
+<schema xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <table name="acme_audit">
+    <column xsi:type="int" name="id"/>
+    <constraint xsi:type="primary" referenceId="PRIMARY"><column name="id"/></constraint>
+  </table>
+  <table name="acme_note">
+    <column name="obsolete" disabled="true"/>
+    <column xsi:type="text" name="audit_message"/>
+  </table>
+</schema>
