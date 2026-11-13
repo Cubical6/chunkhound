@@ -18,6 +18,7 @@ from chunkhound.domain_model.author import resolve_author
 from chunkhound.domain_model.issues import Issue
 from chunkhound.domain_model.loader import (
     COLLECTIONS,
+    dump_model,
     rule_shape_issues,
     template_issues,
     validation_issues,
@@ -200,6 +201,35 @@ class DomainInputUnavailable(ValueError):  # noqa: N818 - public contract name (
     def __init__(self, issues: Iterable[Issue]) -> None:
         self.issues = tuple(issues)
         super().__init__(f"{len(self.issues)} issues; nothing was written")
+
+
+def human_input_view_json(view: HumanInputView) -> dict[str, Any]:
+    """Serialize the contract model in canonical field order for both entrances."""
+    return {
+        "model": json.loads(dump_model(view.model)),
+        "judgements": view.model_dump(mode="json")["judgements"],
+    }
+
+
+def write_result_json(result: WriteResult) -> dict[str, Any]:
+    """Return the shared CLI/MCP write response."""
+    return result.model_dump(mode="json")
+
+
+def domain_error_json(
+    exc: DomainInputRejected | DomainInputUnavailable,
+) -> dict[str, Any]:
+    """Keep structured issues intact across transport boundaries."""
+    return {
+        "error": {
+            "type": type(exc).__name__,
+            "message": str(exc),
+            "issues": [
+                {"path": issue.path, "code": issue.code, "message": issue.message}
+                for issue in exc.issues
+            ],
+        }
+    }
 
 
 def _check_backend(provider: object) -> None:
