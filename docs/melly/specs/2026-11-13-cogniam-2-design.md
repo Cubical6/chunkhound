@@ -1,7 +1,7 @@
 # Spec: §2 Vaste structuurextractie
 
 - Datum: 2026-11-13 · Branch: `worktree-cogniam-plan` (HEAD bij start `02d5664a`)
-- **Status:** concept, wacht op goedkeuring van de gebruiker. Deze spec geeft geen toestemming voor implementatie, voor een provider-run of voor een push naar `main`.
+- **Status:** goedgekeurd door de gebruiker op 2026-11-13, samen met het [plan](../plans/2026-11-13-cogniam-2.md). De voorstellen uit §12 die een eerder besluit raken, zijn vastgelegd als B34. Deze spec geeft geen toestemming voor een provider-run of voor een push naar `main`.
 - Bron: [routekaart §2](../plans/2026-11-12-cogniam-routekaart.md#2-vaste-structuurextractie), besluiten B26 tot en met B33 in het [besluitenlog](../decisions/2026-11-12-cogniam-model.md), en de [spec van §1](2026-11-13-cogniam-1-design.md) voor het contract.
 - Aanhaakpunten zijn op `02d5664a` gelezen, niet gedraaid. Uitzondering: de grammaticaproeven in §6.1 zijn wel gedraaid.
 - Verwijzingen naar "§1-spec §x" gaan naar de spec van §1. Verwijzingen zonder toevoeging gaan naar deze spec.
@@ -198,7 +198,7 @@ Bewerkingen (B32): tabel aanmaken, hernoemen en verwijderen; kolom toevoegen, ve
 | Koppeling van de rol | `target` is `<tabel>.<kolom>` | `team_user.user_id` |
 
 - **Geen enkelvoud of meervoud raden.** `plural` blijft `None`, net als `definition`; `synonyms` is leeg.
-- **De rol heet naar de kolom.** B12 en B26 zeggen dat de rol naar het begrip heet. Vast afleiden kan dat niet: een kolom zonder *foreign key* heeft geen bekend begrip, en twee verwijzingen naar dezelfde tabel (`sender_id`, `receiver_id`) zouden dezelfde naam krijgen. De kolomnaam is altijd uniek en verandert niet tussen runs. Het begrip staat in `Role.concept`. Dit is een voorstel dat de letter van B12 en B26 raakt (§12).
+- **De rol heet naar de kolom.** B12 en B26 zeggen dat de rol naar het begrip heet. Vast afleiden kan dat niet: een kolom zonder *foreign key* heeft geen bekend begrip, en twee verwijzingen naar dezelfde tabel (`sender_id`, `receiver_id`) zouden dezelfde naam krijgen. De kolomnaam is altijd uniek en verandert niet tussen runs. Het begrip staat in `Role.concept`. Dit wijzigt de letter van B12 en B26 en is aanvaard als B34 (§12).
 - **Botsende sleutels.** Geven twee tabellen of twee kolommen hetzelfde `key_segment` (`user_id` en `user-id`), dan krijgt de tweede in bronvolgorde geen element, maar een markering `unresolved` met `key_collision`.
 
 ### 5.3 Sleutelrollen, begrip en `identifies`
@@ -695,7 +695,7 @@ De functie wordt gedeeld met de schrijfdienst, dus de regel geldt ook voor `doma
 
 ## 12. Voorstellen in deze spec
 
-Deze punten staan niet letterlijk in B26 tot en met B33. De eerste zes raken een eerder besluit; bij goedkeuring van deze spec komen ze als B34 in het besluitenlog.
+Deze punten staan niet letterlijk in B26 tot en met B33. De eerste zes raken een eerder besluit; ze zijn aanvaard en staan als B34 in het besluitenlog. De andere twaalf zijn met de spec goedgekeurd.
 
 | # | Voorstel | Waar | Raakt | Waarom |
 |---|---|---|---|---|

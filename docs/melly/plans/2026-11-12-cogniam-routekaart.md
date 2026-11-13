@@ -1,7 +1,7 @@
 # Routekaart: Cogniam-kennismodel uit code
 
 - Datum: 2026-11-12 · Basis: `main` op `f89044d9` · Branch: `worktree-cogniam-plan`
-- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 heeft een [spec](../specs/2026-11-13-cogniam-2-design.md) en een [plan](2026-11-13-cogniam-2.md) (B26 tot en met B33; alle ontwerpvragen zijn beantwoord) die op goedkeuring wachten. Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
+- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 is gereed: de gebruiker keurde de [spec](../specs/2026-11-13-cogniam-2-design.md) en het [plan](2026-11-13-cogniam-2.md) op 2026-11-13 goed, na B26 tot en met B34. §2 is nog niet geïmplementeerd. Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
 - Besluitenlog: [2026-11-12-cogniam-model.md](../decisions/2026-11-12-cogniam-model.md)
 
 ## Doel
@@ -37,7 +37,7 @@ Regels:
 |---|---|---|---|---|---|
 | 0 | Kader en besluiten | – | gereed | n.v.t. | n.v.t. |
 | 1 | Metamodel en contract | 0 | gereed | [spec](../specs/2026-11-13-cogniam-1-design.md) | [plan](2026-11-13-cogniam-1.md) |
-| 2 | Vaste structuurextractie | 1 | plan | [spec](../specs/2026-11-13-cogniam-2-design.md) | [plan](2026-11-13-cogniam-2.md) |
+| 2 | Vaste structuurextractie | 1 | gereed | [spec](../specs/2026-11-13-cogniam-2-design.md) | [plan](2026-11-13-cogniam-2.md) |
 | 3 | LLM-extractie | 1 (2 voor ankers) | open | – | – |
 | 4 | Consolidatie en identiteit | 2, 3 | open | – | – |
 | 5 | Meerdere repositories en koppeling met C4 | 4 | open | – | – |
@@ -198,7 +198,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 
 ## §2 Vaste structuurextractie
 
-- **Status:** plan · **Hangt af van:** §1 · [spec](../specs/2026-11-13-cogniam-2-design.md) · [plan](2026-11-13-cogniam-2.md)
+- **Status:** gereed, goedgekeurd op 2026-11-13 (voorstellen vastgelegd in B34): [spec](../specs/2026-11-13-cogniam-2-design.md) en [plan](2026-11-13-cogniam-2.md) · **Hangt af van:** §1
 - **Doel:** kandidaat-feittypen, invulplaatsen en validatieregels zonder LLM afleiden uit schema's en modellen.
 - **Besloten:**
   - B26: een tabel of model wordt één samengesteld feittype, met één rol per kolom (genoemd naar het begrip, met een koppeling naar de kolom).
@@ -247,6 +247,12 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     - Een project kan in de configuratie namen toevoegen of van de lijst halen.
     - Een koppeltabel zoals `team_user` staat niet op de lijst.
     - Voor de spec: één vorm voor de vier markeringen "technisch", "van derden" (B28), "niet opgelost" (B27) en "onzeker" (B32), en de precieze lijst.
+  - B34: de spec en het plan van §2 zijn goedgekeurd, met zes voorstellen die een eerder besluit raken.
+    - Een rol uit de vaste extractie heet naar de kolom; het begrip staat in `Role.concept` (wijzigt B12 en B26 voor status `extracted`).
+    - Het begrip "hoofdsjabloon" vervalt; bij `identifies` is het eerste sjabloon het identificerende (wijzigt B25, punt 1).
+    - Een Eloquent-model zonder tabel levert geen feittype, en een Magento-servicecontract is alleen een aanwijzing (beperkt B31).
+    - Een Next.js Server Action is een anker van de soort `action` (vult B27 en B30 aan).
+    - De technische lijsten zijn langer dan de voorbeelden in B33; de regel blijft gelijk.
 - **Gevolg van B11:**
   - Uitwisselingsregels horen bij versie 1. Routes, controllers, endpoints en commands zijn daarvoor de bronnen. §2 leest hun structuur als ankers en §3 maakt de regels (B27).
   - De CEM-werkwijze ([onderzoek](../research/2026-11-12-cem-werkwijze.md)) laat zien wat vast te lezen is: uniciteit, deelverzameling (*foreign key*), waardenregel, verplichte rol en datatype. Vaste waarden in de code zijn kandidaten voor een waardenregel.
