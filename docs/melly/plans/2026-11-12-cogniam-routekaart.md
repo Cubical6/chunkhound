@@ -1,7 +1,7 @@
 # Routekaart: Cogniam-kennismodel uit code
 
 - Datum: 2026-11-12 · Basis: `main` op `f89044d9` · Branch: `worktree-cogniam-plan`
-- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 is in ontwerp (B26 tot en met B30). Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
+- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 is in ontwerp (B26 tot en met B31). Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
 - Besluitenlog: [2026-11-12-cogniam-model.md](../decisions/2026-11-12-cogniam-model.md)
 
 ## Doel
@@ -230,6 +230,12 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     - GraphQL-schemabestanden gelden voor alle drie de stacks, inclusief `@resolver` in `etc/schema.graphqls` (Magento) en de directives van Lighthouse (Laravel). Elk veld onder `Query`, `Mutation` en `Subscription` is een anker; het `input`-type en de enums zijn aanwijzingen.
     - Later: Express, en GraphQL-bouwers zonder schemabestand (Pothos, Nexus).
     - Grens: bij TypeScript zonder decorators krijgt de handler van een GraphQL-veld de markering "niet opgelost".
+  - B31: als bronnen overlappen, bepaalt de opslag het feittype.
+    - Rangorde: opslag (DDL, migraties, `db_schema.xml`, Prisma, TypeORM-entity), dan model (Eloquent), dan API-vorm (GraphQL-type, servicecontract). De hoogste bron die er is, bepaalt het feittype, de rollen, verplicht en datatype.
+    - Een lagere bron die hetzelfde zegt, wordt een extra citatie bij dezelfde regel. Een lagere bron die iets toevoegt (een relatie uit het model, een enum-cast), wordt een eigen regel met alleen die citatie.
+    - Invoervalidatie (`FormRequest`, Zod, class-validator, GraphQL-`input`) maakt nooit een feittype. Ze blijft een aanwijzing bij het anker (B27), met een verwijzing naar de rol als de naam overeenkomt.
+    - Bij een tegenspraak kiest §2 niet: beide blijven staan. Het verschil wordt later afgeleid, in §4 of §7.
+    - Voor de spec: hoe een model aan zijn tabel wordt gekoppeld, en of een Zod-schema zonder anker ooit een feittype wordt.
 - **Gevolg van B11:**
   - Uitwisselingsregels horen bij versie 1. Routes, controllers, endpoints en commands zijn daarvoor de bronnen. §2 leest hun structuur als ankers en §3 maakt de regels (B27).
   - De CEM-werkwijze ([onderzoek](../research/2026-11-12-cem-werkwijze.md)) laat zien wat vast te lezen is: uniciteit, deelverzameling (*foreign key*), waardenregel, verplichte rol en datatype. Vaste waarden in de code zijn kandidaten voor een waardenregel.
@@ -271,7 +277,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - ~~Magento: alleen eigen modules of ook `vendor/`~~ (besloten, B28: eigen modules volledig, uit `vendor/` alleen wat ze aanraken);
   - ~~Magento EAV: eigen feittype per attribuut of één generiek feittype~~ (besloten, B29: een attribuut wordt een rol van de entiteit);
   - ~~TypeScript: welke ORM en welke validatiebibliotheken eerst~~ (besloten, B30);
-  - wat te doen als bronnen overlappen of elkaar tegenspreken, bijvoorbeeld een migratie tegenover een model of `FormRequest`. Hierbij hoort ook of een GraphQL-type, een Zod-schema of een servicecontract een eigen feittype wordt als er al een tabel is;
+  - ~~wat te doen als bronnen overlappen of elkaar tegenspreken~~ (besloten, B31: de opslag bepaalt het feittype, lagere bronnen vullen aan, tegenspraak blijft staan);
   - de volgorde van migraties: welke migratie geeft de huidige toestand (ook bij `dropColumn` en hernoemingen);
   - hoe technische tabellen worden herkend: migratieadministratie, jobs, caches, sessies, Magento-indexers. De uitsluiting zelf gebeurt in §4.
 - **Gereed als:**
