@@ -37,6 +37,20 @@ async def domain_command(args: argparse.Namespace, config: Config) -> None:
     if args.schema:
         _emit(WriteRequest.model_json_schema())
         return
+    if getattr(args, "extract_structure", False):
+        from chunkhound.domain_model.structure.contract import dump_structure
+        from chunkhound.domain_model.structure.extract import (
+            StructureExtractionError,
+            extract_structure,
+        )
+
+        try:
+            extraction = extract_structure(args.path, config)
+        except StructureExtractionError as exc:
+            sys.stderr.write(f"chunkhound domain: {exc}\n")
+            raise SystemExit(2) from exc
+        sys.stdout.write(dump_structure(extraction))
+        return
     if not args.write and not args.list_input:
         sys.stderr.write("extraction is not available yet (§2)\n")
         raise SystemExit(2)
