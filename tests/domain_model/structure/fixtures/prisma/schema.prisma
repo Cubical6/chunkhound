@@ -1,0 +1,44 @@
+enum Status {
+  ACTIVE @map("active")
+  INACTIVE
+  @@map("statuses")
+}
+model User {
+  id Int @id
+  email String @unique @map("e_mail")
+  status Status
+  nickname String // @unique @map("wrong") @relation(fields: [id], references: [id])
+  note String // @unique
+  teams Team[]
+  @@map("users")
+}
+model Team {
+  id Int @id
+  members TeamMember[]
+  @@map("teams")
+}
+model TeamMember {
+  id Int @id
+  teamId Int @map("team_id")
+  userId Int
+  team Team @relation(fields: [teamId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+  optional String?
+  omitted String @ignore
+  @@unique(fields: [teamId, userId], name: "team_user_unique", map: "team_user_key")
+  @@map("team_members")
+}
+model Pair {
+  left Int
+  right Int
+  extra Int
+  @@id(fields: [left, right])
+  @@unique([right, extra])
+}
+model _prisma_migrations {
+  id String @id
+}
+model Ignored {
+  id Int @id
+  @@ignore
+}
