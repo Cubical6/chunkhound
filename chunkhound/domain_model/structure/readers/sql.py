@@ -1,8 +1,4 @@
-"""SQL CREATE reader: tree-sitter boundaries, quote-aware CREATE TABLE contents.
-
-Named mysqldump constraints are intentionally read from source, not AST children:
-that syntax is a known hole in the SQL grammar. ALTER/replay is a later phase.
-"""
+"""SQL DDL replay with tree-sitter boundaries and quote-aware definitions."""
 
 import re
 from dataclasses import dataclass
@@ -10,6 +6,7 @@ from typing import TYPE_CHECKING, Literal
 
 from tree_sitter_language_pack import get_parser
 
+from chunkhound.domain_model.structure.ordering import natural_order
 from chunkhound.domain_model.structure.schema import (
     Column,
     Constraint,
@@ -321,7 +318,9 @@ class SQLReader:
         parser = get_parser("sql")
         statements: list[tuple[Schema, _Statement]] = []
         schemas: dict[str, Schema] = {}
-        for path in ctx.paths:
+        for path in sorted(ctx.paths, key=natural_order):
+            if re.match(r"U\d", path.rsplit("/", 1)[-1]):
+                continue
             source = ctx.read(path)
             if source is None:
                 continue
@@ -353,8 +352,16 @@ class SQLReader:
                     end = node.end_byte
         enums: dict[tuple[str, str], tuple[tuple[str, ...], Span]] = {}
         for schema, statement in statements:
-            tokens = _tokens(statement.text)
-            cursor = _Cursor(tokens)
+            cursor = _Cursor(_tokens(statement.text))
+            if cursor.accept("ALTER"):
+                self._alter(schema, statement, cursor, enums)
+                continue
+            if cursor.accept("DROP"):
+                self._drop(schema, statement, cursor)
+                continue
+            if cursor.accept("RENAME"):
+                self._rename(schema, statement, cursor)
+                continue
             if not cursor.accept("CREATE"):
                 continue
             if cursor.accept("TYPE"):
@@ -362,17 +369,12 @@ class SQLReader:
                     name = cursor.identifier()
                     cursor.expect("AS")
                     cursor.expect("ENUM")
-                    enums[(schema.repository, name)] = (
-                        _values(cursor.group()),
-                        statement.span(),
-                    )
+                    values = _values(cursor.group())
+                    self._finished(cursor)
+                    enums[(schema.repository, name)] = (values, statement.span())
                 except _UnparsedError:
                     continue
-        for schema, statement in statements:
-            cursor = _Cursor(_tokens(statement.text))
-            if not cursor.accept("CREATE"):
-                continue
-            if cursor.accept("TABLE"):
+            elif cursor.accept("TABLE"):
                 self._table(schema, statement, cursor, enums)
             elif cursor.accept("UNIQUE") and cursor.accept("INDEX"):
                 table_name = None
@@ -408,6 +410,231 @@ class SQLReader:
                     if table_name:
                         schema.mark_uncertain(table_name, statement.span())
 
+    def _rename(self, schema: Schema, statement: _Statement, cursor: _Cursor) -> None:
+        name = None
+        try:
+            cursor.expect("TABLE")
+            for part in _parts(cursor.tokens[cursor.index :]):
+                item = _Cursor(part)
+                name = item.identifier()
+                item.expect("TO")
+                new_name = item.identifier()
+                self._finished(item)
+                schema.rename_table(name, new_name, statement.span(part))
+        except _UnparsedError:
+            if name:
+                schema.mark_uncertain(name, statement.span())
+
+    @staticmethod
+    def _finished(cursor: _Cursor) -> None:
+        if cursor.index != len(cursor.tokens):
+            raise _UnparsedError("Unrecognized trailing syntax")
+
+    def _drop(self, schema: Schema, statement: _Statement, cursor: _Cursor) -> None:
+        name = None
+        try:
+            if cursor.accept("TABLE"):
+                if cursor.accept("IF"):
+                    cursor.expect("EXISTS")
+                for part in _parts(cursor.tokens[cursor.index :]):
+                    item = _Cursor(part)
+                    name = item.identifier()
+                    item.accept("CASCADE") or item.accept("RESTRICT")
+                    self._finished(item)
+                    schema.drop_table(name, statement.span(part))
+            elif cursor.accept("INDEX"):
+                if cursor.accept("IF"):
+                    cursor.expect("EXISTS")
+                index = cursor.identifier()
+                if cursor.accept("ON"):
+                    name = cursor.identifier()
+                    self._finished(cursor)
+                    schema.drop_constraint(name, index, statement.span())
+                else:
+                    self._finished(cursor)
+                    for table in tuple(schema.tables.values()):
+                        if any(c.name == index for c in table.constraints):
+                            schema.drop_constraint(table.name, index, statement.span())
+        except _UnparsedError:
+            if name:
+                schema.mark_uncertain(name, statement.span())
+
+    def _alter(
+        self,
+        schema: Schema,
+        statement: _Statement,
+        cursor: _Cursor,
+        enums: dict[tuple[str, str], tuple[tuple[str, ...], Span]],
+    ) -> None:
+        name = None
+        try:
+            cursor.expect("TABLE")
+            if cursor.accept("IF"):
+                cursor.expect("EXISTS")
+            cursor.accept("ONLY")
+            name = cursor.identifier()
+        except _UnparsedError:
+            return
+        for part in _parts(cursor.tokens[cursor.index :]):
+            try:
+                self._alter_part(schema, statement, name, _Cursor(part), enums)
+            except _UnparsedError:
+                schema.mark_uncertain(name, statement.span(part))
+
+    def _alter_part(
+        self,
+        schema: Schema,
+        statement: _Statement,
+        name: str,
+        item: _Cursor,
+        enums: dict[tuple[str, str], tuple[tuple[str, ...], Span]],
+    ) -> None:
+        span = statement.span(item.tokens)
+        table = schema.tables.get(name)
+        columns = tuple(c.name for c in table.columns) if table else ()
+        if item.accept("OWNER"):
+            item.expect("TO")
+            item.identifier()
+            self._finished(item)
+            return
+        if item.accept("ADD"):
+            if item.accept("FULLTEXT") or item.accept("SPATIAL"):
+                if not (item.accept("KEY") or item.accept("INDEX")):
+                    raise _UnparsedError("Expected index")
+                return
+            if item.accept("INDEX") or item.accept("KEY"):
+                return  # Ordinary indexes do not contribute to the model.
+            if item.index < len(item.tokens) and item.tokens[item.index].upper in {
+                "CONSTRAINT",
+                "PRIMARY",
+                "UNIQUE",
+                "FOREIGN",
+                "CHECK",
+            }:
+                constraint = _constraint(item, statement, columns)
+                self._finished(item)
+                schema.add_constraint(name, constraint)
+            else:
+                item.accept("COLUMN")
+                definition = self._definition(
+                    statement,
+                    name,
+                    [item.tokens[item.index :]],
+                    enums,
+                    schema.repository,
+                )
+                if definition.uncertain or len(definition.columns) != 1:
+                    raise _UnparsedError("Unknown column definition")
+                schema.add_column(name, definition.columns[0])
+                for constraint in definition.constraints:
+                    schema.add_constraint(name, constraint)
+        elif item.accept("DROP"):
+            if item.accept("PRIMARY"):
+                item.expect("KEY")
+                self._finished(item)
+                schema.drop_constraint(name, None, span, kind="primary")
+            elif item.accept("CONSTRAINT") or item.accept("INDEX"):
+                constraint_name = item.identifier()
+                self._finished(item)
+                schema.drop_constraint(name, constraint_name, span)
+            elif item.accept("FOREIGN"):
+                item.expect("KEY")
+                constraint_name = item.identifier()
+                self._finished(item)
+                schema.drop_constraint(name, constraint_name, span)
+            else:
+                item.accept("COLUMN")
+                column_name = item.identifier()
+                self._finished(item)
+                schema.drop_column(name, column_name, span)
+        elif item.accept("RENAME"):
+            if item.accept("COLUMN"):
+                old = item.identifier()
+                item.expect("TO")
+                new = item.identifier()
+                self._finished(item)
+                schema.rename_column(name, old, new, span)
+            else:
+                item.expect("TO")
+                new = item.identifier()
+                self._finished(item)
+                schema.rename_table(name, new, span)
+        elif item.at("MODIFY") or item.at("CHANGE"):
+            change = item.take().upper == "CHANGE"
+            item.accept("COLUMN")
+            old = (
+                item.identifier()
+                if change
+                else _Cursor(item.tokens, item.index).identifier()
+            )
+            definition = self._definition(
+                statement, name, [item.tokens[item.index :]], enums, schema.repository
+            )
+            if definition.uncertain or len(definition.columns) != 1:
+                raise _UnparsedError("Unknown column definition")
+            schema.change_column(name, old, definition.columns[0])
+            for constraint in definition.constraints:
+                schema.add_constraint(name, constraint)
+        elif item.accept("ALTER"):
+            item.accept("COLUMN")
+            column_name = item.identifier()
+            column = (
+                next((c for c in table.columns if c.name == column_name), None)
+                if table
+                else None
+            )
+            updates: dict[str, str | bool | Span | tuple[Span, ...]] = {
+                "origin": (span,),
+                "defined_at": span,
+            }
+            if item.accept("TYPE"):
+                start = item.index
+                while item.index < len(item.tokens) and not item.at("USING"):
+                    if item.at("("):
+                        item.group()
+                    else:
+                        item.take()
+                type_tokens = item.tokens[start : item.index]
+                if not type_tokens:
+                    raise _UnparsedError("Missing type")
+                updates["datatype"] = _datatype(type_tokens)
+                item.index = len(item.tokens)
+            elif item.accept("SET"):
+                if item.accept("DEFAULT"):
+                    return  # Defaults neither constrain roles nor add citations.
+                item.expect("NOT")
+                item.expect("NULL")
+                updates["mandatory"] = True
+            elif item.accept("DROP"):
+                if item.accept("DEFAULT"):
+                    self._finished(item)
+                    return
+                item.expect("NOT")
+                item.expect("NULL")
+                updates["mandatory"] = False
+            elif item.accept("ADD"):
+                item.expect("GENERATED")
+                if not item.accept("ALWAYS"):
+                    item.expect("BY")
+                    item.expect("DEFAULT")
+                item.expect("AS")
+                item.expect("IDENTITY")
+                if item.at("("):
+                    item.group()
+                self._finished(item)
+                return
+            else:
+                raise _UnparsedError("Unknown column alteration")
+            self._finished(item)
+            if column is None:
+                schema.mark_uncertain(name, span)
+            else:
+                schema.change_column(
+                    name, column_name, column.model_copy(update=updates)
+                )
+        else:
+            raise _UnparsedError("Unknown table alteration")
+
     def _table(
         self,
         schema: Schema,
@@ -427,6 +654,19 @@ class SQLReader:
             if name:
                 schema.mark_uncertain(name, statement.span())
             return
+        schema.create_table(
+            self._definition(statement, name, parts, enums, schema.repository),
+            if_not_exists=if_not_exists,
+        )
+
+    def _definition(
+        self,
+        statement: _Statement,
+        name: str,
+        parts: list[list[_Token]],
+        enums: dict[tuple[str, str], tuple[tuple[str, ...], Span]],
+        repository: str,
+    ) -> Table:
         columns: list[Column] = []
         constraints: list[Constraint] = []
         uncertain: list[tuple[str, Span]] = []
@@ -488,7 +728,7 @@ class SQLReader:
                 else:
                     type_cursor = _Cursor(type_tokens)
                     enum_name = type_cursor.identifier()
-                    enum = enums.get((schema.repository, enum_name))
+                    enum = enums.get((repository, enum_name))
                     if enum:
                         constraints.append(
                             Constraint(
@@ -537,13 +777,10 @@ class SQLReader:
                 valid.append(constraint)
             else:
                 uncertain.append(("unparsed_statement", constraint.spans[0]))
-        schema.create_table(
-            Table(
-                name=name,
-                columns=tuple(columns),
-                constraints=tuple(valid),
-                defined_at=statement.span(),
-                uncertain=tuple(uncertain),
-            ),
-            if_not_exists=if_not_exists,
+        return Table(
+            name=name,
+            columns=tuple(columns),
+            constraints=tuple(valid),
+            defined_at=statement.span(),
+            uncertain=tuple(uncertain),
         )

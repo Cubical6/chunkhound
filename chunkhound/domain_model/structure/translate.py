@@ -5,6 +5,7 @@ import re
 from collections.abc import Callable
 from typing import Any, Literal
 
+from chunkhound.core.config.domain_config import DomainConfig
 from chunkhound.domain_model import identity
 from chunkhound.domain_model.model import (
     Citation,
@@ -27,10 +28,13 @@ from chunkhound.domain_model.structure.schema import (
     Span,
     Table,
 )
+from chunkhound.domain_model.structure.technical import technical_matches
 
 
 def translate(
-    schemas: list[Schema], repository_of: Callable[[str], RepositoryRef]
+    schemas: list[Schema],
+    repository_of: Callable[[str], RepositoryRef],
+    config: DomainConfig | None = None,
 ) -> tuple[DomainModel, list[Finding], list[DivergentClaim]]:
     """Resolve all tables before following references; never synthesize targets."""
     findings: list[Finding] = []
@@ -65,7 +69,7 @@ def translate(
         )
 
     def finding(
-        kind: Literal["unresolved", "uncertain", "external_reference"],
+        kind: Literal["unresolved", "uncertain", "external_reference", "technical"],
         subject: str | None,
         reason: str,
         detail: str | None,
@@ -127,6 +131,13 @@ def translate(
             tables[key] = table
             columns[key] = kept
             fact_ids[key] = fid
+            for reason, list_name in technical_matches(
+                table.name,
+                schema.reader,
+                table.defined_at.path,
+                (config or DomainConfig()).technical_tables,
+            ):
+                finding("technical", fid, reason, list_name, (table.defined_at,))
 
     def valid_constraints(key: tuple[str, str]) -> tuple[Constraint, ...]:
         return tuple(

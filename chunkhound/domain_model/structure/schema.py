@@ -216,17 +216,27 @@ class Schema:
             update={"constraints": (*table.constraints, constraint)}
         )
 
-    def drop_constraint(self, name: str, constraint_name: str, span: Span) -> None:
+    def drop_constraint(
+        self,
+        name: str,
+        constraint_name: str | None,
+        span: Span,
+        *,
+        kind: str | None = None,
+    ) -> None:
+        def matches(constraint: Constraint) -> bool:
+            return (
+                constraint.kind == kind
+                if kind is not None
+                else constraint.name == constraint_name
+            )
+
         table = self.tables.get(name)
-        if table is None or not any(
-            c.name == constraint_name for c in table.constraints
-        ):
+        if table is None or not any(matches(c) for c in table.constraints):
             self.mark_uncertain(name, span)
             return
         self.tables[name] = table.model_copy(
             update={
-                "constraints": tuple(
-                    c for c in table.constraints if c.name != constraint_name
-                )
+                "constraints": tuple(c for c in table.constraints if not matches(c))
             }
         )

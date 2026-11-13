@@ -108,7 +108,9 @@ def _build(ctx: ReadContext) -> StructureExtraction:
                         ),
                     )
                 )
-    model, findings, claims = translate(ctx.schemas, ctx.repository_of)
+    model, findings, claims = translate(
+        ctx.schemas, ctx.repository_of, ctx.config.domain if ctx.config else None
+    )
     ctx.findings.extend(findings)
     return StructureExtraction(
         schema_version=1,
