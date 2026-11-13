@@ -1,7 +1,7 @@
 # Routekaart: Cogniam-kennismodel uit code
 
 - Datum: 2026-11-12 · Basis: `main` op `f89044d9` · Branch: `worktree-cogniam-plan`
-- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 is in ontwerp (B26 tot en met B31). Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
+- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 is in ontwerp (B26 tot en met B32). Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
 - Besluitenlog: [2026-11-12-cogniam-model.md](../decisions/2026-11-12-cogniam-model.md)
 
 ## Doel
@@ -236,6 +236,12 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     - Invoervalidatie (`FormRequest`, Zod, class-validator, GraphQL-`input`) maakt nooit een feittype. Ze blijft een aanwijzing bij het anker (B27), met een verwijzing naar de rol als de naam overeenkomt.
     - Bij een tegenspraak kiest §2 niet: beide blijven staan. Het verschil wordt later afgeleid, in §4 of §7.
     - Voor de spec: hoe een model aan zijn tabel wordt gekoppeld, en of een Zod-schema zonder anker ooit een feittype wordt.
+  - B32: §2 bepaalt de huidige toestand door migraties na te spelen, in volgorde van bestandsnaam, op een schema in het geheugen.
+    - Bewerkingen: aanmaken, kolom toevoegen, verwijderen, hernoemen en wijzigen, en indexen en *foreign keys* erbij of eraf.
+    - Een schemadump (`database/schema/*.sql`) is het startpunt als hij bestaat. De methode `down()` telt niet mee.
+    - Wat §2 niet kan volgen (rauwe SQL in `DB::statement`, voorwaarden, lussen), maakt de tabel "onzeker", met een citatie.
+    - Dit geldt voor Laravel-migraties en losse SQL-migraties. Prisma, TypeORM-entities en `db_schema.xml` beschrijven de huidige toestand al.
+    - Voor de spec: naar welke migratie de citatie van een rol wijst, welke migraties al in een schemadump zitten, en de volgorde bij SQL-migraties met een versienummer.
 - **Gevolg van B11:**
   - Uitwisselingsregels horen bij versie 1. Routes, controllers, endpoints en commands zijn daarvoor de bronnen. §2 leest hun structuur als ankers en §3 maakt de regels (B27).
   - De CEM-werkwijze ([onderzoek](../research/2026-11-12-cem-werkwijze.md)) laat zien wat vast te lezen is: uniciteit, deelverzameling (*foreign key*), waardenregel, verplichte rol en datatype. Vaste waarden in de code zijn kandidaten voor een waardenregel.
@@ -278,7 +284,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - ~~Magento EAV: eigen feittype per attribuut of één generiek feittype~~ (besloten, B29: een attribuut wordt een rol van de entiteit);
   - ~~TypeScript: welke ORM en welke validatiebibliotheken eerst~~ (besloten, B30);
   - ~~wat te doen als bronnen overlappen of elkaar tegenspreken~~ (besloten, B31: de opslag bepaalt het feittype, lagere bronnen vullen aan, tegenspraak blijft staan);
-  - de volgorde van migraties: welke migratie geeft de huidige toestand (ook bij `dropColumn` en hernoemingen);
+  - ~~de volgorde van migraties~~ (besloten, B32: migraties naspelen in volgorde van bestandsnaam);
   - hoe technische tabellen worden herkend: migratieadministratie, jobs, caches, sessies, Magento-indexers. De uitsluiting zelf gebeurt in §4.
 - **Gereed als:**
   - de spec bevat per brontype de vertaling naar §1-elementen, met fixtures;
