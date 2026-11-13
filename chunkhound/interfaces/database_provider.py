@@ -46,6 +46,19 @@ class DatabaseProvider(Protocol):
         ...
 
     @property
+    def supports_domain_input(self) -> bool:
+        """Whether durable human-input storage is supported."""
+        ...
+
+    def append_domain_input(self, rows: list[dict[str, Any]]) -> list[int]:
+        """Append a batch atomically, checkpoint it, and return assigned seq values."""
+        ...
+
+    def load_domain_input(self) -> list[dict[str, Any]]:
+        """Return records ordered by seq, or [] without creating a table."""
+        ...
+
+    @property
     def supports_embedding_sql_queries(self) -> bool:
         """Whether targeted chunk/file/embedding SQL queries are supported."""
         ...
