@@ -1,7 +1,7 @@
 # Routekaart: Cogniam-kennismodel uit code
 
 - Datum: 2026-11-12 · Basis: `main` op `f89044d9` · Branch: `worktree-cogniam-plan`
-- **Status:** concept. §0 is gereed. In §1 zijn alle ontwerpvragen beantwoord (B11 tot en met B23); spec en plan liggen ter review, met één open punt (een leestool, spec §10). Deze routekaart geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
+- **Status:** concept. §0 is gereed. In §1 zijn alle ontwerpvragen beantwoord (B11 tot en met B23), en ook de open punten uit de review (B24, B25). Spec en plan wachten op goedkeuring. Deze routekaart geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
 - Besluitenlog: [2026-11-12-cogniam-model.md](../decisions/2026-11-12-cogniam-model.md)
 
 ## Doel
@@ -36,7 +36,7 @@ Regels:
 | § | Sectie | Hangt af van | Status | Spec | Plan |
 |---|---|---|---|---|---|
 | 0 | Kader en besluiten | – | gereed | n.v.t. | n.v.t. |
-| 1 | Metamodel en contract | 0 | plan (ter review) | [spec](../specs/2026-11-13-cogniam-1-design.md) | [plan](2026-11-13-cogniam-1.md) |
+| 1 | Metamodel en contract | 0 | plan (ter goedkeuring) | [spec](../specs/2026-11-13-cogniam-1-design.md) | [plan](2026-11-13-cogniam-1.md) |
 | 2 | Vaste structuurextractie | 1 | open | – | – |
 | 3 | LLM-extractie | 1 (2 voor ankers) | open | – | – |
 | 4 | Consolidatie en identiteit | 2, 3 | open | – | – |
@@ -52,7 +52,7 @@ Kritiek pad (B4): §0 → §1 → §2 en §3 parallel → §4 → §5 en §6 par
 Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - §8 in versie 1 alleen het lockbestand, en JSON als uitvoer van §7;
 - AutoDoc-pagina's, drift en export daarna;
-- §9 (MCP) als laatste. De MCP-tool voor het schrijven van menselijke invoer komt wel in versie 1 (B17), als onderdeel van §1.
+- §9 (MCP) als laatste. De MCP-tools voor het schrijven (B17) en lezen (B24) van menselijke invoer komen wel in versie 1, als onderdeel van §1.
 
 ## Uitgangspunten (bevestigd, B7)
 
@@ -108,7 +108,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 
 ## §1 Metamodel en contract
 
-- **Status:** plan, ter review: [spec](../specs/2026-11-13-cogniam-1-design.md) en [plan](2026-11-13-cogniam-1.md) · **Hangt af van:** §0
+- **Status:** plan, ter goedkeuring (review verwerkt in B24 en B25): [spec](../specs/2026-11-13-cogniam-1-design.md) en [plan](2026-11-13-cogniam-1.md) · **Hangt af van:** §0
 - **Doel:** de datavorm van het kennismodel. Alle andere secties bouwen hierop.
 - **Basis (B10):** het metamodel volgt het CogNIAM-boek, zie het [onderzoek naar het metamodel in het boek](../research/2026-11-12-cogniam-boek-metamodel.md): zeven kennisklassen (BO, VAR, ZS, VR, AR, UR, ER) plus de feiten op niveau I. Het [onderzoek naar het v4-dossiermodel](../research/2026-11-12-cogniam-v4-metamodel.md) is geen voorbeeld voor §1. Het is alleen achtergrond voor de export in §8.
 - **Praktijkvoorbeeld (B11):** de [CEM-werkwijze van de gebruiker](../research/2026-11-12-cem-werkwijze.md) laat zien hoe de methode op software landt:
@@ -131,13 +131,15 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B21: het id is een sleutel uit soort, repository en naam, zoals bij C4, bijvoorbeeld `fact_type:backend/role-assignment`. Met de termen van B22 begint het id van een regel met `validation_rule:`; hoe de soort regel (zoals uniciteit) in de sleutel komt, volgt in de spec. Het is overal gelijk en komt in testnamen. Een hernoeming geeft een nieuw id, en §4 herkent dat als hernoeming. Een nummer per soort als label kan later bij de export.
   - B22: de Engelse termen komen uit de CogNIAM-literatuur; zie de woordenlijst hieronder.
   - B23: geen veld `level` (kennisdriehoek); gepland of gerealiseerd wordt afgeleid uit citaties; `CHECKPOINT` na elke schrijfactie met menselijke invoer; menselijke invoer in versie 1 alleen op DuckDB.
+  - B24: naast `domain_write` komt de MCP-leestool `domain_read`, met dezelfde uitvoer als `chunkhound domain --list-input`. Zo kent een agent de bestaande id's terwijl de daemon de database op slot heeft.
+  - B25: vier voorstellen uit de spec zijn aanvaard. Een feittype heeft een lijst `templates` (wijzigt B22). De CLI geeft bij een draaiende daemon een eigen lockmelding (wijzigt B17). Een niet-geplaatst gepland element krijgt de sleutel `root` (vult B21 in). Bevestigen van een feittype bevestigt ook de rollen, en voor B14 tellen alleen geldige voorbeeldfeiten uit de menselijke invoer.
 - **Woordenlijst (B8, B22):**
 
   | Boek (Nederlands) | Code en JSON |
   |---|---|
   | begripsomschrijving (BO) | `concept`, met `definition` |
   | variabele of invulplaats (VAR) | `role` |
-  | zinsjabloon (ZS) | `fact_type`, met `template` |
+  | zinsjabloon (ZS) | `fact_type`, met `templates`: een lijst, de eerste is het hoofdsjabloon (B25) |
   | validatieregel (VR) | `validation_rule` |
   | afleidingsregel (AR) | `derivation_rule` |
   | uitwisselingsregel (UR) | `exchange_rule` |
@@ -373,7 +375,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 
 - **Status:** open · **Hangt af van:** §8
 - **Doel:** coding-agents vragen regels op tijdens hun werk.
-- **Al in versie 1 (B17):** de schrijftool voor menselijke invoer. Die hoort bij §1 en wacht niet op §8. §9 gaat alleen over het lezen.
+- **Al in versie 1 (B17, B24):** de schrijftool `domain_write` en de leestool `domain_read` voor menselijke invoer. Die horen bij §1 en wachten niet op §8. §9 gaat over het lezen van het hele model: gevonden en geplande elementen, regels en testspecificaties.
 - **Inhoud:**
   - Vragen als:
     - "regels voor begrip X";

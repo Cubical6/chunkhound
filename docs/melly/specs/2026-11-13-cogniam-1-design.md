@@ -1,8 +1,8 @@
 # Spec: §1 Metamodel en contract van het domeinmodel
 
 - Datum: 2026-11-13 · Branch: `worktree-cogniam-plan` (HEAD bij start `f7a73dcb`)
-- **Status:** concept, ter review. Deze spec geeft geen toestemming voor implementatie of een push naar `main`.
-- Bron: [routekaart §1](../plans/2026-11-12-cogniam-routekaart.md#1-metamodel-en-contract), besluiten B11 tot en met B23 in het [besluitenlog](../decisions/2026-11-12-cogniam-model.md), het [onderzoek naar het metamodel in het boek](../research/2026-11-12-cogniam-boek-metamodel.md) en de [CEM-werkwijze](../research/2026-11-12-cem-werkwijze.md).
+- **Status:** concept, ter goedkeuring. De open punten uit de review zijn besloten (B24, B25, zie §10). Deze spec geeft geen toestemming voor implementatie of een push naar `main`.
+- Bron: [routekaart §1](../plans/2026-11-12-cogniam-routekaart.md#1-metamodel-en-contract), besluiten B11 tot en met B25 in het [besluitenlog](../decisions/2026-11-12-cogniam-model.md), het [onderzoek naar het metamodel in het boek](../research/2026-11-12-cogniam-boek-metamodel.md) en de [CEM-werkwijze](../research/2026-11-12-cem-werkwijze.md).
 - Aanhaakpunten zijn op `f7a73dcb` gelezen, niet gedraaid.
 
 ## 1. Probleem
@@ -18,7 +18,7 @@ Alle andere secties (§2 tot en met §10) hebben één datavorm nodig voor het k
 - de id's (§6);
 - de lader met laadfouten (§7);
 - de opslag van menselijke invoer (§8);
-- de schrijfdienst met een MCP-tool en een CLI-opdracht (§9);
+- de schrijfdienst met een CLI-opdracht en twee MCP-tools: `domain_write` om te schrijven en `domain_read` om te lezen (§9);
 - tests (§12) en fasering (§13).
 
 **Buiten scope:**
@@ -335,7 +335,7 @@ Module: `chunkhound/domain_model/identity.py`. Het patroon is `c4/identity.py:25
   - De sleutel is `root` voor `.` en anders `key_segment(pad)`, dus `services/backend` wordt `services-backend`.
   - Omdat `key_segment` idempotent is, accepteert de schrijfdienst een pad of een sleutel.
   - Geven twee repositories dezelfde sleutel (bijvoorbeeld `services/backend` en `services-backend`, of een map die `root` heet), dan stopt de run in §2 met de fout `repository_key_collision`.
-- **Gepland element zonder bekende repository** (het open punt uit B21): de schrijfdienst gebruikt standaard `.`, dus `root`. Dat betekent "nog niet geplaatst". Komt het element later in een repository, dan krijgt het een ander id, en §4 herkent dat als hernoeming of koppeling.
+- **Gepland element zonder bekende repository** (het open punt uit B21, besloten in B25): de schrijfdienst gebruikt standaard `.`, dus `root`. Dat betekent "nog niet geplaatst". Komt het element later in een repository, dan krijgt het een ander id, en §4 herkent dat als hernoeming of koppeling.
 
 ### 6.2 Sleutel per soort
 
@@ -471,7 +471,7 @@ De operatienamen beginnen niet met `insert`, `update`, enzovoort. Een schrijfact
 
 Over `schema_version`: dit **wijkt af** van een bevinding in de routekaart ("migratie via `schema_version`"). Die tabel heeft alleen een rij "Initial schema" (`duckdb_provider.py:1670`), en geen code handelt op de waarde. ChunkHound migreert al idempotent, zie `_executor_migrate_schema` (`:1682`) en `ADD COLUMN IF NOT EXISTS` in `duckdb_provider.py:1553` en `src/db/duckdb_backend/schema.rs:72`. Een rij in `schema_version` zou een migratieraamwerk introduceren dat nergens voor nodig is. De versie per rij (`payload_version`) dekt de upgrades van de inhoud.
 
-## 9. Schrijfdienst (B17, B18, B19)
+## 9. Schrijfdienst (B17, B18, B19, B24)
 
 Module: `chunkhound/domain_model/human_input.py` (verzoekmodellen, controle, afspelen) en `chunkhound/domain_model/author.py`.
 
@@ -619,7 +619,7 @@ Antwoord (MCP: een toolfout met `isError`; CLI: exitcode 1). Er is niets geschre
 }
 ```
 
-Interpretaties die bij de review getoetst moeten worden:
+Interpretaties, aanvaard bij de review (B25):
 - **B14 telt alleen geldige voorbeeldfeiten** uit de menselijke invoer. Een tegenvoorbeeld hoort niet bij de populatie. Gevonden voorbeeldfeiten ziet de dienst bij het schrijven niet, want die staan niet in de database. §4 kan dat later uitbreiden.
 - **Bevestigen van een feittype geldt ook voor zijn rollen**, want een zinsjabloon en zijn invulplaatsen horen samen (ZS en VAR). Een rol kan ook los worden bevestigd of ontbevestigd.
 
@@ -638,7 +638,16 @@ Interpretaties die bij de review getoetst moeten worden:
 - **Parameters:** `operations: list[dict]` en `dry_run: bool = False`. `services` en `config` worden geïnjecteerd en staan niet in het schema (`tools.py:255-262`). De hoofdmap is `config.target_dir`.
 - **Beschrijving:** kort, met de vorm van een `put` per soort in één regel en een verwijzing naar `chunkhound domain --schema`. Het volledige pydantic-schema staat niet in de toollijst: dat zou elke MCP-sessie van elke gebruiker duizenden tokens kosten (U5).
 - **Afwijzing:** de tool geeft `{"error": {"type": "DomainInputRejected", "message": "<n> issues; nothing was written", "issues": [...]}}` terug. Dat herkent `is_error_tool_content` (`mcp_server/common.py:126`) als toolfout, zodat `isError` wordt gezet. De issues bevatten pad, code en melding (§7).
+- **Omgevingsfout:** bij `backend_not_supported` of `database_busy` (§9.2) is het type `DomainInputUnavailable`, met dezelfde vorm en de code in `issues`. Zo ziet een agent het verschil tussen "verbeter je verzoek" en "probeer het later opnieuw", net als bij de exitcodes 1 en 2 van de CLI.
 - **Logging:** geen `print()` (`AGENTS.md`).
+
+**MCP-tool `domain_read`** (B24), geregistreerd zoals `domain_write`. Een agent leest hiermee de bestaande menselijke invoer voordat hij schrijft, ook als de daemon de database op slot heeft.
+- **Parameters:** geen, net als `daemon_status` (`mcp_server/tools.py:773`). `services` en `config` worden geïnjecteerd.
+- **Uitvoer:** de `HumanInputView` uit `load_human_input(provider)`, als dezelfde JSON als `--list-input` (zie hieronder).
+- **Alleen lezen:** de tool schrijft niets en maakt de tabel niet aan. Zonder tabel is het antwoord een leeg model en een lege lijst `judgements` (invariant 1).
+- **Fouten:** `backend_not_supported` en `database_busy`, als `DomainInputUnavailable` zoals bij `domain_write`.
+- **Omvang:** geen filters en geen paginering. De invoer is handwerk en blijft klein. Filters en het lezen van het hele model horen bij §9.
+- **Beschrijving:** kort. Ze zegt dat de tool geplande elementen, voorbeeldfeiten en bevestigingen teruggeeft, en dat een agent haar gebruikt vóór `domain_write`, om bestaande id's te hergebruiken.
 
 **CLI `chunkhound domain`.** De vorm `chunkhound domain <hoofdmap>` ligt vast (B8), daarom kiest deze spec voor vlaggen en niet voor subcommando's:
 
@@ -650,43 +659,46 @@ chunkhound domain --schema                            # JSON-schema van het verz
 
 - **Registratie** volgt het patroon van `autodoc` (`api/cli/main.py:172`, `:194`, `:363`). De databasetoegang verloopt via `create_services` (`database_factory.py:82`), zoals `code_mapper.py:499`.
 - **Ontbrekende database:** `--write` maakt `.chunkhound/db` aan als die nog niet bestaat. Dat is nodig voor model-eerst-werk zonder index, en voor §10 (B20).
-- **Draaiende daemon:** de database is dan op slot. De CLI herkent de lockfout via `_is_db_lock_error` (`api/cli/commands/run.py:120`) en meldt dat de MCP-tool `domain_write` de weg is zolang de daemon draait (B17). De bestaande melding van `_handle_daemon_lock_conflict` (`:134`) gaat over indexeren en past hier niet letterlijk.
+- **Draaiende daemon:** de database is dan op slot. De CLI herkent de lockfout via `_is_db_lock_error` (`api/cli/commands/run.py:120`) en meldt dat de MCP-tools `domain_write` en `domain_read` de weg zijn zolang de daemon draait. De melding is eigen tekst (B25), omdat de bestaande melding van `_handle_daemon_lock_conflict` (`:134`) over indexeren gaat.
 - **Exitcodes:**
   - `0`: geschreven;
   - `1`: afgewezen, met de issues als JSON;
   - `2`: de omgeving, zoals een lock, LanceDB of `database_busy`.
 - **Zonder vlag** meldt `chunkhound domain <hoofdmap>` in §1 dat extractie nog niet beschikbaar is (§2), met exitcode 2.
 
-`--list-input` en, als dat besloten wordt (§10), de leestool, geven een `HumanInputView` terug:
+`--list-input` en `domain_read` geven dezelfde `HumanInputView` terug, geserialiseerd volgens de regels uit §5:
 - een `DomainModel` met de elementen die een `put` hebben;
 - een lijst `judgements`: oordelen over id's zonder `put`, elk met `id`, `confirmed` en `human_sources`.
 
 Hoe die oordelen in het model komen, besluit §4.
 
-## 10. Ter beslissing
+## 10. Besloten bij de review
 
-1. **Kan een agent de menselijke invoer lezen terwijl de daemon draait?** Bij een draaiende daemon staat de database op slot. Dan werkt `--list-input` niet, en ziet de agent alleen wat `domain_write` teruggeeft. Zonder leestoegang schrijft de agent blind: hij kent de bestaande geplande id's niet en maakt makkelijk dubbelingen of verkeerde verwijzingen.
-   - (a) **Aanbevolen:** een tweede, kleine MCP-tool `domain_read` in versie 1, met de uitvoer van `--list-input`. Die tool schrijft niet, dus B17 ("één schrijftool") blijft staan. Wel komt er dan een tweede MCP-tool vóór §9. Dat wijzigt de volgorde uit B2 op nog een punt, net zoals B17 dat deed.
-   - (b) Geen leestool. De agent ziet alleen het antwoord van zijn eigen schrijfacties, tot §9.
+1. **Een agent kan de menselijke invoer lezen terwijl de daemon draait (B24).** Bij een draaiende daemon staat de database op slot, en dan werkt `--list-input` niet. Zonder leestoegang zou de agent blind schrijven: hij kent de bestaande geplande id's niet en maakt makkelijk dubbelingen of verkeerde verwijzingen. Daarom komt er een tweede, kleine MCP-tool `domain_read` (§9.4). Die schrijft niet, dus B17 ("één schrijftool") blijft staan. Wel wijzigt de volgorde uit B2 op nog een punt.
+2. **De vier voorstellen uit §11 die van een besluit afwijken of er een open punt in invullen, zijn aanvaard (B25):** `templates` als lijst, een eigen lockmelding, `root` voor een niet-geplaatst element, en wat bevestigen doet.
 
-## 11. Voorstellen in deze spec (ter toetsing, geen open vraag)
+## 11. Voorstellen in deze spec
+
+De voorstellen met "B25" zijn bij de review aanvaard. De andere zijn technische keuzes die geen besluit raken; ze gelden zodra de spec is goedgekeurd.
 
 | Voorstel | Waar | Waarom |
 |---|---|---|
-| Een niet-geplaatst gepland element krijgt repository `.`, dus sleutel `root` | §6.1 | Lost het open punt uit B21 op zonder extra veld |
+| Een niet-geplaatst gepland element krijgt repository `.`, dus sleutel `root` (B25) | §6.1 | Lost het open punt uit B21 op zonder extra veld. Nadeel: bij meerdere repositories met ook code in de hoofdmap zelf vallen "niet geplaatst" en "in de hoofdmap" samen |
 | NFKD vóór `slugify_kebab` | §6.1 | Nederlandse termen met trema of accent blijven leesbaar |
 | Het id van een voorbeeldfeit is een hash over waarden en `violates` | §6.2 | Een voorbeeldfeit heeft geen naam, en een tegenvoorbeeld met dezelfde waarden moet een eigen id hebben |
-| `FactType.templates` is een lijst, en het eerste sjabloon is het hoofdsjabloon. B22 en de woordenlijst noemen "`fact_type` met `template`" | §4.2 | Het boek en de CEM kennen meerdere synonieme zinsjablonen per feittype. Met één veld `template` zou dat later een migratie vragen |
+| `FactType.templates` is een lijst, en het eerste sjabloon is het hoofdsjabloon. B22 en de woordenlijst noemden "`fact_type` met `template`" (B25) | §4.2 | Het boek en de CEM kennen meerdere synonieme zinsjablonen per feittype. Met één veld `template` zou dat later een migratie vragen |
 | `HumanSource.put_status` legt vast met welke status een `put` schreef | §4.1 | Anders kan de lader invariant 3 niet controleren: een `put` met `proposed` en een `put` met `confirmed` zien er dan hetzelfde uit |
 | Gelijkheid (`gl`) nog niet als regelsoort | §4.2 | Nog niet nagelezen tegen het boek; later toevoegen is goedkoop |
 | Eén tabel met alleen toevoegingen, aangemaakt bij de eerste schrijfactie | §8.1 | Geen bijwerking voor wie de feature niet gebruikt (U5); de correcties van §4 passen erin zonder migratie |
 | Generieke kopie van `domain_%` tijdens de compactie, met de DDL uit de bron | §8.3 | Rust hoeft het domeinschema niet te kennen; een nieuwe tabel vraagt geen wijziging in Rust |
 | Geen rij in `schema_version`; idempotente DDL en `payload_version` | §8.3 | Er is geen migratieraamwerk, en dit volgt het bestaande patroon |
 | Rollen alleen binnen de `put` van een feittype; regels en voorbeeldfeiten verwijzen naar rolnamen | §9.1 | Een agent schrijft een feittype in één stap |
-| Bevestigen van een feittype geldt ook voor zijn rollen; B14 telt alleen geldige voorbeeldfeiten uit de menselijke invoer | §9.2 | Interpretatie van B14 en B19 |
-| `domain_write` staat altijd in de toollijst, met een korte beschrijving | §9.4 | Toegang per configuratie maakt de configuratie groter; de kosten in tokens blijven klein |
+| Bevestigen van een feittype geldt ook voor zijn rollen; B14 telt alleen geldige voorbeeldfeiten uit de menselijke invoer (B25) | §9.2 | Interpretatie van B14 en B19 |
+| `domain_write` en `domain_read` staan altijd in de toollijst, met een korte beschrijving | §9.4 | Toegang per configuratie maakt de configuratie groter; de kosten in tokens blijven klein |
+| `domain_read` zonder parameters, filters of paginering | §9.4 | De invoer is handwerk en blijft klein; filters horen bij §9 |
+| Omgevingsfouten in de MCP-tools als `DomainInputUnavailable`, afwijzingen als `DomainInputRejected` | §9.4 | Een agent moet weten of hij zijn verzoek moet verbeteren of later opnieuw moet proberen |
 | Vlaggen `--write`, `--list-input` en `--schema` in plaats van subcommando's | §9.4 | B8 legt `chunkhound domain <hoofdmap>` vast |
-| Bij een draaiende daemon een eigen lockmelding die naar `domain_write` wijst | §9.4 | B17 noemt "de bestaande lockmelding", maar die (`run.py:134`) zegt hoe je handmatig indexeert en helpt hier niet. De herkenning van de lock (`run.py:120`) blijft dezelfde |
+| Bij een draaiende daemon een eigen lockmelding die naar `domain_write` en `domain_read` wijst (B25) | §9.4 | B17 noemt "de bestaande lockmelding", maar die (`run.py:134`) zegt hoe je handmatig indexeert en helpt hier niet. De herkenning van de lock (`run.py:120`) blijft dezelfde |
 | De auteur wordt per repositorysleutel gelezen, met terugval op de hoofdmap | §9.3 | Werkt de aanname bij B18 uit voor meerdere repositories |
 
 ## 12. Testen
@@ -721,6 +733,7 @@ Volgens `TESTING_PHILOSOPHY` in `AGENTS.md`: alleen contracten die een gebruiker
 | `test_human_input_rejected_on_lancedb` | B23, `backend_not_supported`, er wordt niets geschreven |
 | `test_write_while_database_busy_reports_retry` | `database_busy` |
 | `test_mcp_domain_write_reports_issues_as_tool_error` | `isError` plus de issues, via `common.handle_tool_call` |
+| `test_mcp_domain_read_returns_human_input` | B24, via `common.handle_tool_call`: op een verse database een lege `HumanInputView` zonder dat de tabel ontstaat (invariant 1); na een `domain_write` dezelfde JSON als `--list-input` |
 | `test_cli_domain_write_and_list_round_trip` | CLI: schrijven, lezen, exitcodes 0, 1 en 2, en `--schema` zonder database |
 
 De bestaande test `test_unknown_tables_are_dropped_during_compaction` blijft ongewijzigd groen.
@@ -735,7 +748,7 @@ De bestaande test `test_unknown_tables_are_dropped_during_compaction` blijft ong
 | 4 | De kopie in de Rust-compactie, met een Rust-test en Python-contracttests via de Rust-pijplijn (compactie en `--force-reindex`); `make rust-check` en `make rust-test` | 3 | sol/high |
 | 5 | `human_input.py`: verzoekmodellen, afspelen, controle, `apply_write` en `load_human_input`, met de schrijftests op een echte tijdelijke DuckDB | 1, 2, 3 | sol/high |
 | 6 | `author.py` en `write_human_input`: auteur, tijdstip, ingang, LanceDB-weigering, `database_busy` en `upgrade_payload`, met de bijbehorende tests | 5 | sol/medium |
-| 7 | Ingangen: de CLI `chunkhound domain` (`--write`, `--list-input`, `--schema`, `--dry-run`) en de MCP-tool `domain_write`, met de ingangstests. Ook `domain_read` als §10 daartoe besluit | 6 | sol/medium |
+| 7 | Ingangen: de CLI `chunkhound domain` (`--write`, `--list-input`, `--schema`, `--dry-run`) en de MCP-tools `domain_write` en `domain_read` (B24), met de ingangstests | 6 | sol/medium |
 
 Fase 1 en 3 zijn onafhankelijk en kunnen parallel in aparte worktrees, net als fase 2 en 4. Na elke fase volgen een diff-review, de smoke tests en een commit. Het plan (`docs/melly/plans/2026-11-13-cogniam-1.md`) werkt de fasen uit met bestanden, acceptatiecriteria en een testcommando per fase.
 
