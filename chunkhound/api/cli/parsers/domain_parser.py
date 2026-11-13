@@ -16,6 +16,7 @@ def add_domain_subparser(subparsers: Any) -> argparse.ArgumentParser:
     modes.add_argument("--write", metavar="FILE|-", help="Read a JSON write request")
     modes.add_argument("--list-input", action="store_true")
     modes.add_argument("--schema", action="store_true")
+    modes.add_argument("--extract-structure", action="store_true")
     parser.add_argument(
         "--dry-run",
         action="store_true",
