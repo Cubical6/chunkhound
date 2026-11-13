@@ -1,7 +1,7 @@
 # Routekaart: Cogniam-kennismodel uit code
 
 - Datum: 2026-11-12 · Basis: `main` op `f89044d9` · Branch: `worktree-cogniam-plan`
-- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 heeft een [spec](../specs/2026-11-13-cogniam-2-design.md) (B26 tot en met B33; alle ontwerpvragen zijn beantwoord) die op goedkeuring wacht. Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
+- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 heeft een [spec](../specs/2026-11-13-cogniam-2-design.md) en een [plan](2026-11-13-cogniam-2.md) (B26 tot en met B33; alle ontwerpvragen zijn beantwoord) die op goedkeuring wachten. Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
 - Besluitenlog: [2026-11-12-cogniam-model.md](../decisions/2026-11-12-cogniam-model.md)
 
 ## Doel
@@ -37,7 +37,7 @@ Regels:
 |---|---|---|---|---|---|
 | 0 | Kader en besluiten | – | gereed | n.v.t. | n.v.t. |
 | 1 | Metamodel en contract | 0 | gereed | [spec](../specs/2026-11-13-cogniam-1-design.md) | [plan](2026-11-13-cogniam-1.md) |
-| 2 | Vaste structuurextractie | 1 | spec | [spec](../specs/2026-11-13-cogniam-2-design.md) | – |
+| 2 | Vaste structuurextractie | 1 | plan | [spec](../specs/2026-11-13-cogniam-2-design.md) | [plan](2026-11-13-cogniam-2.md) |
 | 3 | LLM-extractie | 1 (2 voor ankers) | open | – | – |
 | 4 | Consolidatie en identiteit | 2, 3 | open | – | – |
 | 5 | Meerdere repositories en koppeling met C4 | 4 | open | – | – |
@@ -198,7 +198,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 
 ## §2 Vaste structuurextractie
 
-- **Status:** spec · **Hangt af van:** §1 · [spec](../specs/2026-11-13-cogniam-2-design.md)
+- **Status:** plan · **Hangt af van:** §1 · [spec](../specs/2026-11-13-cogniam-2-design.md) · [plan](2026-11-13-cogniam-2.md)
 - **Doel:** kandidaat-feittypen, invulplaatsen en validatieregels zonder LLM afleiden uit schema's en modellen.
 - **Besloten:**
   - B26: een tabel of model wordt één samengesteld feittype, met één rol per kolom (genoemd naar het begrip, met een koppeling naar de kolom).

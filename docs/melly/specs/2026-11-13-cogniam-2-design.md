@@ -66,6 +66,8 @@ Module: `chunkhound/domain_model/structure/`.
 | `contract.py` | De datavormen van §4, `parse_structure` en `dump_structure` |
 | `schema.py` | Het schema in het geheugen en zijn bewerkingen (§5.1) |
 | `translate.py` | Schema naar §1-elementen (§5), samenvoegen van bronnen (§8) |
+| `technical.py` | De lijsten van technische tabellen (§5.8) |
+| `anchors.py` | Ankers bouwen en aanwijzingen koppelen (§4.1, §7) |
 | `files.py` | Bestandsselectie, repositories en commits (§9.2) |
 | `extract.py` | `extract_structure`, de lijst van lezers |
 | `readers/*.py` | Eén bestand per lezer (§6, §7) |
@@ -574,7 +576,7 @@ Een anker is één ingang. §2 maakt geen uitwisselingsregels; §3 maakt er éé
 
 **GraphQL-type als feittype (B31).** Een `type` wordt gekoppeld aan een bestaand feittype als zijn naam, als `key_segment`, gelijk is aan de term van een begrip in dezelfde repository. Dan is het een lagere bron: velden met dezelfde naam als een rol leveren een uitspraak over `mandatory` (`!`) en, bij een `enum`-type, over de waarden (§8). Is er geen koppeling, dan is het type zelf de hoogste bron en wordt het een tabel in het schema: een kolom per veld met een scalair of `enum`-type, de primaire sleutel op het veld `id` als dat het type `ID` heeft, en een *foreign key* voor een veld met een objecttype dat zelf een sleutel heeft. Niet gelezen als feittype: `Query`, `Mutation`, `Subscription`, `input`-typen, interfaces en unions.
 
-**Fixture `graphql/`:** een Magento-`schema.graphqls` met `@resolver` en `\\`, een Lighthouse-schema met `@create`, `@field` en `@rules`, en een los schema zonder handlers met een type `Team` dat aan een tabel koppelt, een type `Invoice` zonder tabel en een type `TeamConnection`. Moet aantonen: de handler van de Magento-resolver is gevonden ondanks het gat uit §6.1; `@create` geeft `operation` `add` zonder markering; het losse schema geeft `handler_not_found`; `Team` geeft een extra citatie of een `DivergentClaim`; `Invoice` wordt een feittype; `TeamConnection` is `technical`.
+**Fixtures `graphql_magento/`, `graphql_lighthouse/` en `graphql_plain/`:** een Magento-`schema.graphqls` met `@resolver` en `\\`, een Lighthouse-schema met `@create`, `@field` en `@rules`, en een los schema zonder handlers met een type `Team` dat aan een tabel koppelt, een type `Invoice` zonder tabel en een type `TeamConnection`. Moet aantonen: de handler van de Magento-resolver is gevonden ondanks het gat uit §6.1; `@create` geeft `operation` `add` zonder markering; het losse schema geeft `handler_not_found`; `Team` geeft een extra citatie of een `DivergentClaim`; `Invoice` wordt een feittype; `TeamConnection` is `technical`.
 
 ### 7.4 NestJS en class-validator
 
@@ -755,7 +757,7 @@ Elke fase is één pi-bolt-sessie op een eigen branch, met een eigen fixture en 
 | 5 | Laravel-migraties en schemadump; het voorbeeld van §5.9 | §6.3, §5.9 | 4 | `gpt-6.1-sol` / `high` |
 | 6 | Eloquent-modellen, PSR-4-opzoeking, samenvoegen van bronnen | §6.4, §8 | 5 | `gpt-6.1-sol` / `high` |
 | 7 | Magento: modules, `db_schema.xml`, `vendor/` één stap diep | §6.5 | 4 | `gpt-6.1-sol` / `medium` |
-| 8 | Magento: EAV-attributen | §6.6 | 7 | `gpt-6.1-sol` / `medium` |
+| 8 | Magento: EAV-attributen | §6.6 | 5, 7 | `gpt-6.1-sol` / `medium` |
 | 9 | Prisma | §6.7 | 4 | `gpt-6.1-terra` / `medium` |
 | 10 | TypeORM | §6.8 | 4 | `gpt-6.1-sol` / `medium` |
 | 11 | Laravel-ankers: routes, commands, aanwijzingen uit `FormRequest` | §7 inleiding, §7.1 | 6 | `gpt-6.1-sol` / `high` |
@@ -766,7 +768,7 @@ Elke fase is één pi-bolt-sessie op een eigen branch, met een eigen fixture en 
 
 - Fasen 1 en 2 kunnen naast elkaar. Na fase 4 kunnen 5, 7, 9 en 10 naast elkaar, elk in een eigen worktree.
 - Het enige gedeelde bestand is de lijst van lezers in `extract.py`: één regel per lezer, dus een conflict bij het samenvoegen is klein.
-- Fase 12 hangt van 11 af omdat de vorm van ankers en aanwijzingen daar ontstaat.
+- Fase 12 hangt van 11 af omdat de vorm van ankers en aanwijzingen daar ontstaat. Fase 8 hangt van 5 af omdat de hulpfuncties voor PHP daar ontstaan.
 - Na elke fase is `--extract-structure` bruikbaar voor de brontypen die er dan zijn.
 
 ## 15. Bewust niet
