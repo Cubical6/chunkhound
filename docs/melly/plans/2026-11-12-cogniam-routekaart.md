@@ -1,7 +1,7 @@
 # Routekaart: Cogniam-kennismodel uit code
 
 - Datum: 2026-11-12 · Basis: `main` op `f89044d9` · Branch: `worktree-cogniam-plan`
-- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 is in ontwerp (B26, B27). Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
+- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 is in ontwerp (B26 tot en met B28). Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
 - Besluitenlog: [2026-11-12-cogniam-model.md](../decisions/2026-11-12-cogniam-model.md)
 
 ## Doel
@@ -211,6 +211,12 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     - Per anker komen de vast leesbare aanwijzingen mee: de HTTP-methode, de `FormRequest` en de modellen in de signatuur. Voor §3 zijn dat hints.
     - Bronnen: Laravel `routes/*.php` en commands, Magento `etc/webapi.xml` en `routes.xml`, en voor TypeScript de frameworks uit de vraag over TypeScript hieronder.
     - Voor de spec: de opslagvorm van ankers (een anker is geen §1-element), de markering "niet opgelost" bij dynamische registratie, en fixtures die de lijst toetsen.
+  - B28: bij Magento leest §2 de eigen modules in `app/code` volledig. Uit `vendor/` komen alleen de tabellen die een eigen module uitbreidt of waar een eigen module naar verwijst, één stap diep.
+    - Elementen uit `vendor/` krijgen de markering dat ze van derden komen.
+    - Ontbreekt `vendor/`, dan leest §2 alleen de eigen modules en meldt het dat. Een verwijzing naar buiten blijft dan een externe verwijzing zonder feittype.
+    - De ankers uit B27 komen alleen uit eigen modules.
+    - Gevolg: `vendor/` staat meestal in `.gitignore`, dus §2 negeert `.gitignore` voor dit ene doel.
+    - Voor de spec: de vorm van de markering, en eigen modules die buiten `app/code` staan.
 - **Gevolg van B11:**
   - Uitwisselingsregels horen bij versie 1. Routes, controllers, endpoints en commands zijn daarvoor de bronnen. §2 leest hun structuur als ankers en §3 maakt de regels (B27).
   - De CEM-werkwijze ([onderzoek](../research/2026-11-12-cem-werkwijze.md)) laat zien wat vast te lezen is: uniciteit, deelverzameling (*foreign key*), waardenregel, verplichte rol en datatype. Vaste waarden in de code zijn kandidaten voor een waardenregel.
@@ -248,7 +254,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - **Te beslissen:**
   - ~~hoe een tabel naar feittypen vertaalt~~ (besloten, B26: één samengesteld feittype per tabel);
   - ~~of §2 de structuur van uitwisselingsregels vast leest~~ (besloten, B27: §2 levert ankers, §3 maakt de regels);
-  - Magento: alleen eigen modules (`app/code`) of ook kernmodules en modules van derden in `vendor/`;
+  - ~~Magento: alleen eigen modules of ook `vendor/`~~ (besloten, B28: eigen modules volledig, uit `vendor/` alleen wat ze aanraken);
   - Magento EAV: wordt elk attribuut een eigen feittype, of komt er één generiek feittype "entiteit heeft attribuutwaarde";
   - TypeScript: welke ORM en welke validatiebibliotheken eerst (Prisma, TypeORM, Zod, class-validator);
   - wat te doen als bronnen elkaar tegenspreken, bijvoorbeeld een migratie tegenover een model of `FormRequest`;
