@@ -1,7 +1,7 @@
 # Routekaart: Cogniam-kennismodel uit code
 
 - Datum: 2026-11-12 · Basis: `main` op `f89044d9` · Branch: `worktree-cogniam-plan`
-- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 is in ontwerp (B26 tot en met B28). Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
+- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 is in ontwerp (B26 tot en met B29). Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
 - Besluitenlog: [2026-11-12-cogniam-model.md](../decisions/2026-11-12-cogniam-model.md)
 
 ## Doel
@@ -217,6 +217,13 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     - De ankers uit B27 komen alleen uit eigen modules.
     - Gevolg: `vendor/` staat meestal in `.gitignore`, dus §2 negeert `.gitignore` voor dit ene doel.
     - Voor de spec: de vorm van de markering, en eigen modules die buiten `app/code` staan.
+  - B29: een Magento EAV-attribuut uit een data patch wordt een rol in het feittype van de entiteit, met een eigen sjabloon, net als een kolom (B26).
+    - `required` wordt verplicht, `type` wordt datatype, `unique` wordt een uniciteitsregel, en een source model met vaste opties wordt een waardenregel.
+    - Een attribuut toevoegen telt als het uitbreiden van een kerntabel (B28): de entiteitstabel komt uit `vendor/` mee.
+    - Standaardattributen van de kern (zoals `name` en `price`) leest versie 1 niet.
+    - De waardetabellen van EAV (zoals `catalog_product_entity_int`) worden geen feittype.
+    - Grens: attributen uit het beheerscherm staan alleen in de database en zijn niet te lezen.
+    - Voor de spec: het bereik van een attribuut, en wat er gebeurt als de entiteitstabel ontbreekt.
 - **Gevolg van B11:**
   - Uitwisselingsregels horen bij versie 1. Routes, controllers, endpoints en commands zijn daarvoor de bronnen. §2 leest hun structuur als ankers en §3 maakt de regels (B27).
   - De CEM-werkwijze ([onderzoek](../research/2026-11-12-cem-werkwijze.md)) laat zien wat vast te lezen is: uniciteit, deelverzameling (*foreign key*), waardenregel, verplichte rol en datatype. Vaste waarden in de code zijn kandidaten voor een waardenregel.
@@ -255,7 +262,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - ~~hoe een tabel naar feittypen vertaalt~~ (besloten, B26: één samengesteld feittype per tabel);
   - ~~of §2 de structuur van uitwisselingsregels vast leest~~ (besloten, B27: §2 levert ankers, §3 maakt de regels);
   - ~~Magento: alleen eigen modules of ook `vendor/`~~ (besloten, B28: eigen modules volledig, uit `vendor/` alleen wat ze aanraken);
-  - Magento EAV: wordt elk attribuut een eigen feittype, of komt er één generiek feittype "entiteit heeft attribuutwaarde";
+  - ~~Magento EAV: eigen feittype per attribuut of één generiek feittype~~ (besloten, B29: een attribuut wordt een rol van de entiteit);
   - TypeScript: welke ORM en welke validatiebibliotheken eerst (Prisma, TypeORM, Zod, class-validator);
   - wat te doen als bronnen elkaar tegenspreken, bijvoorbeeld een migratie tegenover een model of `FormRequest`;
   - de volgorde van migraties: welke migratie geeft de huidige toestand (ook bij `dropColumn` en hernoemingen);
