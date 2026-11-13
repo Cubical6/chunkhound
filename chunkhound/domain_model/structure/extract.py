@@ -18,6 +18,10 @@ from chunkhound.domain_model.structure.files import (
     repository_paths,
     select_files,
 )
+from chunkhound.domain_model.structure.readers.magento_schema import (
+    MagentoSchemaReader,
+    third_party_findings,
+)
 from chunkhound.domain_model.structure.readers.prisma import PrismaReader
 from chunkhound.domain_model.structure.readers.sql import SQLReader
 from chunkhound.domain_model.structure.schema import Schema
@@ -76,7 +80,7 @@ class Reader(Protocol):
     def read(self, ctx: ReadContext) -> None: ...
 
 
-READERS: list[Reader] = [SQLReader(), PrismaReader()]
+READERS: list[Reader] = [SQLReader(), PrismaReader(), MagentoSchemaReader()]
 
 
 def _build(ctx: ReadContext) -> StructureExtraction:
@@ -113,6 +117,7 @@ def _build(ctx: ReadContext) -> StructureExtraction:
         ctx.schemas, ctx.repository_of, ctx.config.domain if ctx.config else None
     )
     ctx.findings.extend(findings)
+    ctx.findings.extend(third_party_findings(ctx, model))
     return StructureExtraction(
         schema_version=1,
         repositories=ctx.repositories,

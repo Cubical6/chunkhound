@@ -1,0 +1,19 @@
+<schema xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <table name="acme_note">
+    <column xsi:type="int" name="id" nullable="false" unsigned="true" identity="true"/>
+    <column xsi:type="int" name="customer_id" nullable="false"/>
+    <column xsi:type="decimal" name="amount" precision="12" scale="4"/>
+    <column xsi:type="varchar" name="label" length="80" nullable="true"/>
+    <column xsi:type="int" name="obsolete"/>
+    <constraint xsi:type="primary" referenceId="PRIMARY"><column name="id"/></constraint>
+    <constraint xsi:type="unique" referenceId="NOTE_LABEL"><column name="label"/></constraint>
+    <constraint xsi:type="foreign" referenceId="NOTE_CUSTOMER" column="customer_id" referenceTable="customer_entity" referenceColumn="entity_id"/>
+    <index referenceId="NOTE_LABEL_IDX"><column name="label"/></index>
+  </table>
+  <table name="sales_order">
+    <column xsi:type="varchar" name="acme_note" length="255" nullable="true"/>
+    <column name="old_column" disabled="true"/>
+    <constraint referenceId="OLD_UNIQUE" disabled="true"/>
+  </table>
+  <table name="removed_table" disabled="true"/>
+</schema>
