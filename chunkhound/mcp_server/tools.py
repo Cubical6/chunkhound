@@ -35,6 +35,17 @@ except (ImportError, AttributeError):
 
 from chunkhound.core.config.config import Config
 from chunkhound.database_factory import DatabaseServices
+from chunkhound.domain_model.human_input import (
+    DomainInputProvider,
+    DomainInputRejected,
+    DomainInputUnavailable,
+    domain_error_json,
+    human_input_view_json,
+    load_human_input,
+    write_human_input,
+    write_result_json,
+)
+from chunkhound.domain_model.issues import Issue
 from chunkhound.embeddings import EmbeddingManager
 from chunkhound.llm_manager import LLMManager
 from chunkhound.mcp_server.status import derive_daemon_status
@@ -347,6 +358,68 @@ def register_tool(
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+
+@register_tool(
+    name="domain_write",
+    description=(
+        "Write human domain input (atomic operations; optional dry_run). Put shapes:\n"
+        "concept: kind, term, repository?\n"
+        "fact_type: kind, name, templates, roles, repository?\n"
+        "validation_rule: kind, fact_type, rule_kind\n"
+        "derivation_rule: kind, name, statement\n"
+        "exchange_rule: kind, name, statement, operations\n"
+        "event_rule: kind, name, statement\n"
+        "ground_fact: kind, fact_type, values\n"
+        "Full schema: chunkhound domain --schema"
+    ),
+)
+async def domain_write(
+    operations: list[dict],
+    services: DatabaseServices,
+    config: Config,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Write operations using server-owned provenance."""
+    try:
+        if config.database.read_only:
+            raise DomainInputUnavailable(
+                [
+                    Issue(
+                        "",
+                        "backend_not_supported",
+                        "Server runs read-only; nothing was written",
+                    )
+                ]
+            )
+        return write_result_json(
+            write_human_input(
+                {"operations": operations},
+                provider=cast(DomainInputProvider, services.provider),
+                project_root=config.target_dir or Path.cwd(),
+                entry_point="mcp",
+                dry_run=dry_run,
+            )
+        )
+    except (DomainInputRejected, DomainInputUnavailable) as exc:
+        return domain_error_json(exc)
+
+
+@register_tool(
+    name="domain_read",
+    description=(
+        "Read planned elements, ground facts and judgements before domain_write "
+        "to reuse existing ids."
+    ),
+)
+async def domain_read(services: DatabaseServices, config: Config) -> dict[str, Any]:
+    """Read human input without creating its table."""
+    try:
+        return human_input_view_json(
+            load_human_input(cast(DomainInputProvider, services.provider))
+        )
+    except DomainInputUnavailable as exc:
+        return domain_error_json(exc)
 
 
 def _convert_paths_to_native(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
