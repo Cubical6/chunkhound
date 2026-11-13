@@ -1,7 +1,7 @@
 # Routekaart: Cogniam-kennismodel uit code
 
 - Datum: 2026-11-12 · Basis: `main` op `f89044d9` · Branch: `worktree-cogniam-plan`
-- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 is in ontwerp (B26). Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
+- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 is in ontwerp (B26, B27). Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
 - Besluitenlog: [2026-11-12-cogniam-model.md](../decisions/2026-11-12-cogniam-model.md)
 
 ## Doel
@@ -206,8 +206,13 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     - Regels: uniciteit (ook over meerdere kolommen), deelverzameling en waardenregel hangen aan het samengestelde feittype. Verplicht en datatype zijn kenmerken van de rol (B13).
     - Gevolg voor §1: de sjabloonregel wordt verruimd (een sjabloon bevat een deel van de rollen; samen dekken ze alle rollen). Dat is achterwaarts verenigbaar en wordt een kleine fase in het plan van §2.
     - Voor de spec: waar het identificerende sjabloon en `identifies` staan, en de volgorde van de sjablonen.
+  - B27: §2 leest van uitwisselingsregels alleen de structuur, als ankers. §2 maakt zelf geen uitwisselingsregels; dat doet §3 per anker.
+    - Een anker is één ingang (route, endpoint of command) met methode, pad, handler, bestand en regels.
+    - Per anker komen de vast leesbare aanwijzingen mee: de HTTP-methode, de `FormRequest` en de modellen in de signatuur. Voor §3 zijn dat hints.
+    - Bronnen: Laravel `routes/*.php` en commands, Magento `etc/webapi.xml` en `routes.xml`, en voor TypeScript de frameworks uit de vraag over TypeScript hieronder.
+    - Voor de spec: de opslagvorm van ankers (een anker is geen §1-element), de markering "niet opgelost" bij dynamische registratie, en fixtures die de lijst toetsen.
 - **Gevolg van B11:**
-  - Uitwisselingsregels horen bij versie 1. Routes, controllers, endpoints en commands zijn daarvoor de bronnen. Of §2 hun structuur vast leest en §3 de betekenis aanvult, is nog te beslissen.
+  - Uitwisselingsregels horen bij versie 1. Routes, controllers, endpoints en commands zijn daarvoor de bronnen. §2 leest hun structuur als ankers en §3 maakt de regels (B27).
   - De CEM-werkwijze ([onderzoek](../research/2026-11-12-cem-werkwijze.md)) laat zien wat vast te lezen is: uniciteit, deelverzameling (*foreign key*), waardenregel, verplichte rol en datatype. Vaste waarden in de code zijn kandidaten voor een waardenregel.
 - **Bronnen per stack (B3):**
 
@@ -225,10 +230,24 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     - XML met een veilige XML-parser, zonder externe entiteiten;
     - PHP en TypeScript met de tree-sitter-grammatica's die al meegeleverd worden;
     - Prisma met een eigen kleine parser, of als tekst voor §3.
-- **Uitgangspunt:** `chunkhound/parsers/mappings/sql.py`, `php.py` en `typescript.py`.
+- **Bevinding (2026-11-13), hergebruik:**
+  - De C4-kaart en de research herkennen geen frameworks, routes, controllers of commands. Een zoektocht op Laravel, Magento, Eloquent, Prisma en NestJS in `chunkhound/` en `src/` gaf geen treffers.
+  - Een losse aanroep zoals `Route::post(...)` wordt waarschijnlijk geen eigen chunk. Ook daarom leest §2 de bestanden zelf, zoals de statische scan van de C4-kaart doet.
+  - De SQL-mapping telt alleen het aantal kolommen; kolomnamen, typen en constraints leest ze niet.
+  - De enige XML-parser is die voor TwinCAT (`chunkhound/parsers/twincat/xml_extractor.py`), op de standaardbibliotheek en zonder beveiliging tegen kwaadaardige XML.
+  - Niet getest: of `SourceInspector` de vormen in een Laravel-routebestand goed afhandelt. Dat hoort bij de fixtures in de spec.
+- **Uitgangspunt:**
+  - de mappings `chunkhound/parsers/mappings/sql.py`, `php.py` en `typescript.py` (de laatste heeft `extract_decorators`, bruikbaar voor NestJS);
+  - bestandsselectie met gitignore en uitsluitingen: `list_scope_files` (`chunkhound/code_mapper/c4/files.py`) en `collect_scope_files` (`chunkhound/code_mapper/scope.py`);
+  - bron lezen met hash en regels, binnen de projectmap: `read_source` (`chunkhound/services/extraction/sources.py`);
+  - syntaxboom en queries per taal: `ParserFactory` (`chunkhound/parsers/parser_factory.py`) en `TreeSitterEngine.parse_to_ast` en `compile_query` (`chunkhound/parsers/universal_engine.py`);
+  - aanroepen, basisklassen en symbolen met parameters: `SourceInspector` (`chunkhound/code_mapper/c4/codeboarding/source_inspector.py`), gebruikt door `_scan_references` (`chunkhound/code_mapper/c4/references.py`) voor Python, JS/TS en PHP;
+  - een klasse naar een bestand herleiden: `ImportResolverService` (`chunkhound/services/research/shared/import_resolver.py`);
+  - het framework vaststellen uit afhankelijkheden: `scan_runtime` (`chunkhound/code_mapper/c4/runtime.py`) leest `composer.json` en `package.json` al;
+  - overslaan wat niet veranderd is: `source_manifest_version` (`chunkhound/services/extraction/dev_cache.py`).
 - **Te beslissen:**
   - ~~hoe een tabel naar feittypen vertaalt~~ (besloten, B26: één samengesteld feittype per tabel);
-  - of §2 de structuur van uitwisselingsregels vast leest (routes, controllers, endpoints, commands) en §3 de betekenis aanvult, of dat alles naar §3 gaat (zie "Gevolg van B11");
+  - ~~of §2 de structuur van uitwisselingsregels vast leest~~ (besloten, B27: §2 levert ankers, §3 maakt de regels);
   - Magento: alleen eigen modules (`app/code`) of ook kernmodules en modules van derden in `vendor/`;
   - Magento EAV: wordt elk attribuut een eigen feittype, of komt er één generiek feittype "entiteit heeft attribuutwaarde";
   - TypeScript: welke ORM en welke validatiebibliotheken eerst (Prisma, TypeORM, Zod, class-validator);
@@ -237,7 +256,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - hoe technische tabellen worden herkend: migratieadministratie, jobs, caches, sessies, Magento-indexers. De uitsluiting zelf gebeurt in §4.
 - **Gereed als:**
   - de spec bevat per brontype de vertaling naar §1-elementen, met fixtures;
-  - het plan heeft één fase per brontype, plus een fase die de sjabloonregel van §1 verruimt (B26).
+  - het plan heeft één fase per brontype, ook voor de ankers (B27), plus een fase die de sjabloonregel van §1 verruimt (B26).
 
 ## §3 LLM-extractie
 
@@ -246,10 +265,11 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - begrippen en definities;
   - zinsjablonen;
   - afleidingsregels;
-  - uitwisselingsregels (de betekenis; de structuur mogelijk uit §2);
+  - uitwisselingsregels, per anker uit §2 (B27);
   - eventregels;
   - voorbeeldfeiten uit tests en documentatie.
 - **Gevolg van B26:** §2 levert per feittype mechanische sjablonen, één per kolom plus een identificerend sjabloon. §3 stelt per sjabloon een echte zin voor; de rollen van het sjabloon blijven gelijk.
+- **Gevolg van B27:** §2 levert de lijst van ingangen als ankers, met aanwijzingen. §3 maakt per anker de uitwisselingsregel (naam, zin, bewerkingen, feittypen) en gebruikt de aanwijzingen als hint. Voor de spec: of elke ingang een regel of de markering "geen domeinuitwisseling" krijgt, zodat dekking meetbaar is.
 - **Uitgangspunt:**
   - de gedeelde extractielaag (`services/extraction/`): begrensde aanvragen, bundels, persistente opslag en dev-cache;
   - prompts in de stijl van `code_mapper/prompts/c4_*.md`.
