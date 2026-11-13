@@ -6,8 +6,7 @@ from typing import Protocol
 
 from chunkhound.core.config.config import Config
 from chunkhound.domain_model.identity import repository_key
-from chunkhound.domain_model.loader import COLLECTIONS
-from chunkhound.domain_model.model import Citation, DomainModel
+from chunkhound.domain_model.model import Citation
 from chunkhound.domain_model.structure.contract import (
     Anchor,
     Finding,
@@ -19,6 +18,9 @@ from chunkhound.domain_model.structure.files import (
     repository_paths,
     select_files,
 )
+from chunkhound.domain_model.structure.readers.sql import SQLReader
+from chunkhound.domain_model.structure.schema import Schema
+from chunkhound.domain_model.structure.translate import translate
 from chunkhound.services.extraction.sources import SourceVersion
 from chunkhound.utils.git_safe import GitCommandError, run_git
 
@@ -38,6 +40,7 @@ class ReadContext:
     findings: list[Finding] = field(default_factory=list)
     anchors: list[Anchor] = field(default_factory=list)
     read_paths: set[str] = field(default_factory=set)
+    schemas: list[Schema] = field(default_factory=list)
 
     _repository_prefixes: tuple[tuple[PurePosixPath, RepositoryRef], ...] = field(
         init=False, repr=False
@@ -72,7 +75,7 @@ class Reader(Protocol):
     def read(self, ctx: ReadContext) -> None: ...
 
 
-READERS: list[Reader] = []
+READERS: list[Reader] = [SQLReader()]
 
 
 def _build(ctx: ReadContext) -> StructureExtraction:
@@ -105,19 +108,15 @@ def _build(ctx: ReadContext) -> StructureExtraction:
                         ),
                     )
                 )
-    model = DomainModel.model_validate(
-        {
-            "schema_version": 1,
-            **{collection: [] for collection in COLLECTIONS},
-        }
-    )
+    model, findings, claims = translate(ctx.schemas, ctx.repository_of)
+    ctx.findings.extend(findings)
     return StructureExtraction(
         schema_version=1,
         repositories=ctx.repositories,
         model=model,
         anchors=tuple(ctx.anchors),
         findings=tuple(ctx.findings),
-        divergent_claims=(),
+        divergent_claims=tuple(claims),
     )
 
 
