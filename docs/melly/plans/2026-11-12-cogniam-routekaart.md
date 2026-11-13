@@ -1,7 +1,7 @@
 # Routekaart: Cogniam-kennismodel uit code
 
 - Datum: 2026-11-12 · Basis: `main` op `f89044d9` · Branch: `worktree-cogniam-plan`
-- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 is in ontwerp (B26 tot en met B29). Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
+- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 is in ontwerp (B26 tot en met B30). Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
 - Besluitenlog: [2026-11-12-cogniam-model.md](../decisions/2026-11-12-cogniam-model.md)
 
 ## Doel
@@ -209,7 +209,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B27: §2 leest van uitwisselingsregels alleen de structuur, als ankers. §2 maakt zelf geen uitwisselingsregels; dat doet §3 per anker.
     - Een anker is één ingang (route, endpoint of command) met methode, pad, handler, bestand en regels.
     - Per anker komen de vast leesbare aanwijzingen mee: de HTTP-methode, de `FormRequest` en de modellen in de signatuur. Voor §3 zijn dat hints.
-    - Bronnen: Laravel `routes/*.php` en commands, Magento `etc/webapi.xml` en `routes.xml`, en voor TypeScript de frameworks uit de vraag over TypeScript hieronder.
+    - Bronnen: Laravel `routes/*.php` en commands, Magento `etc/webapi.xml` en `routes.xml`, en voor TypeScript en GraphQL de bronnen uit B30.
     - Voor de spec: de opslagvorm van ankers (een anker is geen §1-element), de markering "niet opgelost" bij dynamische registratie, en fixtures die de lijst toetsen.
   - B28: bij Magento leest §2 de eigen modules in `app/code` volledig. Uit `vendor/` komen alleen de tabellen die een eigen module uitbreidt of waar een eigen module naar verwijst, één stap diep.
     - Elementen uit `vendor/` krijgen de markering dat ze van derden komen.
@@ -224,6 +224,12 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     - De waardetabellen van EAV (zoals `catalog_product_entity_int`) worden geen feittype.
     - Grens: attributen uit het beheerscherm staan alleen in de database en zijn niet te lezen.
     - Voor de spec: het bereik van een attribuut, en wat er gebeurt als de entiteitstabel ontbreekt.
+  - B30: de TypeScript-bronnen van versie 1, plus GraphQL voor alle stacks.
+    - Structuur: Prisma, TypeORM, class-validator en Zod.
+    - Ankers: NestJS (REST en GraphQL), Next.js en GraphQL-schemabestanden.
+    - GraphQL-schemabestanden gelden voor alle drie de stacks, inclusief `@resolver` in `etc/schema.graphqls` (Magento) en de directives van Lighthouse (Laravel). Elk veld onder `Query`, `Mutation` en `Subscription` is een anker; het `input`-type en de enums zijn aanwijzingen.
+    - Later: Express, en GraphQL-bouwers zonder schemabestand (Pothos, Nexus).
+    - Grens: bij TypeScript zonder decorators krijgt de handler van een GraphQL-veld de markering "niet opgelost".
 - **Gevolg van B11:**
   - Uitwisselingsregels horen bij versie 1. Routes, controllers, endpoints en commands zijn daarvoor de bronnen. §2 leest hun structuur als ankers en §3 maakt de regels (B27).
   - De CEM-werkwijze ([onderzoek](../research/2026-11-12-cem-werkwijze.md)) laat zien wat vast te lezen is: uniciteit, deelverzameling (*foreign key*), waardenregel, verplichte rol en datatype. Vaste waarden in de code zijn kandidaten voor een waardenregel.
@@ -239,6 +245,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 - **Bevinding (2026-11-12):**
   - `.xml` wordt als platte tekst geïndexeerd (`chunkhound/core/types/common.py:339`).
   - `.prisma` staat niet in de extensielijst en wordt dus niet geïndexeerd.
+  - `.graphql` wordt als platte tekst geïndexeerd (`chunkhound/core/types/common.py:337`) en `.graphqls` staat niet in de extensielijst. De meegeleverde grammaticabundel bevat wel een GraphQL-grammatica (nagezocht op 2026-11-13).
   - Gevolg: §2 kan niet op de geïndexeerde chunks bouwen. Het leest de bronbestanden zelf:
     - XML met een veilige XML-parser, zonder externe entiteiten;
     - PHP en TypeScript met de tree-sitter-grammatica's die al meegeleverd worden;
@@ -263,8 +270,8 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - ~~of §2 de structuur van uitwisselingsregels vast leest~~ (besloten, B27: §2 levert ankers, §3 maakt de regels);
   - ~~Magento: alleen eigen modules of ook `vendor/`~~ (besloten, B28: eigen modules volledig, uit `vendor/` alleen wat ze aanraken);
   - ~~Magento EAV: eigen feittype per attribuut of één generiek feittype~~ (besloten, B29: een attribuut wordt een rol van de entiteit);
-  - TypeScript: welke ORM en welke validatiebibliotheken eerst (Prisma, TypeORM, Zod, class-validator);
-  - wat te doen als bronnen elkaar tegenspreken, bijvoorbeeld een migratie tegenover een model of `FormRequest`;
+  - ~~TypeScript: welke ORM en welke validatiebibliotheken eerst~~ (besloten, B30);
+  - wat te doen als bronnen overlappen of elkaar tegenspreken, bijvoorbeeld een migratie tegenover een model of `FormRequest`. Hierbij hoort ook of een GraphQL-type, een Zod-schema of een servicecontract een eigen feittype wordt als er al een tabel is;
   - de volgorde van migraties: welke migratie geeft de huidige toestand (ook bij `dropColumn` en hernoemingen);
   - hoe technische tabellen worden herkend: migratieadministratie, jobs, caches, sessies, Magento-indexers. De uitsluiting zelf gebeurt in §4.
 - **Gereed als:**
