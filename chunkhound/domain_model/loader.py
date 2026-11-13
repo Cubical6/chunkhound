@@ -6,7 +6,7 @@ from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 from types import UnionType
-from typing import Any, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel, ValidationError
 
@@ -47,11 +47,13 @@ COLLECTIONS = (
 )
 
 
-def _json_path(loc: tuple[str | int, ...]) -> str:
+def _json_path(loc: tuple[str | int, ...], root: type[BaseModel] = DomainModel) -> str:
     """Follow the contract types so union branch labels are not JSON keys."""
-    annotation: Any = DomainModel
+    annotation: Any = root
     path = ""
     for part in loc:
+        while get_origin(annotation) is Annotated:
+            annotation = get_args(annotation)[0]
         origin = get_origin(annotation)
         if origin in (UnionType, Union):
             choices = [
@@ -63,6 +65,15 @@ def _json_path(loc: tuple[str | int, ...]) -> str:
                         choice
                         for choice in choices
                         if getattr(choice, "__name__", None) == part
+                        or (
+                            isinstance(choice, type)
+                            and issubclass(choice, BaseModel)
+                            and any(
+                                get_origin(field.annotation) is Literal
+                                and part in get_args(field.annotation)
+                                for field in choice.model_fields.values()
+                            )
+                        )
                     ),
                     Any,
                 )
@@ -80,6 +91,88 @@ def _json_path(loc: tuple[str | int, ...]) -> str:
         else:
             annotation = Any
     return path
+
+
+def validation_issues(
+    exc: ValidationError, root: type[BaseModel] = DomainModel
+) -> list[Issue]:
+    """Translate pydantic failures into paths in the submitted JSON."""
+    issues = []
+    seen: set[tuple[str, str]] = set()
+    for error in exc.errors():
+        loc = error["loc"]
+        code = {"missing": "missing_field", "extra_forbidden": "unknown_field"}.get(
+            error["type"], "invalid_value"
+        )
+        if (
+            loc
+            and loc[-1] == "rule_kind"
+            and error.get("input") in ("mandatory", "datatype")
+        ):
+            code = "derived_rule_kind"
+        path = _json_path(loc, root)
+        if (path, code) not in seen:
+            issues.append(Issue(path, code, error["msg"]))
+            seen.add((path, code))
+    return issues
+
+
+def template_issues(template: str, role_names: list[str], path: str) -> list[Issue]:
+    """Check the same placeholder contract for loaded and human-written facts."""
+    counts = Counter(re.findall(r"<([^<>]*)>", template))
+    issues = []
+    for name, count in counts.items():
+        if name not in role_names:
+            message = (
+                f"placeholder <{name}> matches no role; "
+                f"roles are: {', '.join(role_names)}"
+            )
+        elif count != 1:
+            message = f"role {name!r} appears more than once in this template"
+        elif role_names.count(name) != 1:
+            message = f"role name {name!r} is not unique in this fact type"
+        else:
+            continue
+        issues.append(Issue(path, "template_role_mismatch", message))
+    for name in role_names:
+        if name not in counts:
+            issues.append(
+                Issue(
+                    path,
+                    "template_role_mismatch",
+                    f"role {name!r} does not appear in this template",
+                )
+            )
+    return issues
+
+
+def rule_shape_issues(element: ValidationRule, path: str) -> list[Issue]:
+    """Check rule shape independently of reference resolution."""
+    malformed = (
+        (element.rule_kind == "uniqueness" and not element.roles)
+        or (element.rule_kind == "value" and len(element.roles) != 1)
+        or (
+            element.rule_kind == "subset"
+            and (
+                not element.roles
+                or not element.superset_fact_type
+                or len(element.roles) != len(element.superset_roles)
+            )
+        )
+        or (
+            element.rule_kind == "other" and (not element.name or not element.statement)
+        )
+    )
+    if malformed:
+        return [
+            Issue(
+                path,
+                "rule_shape",
+                "Expected roles for uniqueness, one role for value, matching "
+                "subset roles and superset, or name and statement for other",
+            )
+        ]
+    return []
 
 
 def parse_model(data: object) -> DomainModel:
@@ -101,24 +194,7 @@ def parse_model(data: object) -> DomainModel:
     try:
         model = DomainModel.model_validate(data)
     except ValidationError as exc:
-        issues = []
-        seen: set[tuple[str, str]] = set()
-        for error in exc.errors():
-            loc = error["loc"]
-            code = {"missing": "missing_field", "extra_forbidden": "unknown_field"}.get(
-                error["type"], "invalid_value"
-            )
-            if (
-                loc
-                and loc[-1] == "rule_kind"
-                and error.get("input") in ("mandatory", "datatype")
-            ):
-                code = "derived_rule_kind"
-            path = _json_path(loc)
-            if (path, code) not in seen:
-                issues.append(Issue(path, code, error["msg"]))
-                seen.add((path, code))
-        raise ModelLoadError(issues) from exc
+        raise ModelLoadError(validation_issues(exc)) from exc
     issues = _model_issues(model)
     if issues:
         raise ModelLoadError(issues)
@@ -253,15 +329,9 @@ def _model_issues(model: DomainModel) -> list[Issue]:
                 if isinstance(role := by_id.get(role_id), Role)
             ]
             for i, template in enumerate(element.templates):
-                placeholders = re.findall(r"<([^<>]*)>", template)
-                if Counter(placeholders) != Counter(role_names) or len(
-                    set(placeholders)
-                ) != len(placeholders):
-                    add(
-                        f"{path}.templates[{i}]",
-                        "template_role_mismatch",
-                        f"Expected each role exactly once: {role_names!r}",
-                    )
+                issues.extend(
+                    template_issues(template, role_names, f"{path}.templates[{i}]")
+                )
             for i, role_id in enumerate(element.roles):
                 role = by_id.get(role_id)
                 if isinstance(role, Role) and role.fact_type != element.id:
@@ -297,29 +367,7 @@ def _model_issues(model: DomainModel) -> list[Issue]:
         if isinstance(element, ValidationRule):
             single_refs["superset_fact_type"] = {"fact_type"}
             list_refs.update(roles={"role"}, superset_roles={"role"})
-            malformed = (
-                (element.rule_kind == "uniqueness" and not element.roles)
-                or (element.rule_kind == "value" and len(element.roles) != 1)
-                or (
-                    element.rule_kind == "subset"
-                    and (
-                        not element.roles
-                        or not element.superset_fact_type
-                        or len(element.roles) != len(element.superset_roles)
-                    )
-                )
-                or (
-                    element.rule_kind == "other"
-                    and (not element.name or not element.statement)
-                )
-            )
-            if malformed:
-                add(
-                    path,
-                    "rule_shape",
-                    "Expected roles for uniqueness, one role for value, matching "
-                    "subset roles and superset, or name and statement for other",
-                )
+            issues.extend(rule_shape_issues(element, path))
         if isinstance(element, DerivationRule):
             list_refs["derives"] = {"fact_type", "role"}
             list_refs["uses"] = {
