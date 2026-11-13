@@ -1,7 +1,7 @@
 # Routekaart: Cogniam-kennismodel uit code
 
 - Datum: 2026-11-12 · Basis: `main` op `f89044d9` · Branch: `worktree-cogniam-plan`
-- **Status:** concept. §0 is gereed. In §1 zijn alle ontwerpvragen beantwoord (B11 tot en met B23), en ook de open punten uit de review (B24, B25). Spec en plan wachten op goedkeuring. Deze routekaart geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
+- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. De implementatie van §1 volgt het [plan](2026-11-13-cogniam-1.md). Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
 - Besluitenlog: [2026-11-12-cogniam-model.md](../decisions/2026-11-12-cogniam-model.md)
 
 ## Doel
@@ -36,7 +36,7 @@ Regels:
 | § | Sectie | Hangt af van | Status | Spec | Plan |
 |---|---|---|---|---|---|
 | 0 | Kader en besluiten | – | gereed | n.v.t. | n.v.t. |
-| 1 | Metamodel en contract | 0 | plan (ter goedkeuring) | [spec](../specs/2026-11-13-cogniam-1-design.md) | [plan](2026-11-13-cogniam-1.md) |
+| 1 | Metamodel en contract | 0 | gereed | [spec](../specs/2026-11-13-cogniam-1-design.md) | [plan](2026-11-13-cogniam-1.md) |
 | 2 | Vaste structuurextractie | 1 | open | – | – |
 | 3 | LLM-extractie | 1 (2 voor ankers) | open | – | – |
 | 4 | Consolidatie en identiteit | 2, 3 | open | – | – |
@@ -108,7 +108,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 
 ## §1 Metamodel en contract
 
-- **Status:** plan, ter goedkeuring (review verwerkt in B24 en B25): [spec](../specs/2026-11-13-cogniam-1-design.md) en [plan](2026-11-13-cogniam-1.md) · **Hangt af van:** §0
+- **Status:** gereed, goedgekeurd op 2026-11-13 (review verwerkt in B24 en B25): [spec](../specs/2026-11-13-cogniam-1-design.md) en [plan](2026-11-13-cogniam-1.md) · **Hangt af van:** §0
 - **Doel:** de datavorm van het kennismodel. Alle andere secties bouwen hierop.
 - **Basis (B10):** het metamodel volgt het CogNIAM-boek, zie het [onderzoek naar het metamodel in het boek](../research/2026-11-12-cogniam-boek-metamodel.md): zeven kennisklassen (BO, VAR, ZS, VR, AR, UR, ER) plus de feiten op niveau I. Het [onderzoek naar het v4-dossiermodel](../research/2026-11-12-cogniam-v4-metamodel.md) is geen voorbeeld voor §1. Het is alleen achtergrond voor de export in §8.
 - **Praktijkvoorbeeld (B11):** de [CEM-werkwijze van de gebruiker](../research/2026-11-12-cem-werkwijze.md) laat zien hoe de methode op software landt:

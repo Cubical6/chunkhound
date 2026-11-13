@@ -1,7 +1,7 @@
 # Spec: §1 Metamodel en contract van het domeinmodel
 
 - Datum: 2026-11-13 · Branch: `worktree-cogniam-plan` (HEAD bij start `f7a73dcb`)
-- **Status:** concept, ter goedkeuring. De open punten uit de review zijn besloten (B24, B25, zie §10). Deze spec geeft geen toestemming voor implementatie of een push naar `main`.
+- **Status:** goedgekeurd door de gebruiker op 2026-11-13. De open punten uit de review zijn besloten (B24, B25, zie §10). De implementatie volgt het [plan](../plans/2026-11-13-cogniam-1.md). Deze spec geeft geen toestemming voor een push naar `main`.
 - Bron: [routekaart §1](../plans/2026-11-12-cogniam-routekaart.md#1-metamodel-en-contract), besluiten B11 tot en met B25 in het [besluitenlog](../decisions/2026-11-12-cogniam-model.md), het [onderzoek naar het metamodel in het boek](../research/2026-11-12-cogniam-boek-metamodel.md) en de [CEM-werkwijze](../research/2026-11-12-cem-werkwijze.md).
 - Aanhaakpunten zijn op `f7a73dcb` gelezen, niet gedraaid.
 
