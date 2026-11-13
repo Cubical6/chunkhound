@@ -112,7 +112,7 @@ Gepland of gerealiseerd is een afgeleide eigenschap, geen veld: `is_realized = l
 | niveau I | `GroundFact` | `fact_type: str`, `values: Mapping[str, str \| int \| float \| bool \| None]` (rolnaam → waarde), `violates: tuple[str, ...]` (regel-id's; leeg = geldig feit) |
 
 Toelichting:
-- **Sjablonen.** Een sjabloon bevat invulplaatsen `<rolnaam>`. Elke rol van het feittype komt in elk sjabloon precies één keer voor, en elke invulplaats hoort bij een rol (B12). Een rolnaam bevat geen `<`, `>` of regeleinde.
+- **Sjablonen.** Een sjabloon bevat invulplaatsen `<rolnaam>`. Elke rol van het feittype komt in elk sjabloon precies één keer voor, en elke invulplaats hoort bij een rol (B12). Een rolnaam bevat geen `<`, `>` of regeleinde. **Gewijzigd door B26, nog niet geïmplementeerd:** een sjabloon mag een deel van de rollen bevatten, elke rol hooguit één keer, en alle sjablonen van een feittype dekken samen alle rollen. De code volgt tot de fase uit het plan van §2 de oude regel.
 - **Identificerend sjabloon.** Dat is het sjabloon van een feittype met `identifies`, zoals in de CEM, waar elk begrip een eigen elementair feittype krijgt.
 - **Verplicht en datatype** zijn kenmerken van de rol (B13). Ze zijn geen `ValidationRule`. §7 test ze onder een afgeleid id (§6.2).
 - **Regelsoorten** volgen de CEM: uniciteit, deelverzameling en waardenregel. Al het andere valt onder `other`, met een naam en een `statement`. Gelijkheid (`gl` in het boek) is nog niet nagelezen en komt pas na controle tegen de scans. Een regelsoort toevoegen vraagt geen migratie.

@@ -1,7 +1,7 @@
 # Routekaart: Cogniam-kennismodel uit code
 
 - Datum: 2026-11-12 · Basis: `main` op `f89044d9` · Branch: `worktree-cogniam-plan`
-- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. De implementatie van §1 volgt het [plan](2026-11-13-cogniam-1.md). Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
+- **Status:** concept. §0 en §1 zijn gereed. De gebruiker keurde de spec en het plan van §1 op 2026-11-13 goed, na B11 tot en met B25. §1 is geïmplementeerd volgens het [plan](2026-11-13-cogniam-1.md), op de branch `cogniam1/integration` (draft-PR #30 op de fork). §2 is in ontwerp (B26). Deze routekaart zelf geeft geen toestemming voor implementatie, providerruns of een push naar `main`.
 - Besluitenlog: [2026-11-12-cogniam-model.md](../decisions/2026-11-12-cogniam-model.md)
 
 ## Doel
@@ -37,7 +37,7 @@ Regels:
 |---|---|---|---|---|---|
 | 0 | Kader en besluiten | – | gereed | n.v.t. | n.v.t. |
 | 1 | Metamodel en contract | 0 | gereed | [spec](../specs/2026-11-13-cogniam-1-design.md) | [plan](2026-11-13-cogniam-1.md) |
-| 2 | Vaste structuurextractie | 1 | open | – | – |
+| 2 | Vaste structuurextractie | 1 | ontwerp | – | – |
 | 3 | LLM-extractie | 1 (2 voor ankers) | open | – | – |
 | 4 | Consolidatie en identiteit | 2, 3 | open | – | – |
 | 5 | Meerdere repositories en koppeling met C4 | 4 | open | – | – |
@@ -133,13 +133,14 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - B23: geen veld `level` (kennisdriehoek); gepland of gerealiseerd wordt afgeleid uit citaties; `CHECKPOINT` na elke schrijfactie met menselijke invoer; menselijke invoer in versie 1 alleen op DuckDB.
   - B24: naast `domain_write` komt de MCP-leestool `domain_read`, met dezelfde uitvoer als `chunkhound domain --list-input`. Zo kent een agent de bestaande id's terwijl de daemon de database op slot heeft.
   - B25: vier voorstellen uit de spec zijn aanvaard. Een feittype heeft een lijst `templates` (wijzigt B22). De CLI geeft bij een draaiende daemon een eigen lockmelding (wijzigt B17). Een niet-geplaatst gepland element krijgt de sleutel `root` (vult B21 in). Bevestigen van een feittype bevestigt ook de rollen, en voor B14 tellen alleen geldige voorbeeldfeiten uit de menselijke invoer.
+  - B26 (uit §2, nog niet geïmplementeerd): de sjabloonregel wordt verruimd. Een sjabloon mag een deel van de rollen bevatten, en alle sjablonen van een feittype dekken samen alle rollen. De sjablonen zijn dan deelzinnen, geen synoniemen van één hoofdsjabloon (wijzigt B25, punt 1). De wijziging komt als fase in het plan van §2.
 - **Woordenlijst (B8, B22):**
 
   | Boek (Nederlands) | Code en JSON |
   |---|---|
   | begripsomschrijving (BO) | `concept`, met `definition` |
   | variabele of invulplaats (VAR) | `role` |
-  | zinsjabloon (ZS) | `fact_type`, met `templates`: een lijst, de eerste is het hoofdsjabloon (B25) |
+  | zinsjabloon (ZS) | `fact_type`, met `templates`: een lijst (B25). Na B26 is elk sjabloon een deelzin over een deel van de rollen |
   | validatieregel (VR) | `validation_rule` |
   | afleidingsregel (AR) | `derivation_rule` |
   | uitwisselingsregel (UR) | `exchange_rule` |
@@ -197,8 +198,14 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
 
 ## §2 Vaste structuurextractie
 
-- **Status:** open · **Hangt af van:** §1
+- **Status:** ontwerp · **Hangt af van:** §1
 - **Doel:** kandidaat-feittypen, invulplaatsen en validatieregels zonder LLM afleiden uit schema's en modellen.
+- **Besloten:**
+  - B26: een tabel of model wordt één samengesteld feittype, met één rol per kolom (genoemd naar het begrip, met een koppeling naar de kolom).
+    - Sjablonen: per kolom één sjabloon met de sleutelrollen plus die rol, en één identificerend sjabloon met alleen de sleutelrollen, zoals bijlage C van het boek. §2 stelt ze mechanisch op; §3 maakt er zinnen van.
+    - Regels: uniciteit (ook over meerdere kolommen), deelverzameling en waardenregel hangen aan het samengestelde feittype. Verplicht en datatype zijn kenmerken van de rol (B13).
+    - Gevolg voor §1: de sjabloonregel wordt verruimd (een sjabloon bevat een deel van de rollen; samen dekken ze alle rollen). Dat is achterwaarts verenigbaar en wordt een kleine fase in het plan van §2.
+    - Voor de spec: waar het identificerende sjabloon en `identifies` staan, en de volgorde van de sjablonen.
 - **Gevolg van B11:**
   - Uitwisselingsregels horen bij versie 1. Routes, controllers, endpoints en commands zijn daarvoor de bronnen. Of §2 hun structuur vast leest en §3 de betekenis aanvult, is nog te beslissen.
   - De CEM-werkwijze ([onderzoek](../research/2026-11-12-cem-werkwijze.md)) laat zien wat vast te lezen is: uniciteit, deelverzameling (*foreign key*), waardenregel, verplichte rol en datatype. Vaste waarden in de code zijn kandidaten voor een waardenregel.
@@ -220,6 +227,8 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
     - Prisma met een eigen kleine parser, of als tekst voor §3.
 - **Uitgangspunt:** `chunkhound/parsers/mappings/sql.py`, `php.py` en `typescript.py`.
 - **Te beslissen:**
+  - ~~hoe een tabel naar feittypen vertaalt~~ (besloten, B26: één samengesteld feittype per tabel);
+  - of §2 de structuur van uitwisselingsregels vast leest (routes, controllers, endpoints, commands) en §3 de betekenis aanvult, of dat alles naar §3 gaat (zie "Gevolg van B11");
   - Magento: alleen eigen modules (`app/code`) of ook kernmodules en modules van derden in `vendor/`;
   - Magento EAV: wordt elk attribuut een eigen feittype, of komt er één generiek feittype "entiteit heeft attribuutwaarde";
   - TypeScript: welke ORM en welke validatiebibliotheken eerst (Prisma, TypeORM, Zod, class-validator);
@@ -228,7 +237,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - hoe technische tabellen worden herkend: migratieadministratie, jobs, caches, sessies, Magento-indexers. De uitsluiting zelf gebeurt in §4.
 - **Gereed als:**
   - de spec bevat per brontype de vertaling naar §1-elementen, met fixtures;
-  - het plan heeft één fase per brontype.
+  - het plan heeft één fase per brontype, plus een fase die de sjabloonregel van §1 verruimt (B26).
 
 ## §3 LLM-extractie
 
@@ -240,6 +249,7 @@ Prioriteit volgens B2 (testspecificaties en regeldekking eerst):
   - uitwisselingsregels (de betekenis; de structuur mogelijk uit §2);
   - eventregels;
   - voorbeeldfeiten uit tests en documentatie.
+- **Gevolg van B26:** §2 levert per feittype mechanische sjablonen, één per kolom plus een identificerend sjabloon. §3 stelt per sjabloon een echte zin voor; de rollen van het sjabloon blijven gelijk.
 - **Uitgangspunt:**
   - de gedeelde extractielaag (`services/extraction/`): begrensde aanvragen, bundels, persistente opslag en dev-cache;
   - prompts in de stijl van `code_mapper/prompts/c4_*.md`.
