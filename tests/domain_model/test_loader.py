@@ -87,7 +87,6 @@ def test_loader_rejects_confirmed_fact_type_without_ground_fact(
     "template",
     [
         "User <member> belongs to <unknown>.",
-        "User <member> belongs to a team.",
         "<member> <team> <member>",
     ],
 )
@@ -96,6 +95,28 @@ def test_loader_rejects_template_role_mismatch(data: dict, template: str) -> Non
     assert issue_pairs(data) == {
         ("fact_types[0].templates[1]", "template_role_mismatch")
     }
+
+
+def test_templates_may_cover_a_subset_of_roles(data: dict) -> None:
+    fact = data["fact_types"][0]
+    role = data["roles"][0].copy()
+    role.update(id="role:backend/team-membership/extra", name="extra")
+    data["roles"].append(role)
+    fact["roles"].append(role["id"])
+    fact["templates"] = ["<member>", "<team>", "<extra>"]
+    parse_model(data)
+
+
+def test_role_missing_from_every_template_is_rejected(data: dict) -> None:
+    data["fact_types"][0]["templates"] = ["<member>"]
+    with pytest.raises(ModelLoadError) as error:
+        parse_model(data)
+    assert any(
+        issue.path == "fact_types[0]"
+        and issue.code == "template_role_mismatch"
+        and "team" in issue.message
+        for issue in error.value.issues
+    )
 
 
 @pytest.mark.parametrize(

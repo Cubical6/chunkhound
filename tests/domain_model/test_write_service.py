@@ -81,6 +81,42 @@ def domain_tables(db: DuckDBProvider) -> list[dict[str, Any]]:
     )
 
 
+def test_templates_may_cover_a_subset_of_roles(db: DuckDBProvider) -> None:
+    write(
+        db,
+        [
+            put(
+                kind="fact_type",
+                name="assignment",
+                templates=["<one>", "<two>", "<three>"],
+                roles=[{"name": "one"}, {"name": "two"}, {"name": "three"}],
+            )
+        ],
+    )
+    model = load_human_input(db).model
+    assert any(fact.name == "assignment" for fact in model.fact_types)
+
+
+def test_role_missing_from_every_template_is_rejected(db: DuckDBProvider) -> None:
+    issues = rejected(
+        db,
+        [
+            put(
+                kind="fact_type",
+                name="assignment",
+                templates=["<one>"],
+                roles=[{"name": "one"}, {"name": "two"}],
+            )
+        ],
+    )
+    assert any(
+        issue.path == "operations[0].element"
+        and issue.code == "template_role_mismatch"
+        and "two" in issue.message
+        for issue in issues
+    )
+
+
 def test_write_rejects_invalid_request_with_paths_and_writes_nothing(
     db: DuckDBProvider,
 ) -> None:
@@ -104,9 +140,9 @@ def test_write_rejects_invalid_request_with_paths_and_writes_nothing(
             "placeholder <agent> matches no role; roles are: ticket, assignee",
         ),
         Issue(
-            "operations[0].element.templates[0]",
+            "operations[0].element",
             "template_role_mismatch",
-            "role 'assignee' does not appear in this template",
+            "role 'assignee' does not appear in any template",
         ),
         Issue(
             "operations[0].element.status",

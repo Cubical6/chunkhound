@@ -366,6 +366,7 @@ def register_tool(
         "Write human domain input (atomic operations; optional dry_run). Put shapes:\n"
         "concept: kind, term, repository?\n"
         "fact_type: kind, name, templates, roles, repository?\n"
+        "Templates may each cover a subset of roles, but together must cover all roles.\n"
         "validation_rule: kind, fact_type, rule_kind\n"
         "derivation_rule: kind, name, statement\n"
         "exchange_rule: kind, name, statement, operations\n"

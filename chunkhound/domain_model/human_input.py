@@ -20,6 +20,7 @@ from chunkhound.domain_model.loader import (
     COLLECTIONS,
     dump_model,
     rule_shape_issues,
+    template_coverage_issues,
     template_issues,
     validation_issues,
 )
@@ -454,6 +455,7 @@ def _body_issues(body: dict[str, Any], path: str) -> list[Issue]:
             issues.extend(
                 template_issues(template, names, f"{path}.templates[{index}]")
             )
+        issues.extend(template_coverage_issues(body["templates"], names, path))
     if body["kind"] == "validation_rule":
         # Shape is independent of whether roles are names (input) or ids (contract).
         issues.extend(rule_shape_issues(ValidationRule.model_construct(**body), path))

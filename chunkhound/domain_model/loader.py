@@ -3,7 +3,7 @@
 import json
 import re
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import UnionType
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
@@ -134,16 +134,25 @@ def template_issues(template: str, role_names: list[str], path: str) -> list[Iss
         else:
             continue
         issues.append(Issue(path, "template_role_mismatch", message))
-    for name in role_names:
-        if name not in counts:
-            issues.append(
-                Issue(
-                    path,
-                    "template_role_mismatch",
-                    f"role {name!r} does not appear in this template",
-                )
-            )
     return issues
+
+
+def template_coverage_issues(
+    templates: Sequence[str], role_names: Sequence[str], path: str
+) -> list[Issue]:
+    """Require the templates together to cover every role."""
+    covered = {
+        name for template in templates for name in re.findall(r"<([^<>]*)>", template)
+    }
+    return [
+        Issue(
+            path,
+            "template_role_mismatch",
+            f"role {name!r} does not appear in any template",
+        )
+        for name in dict.fromkeys(role_names)
+        if name not in covered
+    ]
 
 
 def rule_shape_issues(element: ValidationRule, path: str) -> list[Issue]:
@@ -332,6 +341,7 @@ def _model_issues(model: DomainModel) -> list[Issue]:
                 issues.extend(
                     template_issues(template, role_names, f"{path}.templates[{i}]")
                 )
+            issues.extend(template_coverage_issues(element.templates, role_names, path))
             for i, role_id in enumerate(element.roles):
                 role = by_id.get(role_id)
                 if isinstance(role, Role) and role.fact_type != element.id:
