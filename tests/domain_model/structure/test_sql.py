@@ -1,4 +1,4 @@
-"""User-facing contracts for SQL CREATE extraction, without Git or a database."""
+"""User-facing contracts for SQL extraction and replay, without Git or a database."""
 
 import hashlib
 from collections.abc import Callable
@@ -11,6 +11,201 @@ from chunkhound.domain_model.structure.contract import (
     StructureExtraction,
 )
 from chunkhound.domain_model.structure.extract import build_structure
+
+
+def replay_sql(tmp_path: Path, source: str) -> StructureExtraction:
+    (tmp_path / "schema.sql").write_text(source)
+    return build_structure(
+        tmp_path,
+        (RepositoryRef(key="root", path=".", commit="1" * 40, dirty=False),),
+    )
+
+
+def test_pg_dump_keys_survive_irrelevant_ddl(
+    extract_fixture: Callable[[str], StructureExtraction],
+) -> None:
+    result = extract_fixture("sql")
+    assert any(c.id == "concept:root/users" for c in result.model.concepts)
+    assert any(
+        r.fact_type == "fact_type:root/users"
+        and r.rule_kind == "uniqueness"
+        and r.roles == ("role:root/users/id",)
+        for r in result.model.validation_rules
+    )
+    assert any(
+        r.fact_type == "fact_type:root/messages"
+        and r.rule_kind == "subset"
+        and r.roles == ("role:root/messages/user-id",)
+        and r.superset_fact_type == "fact_type:root/users"
+        and r.superset_roles == ("role:root/users/id",)
+        for r in result.model.validation_rules
+    )
+    assert not any(
+        f.kind == "uncertain"
+        and f.subject in {"fact_type:root/users", "fact_type:root/messages"}
+        for f in result.findings
+    )
+    message_roles = {
+        r.name: r
+        for r in result.model.roles
+        if r.fact_type == "fact_type:root/messages"
+    }
+    assert set(message_roles) == {"id", "user_id", "title"}
+    assert message_roles["title"].datatype == "varchar(10)"
+    assert len(message_roles["id"].citations) == 1
+    assert message_roles["id"].bindings[0].citation.start_line == 10
+    users = next(f for f in result.model.fact_types if f.id == "fact_type:root/users")
+    assert len(users.citations) == 1
+    user_id = next(r for r in result.model.roles if r.id == "role:root/users/id")
+    assert len(user_id.citations) == 1
+    assert user_id.bindings[0].citation.start_line == 2
+
+
+def test_migrations_replay_in_natural_order(
+    extract_fixture: Callable[[str], StructureExtraction],
+) -> None:
+    result = extract_fixture("sql")
+    assert any(f.name == "team_user" for f in result.model.fact_types)
+    assert not any(
+        f.kind == "uncertain" and f.subject == "fact_type:root/team-user"
+        for f in result.findings
+    )
+    assert any(
+        r.id == "validation_rule:root/team-user/subset/user-id"
+        for r in result.model.validation_rules
+    )
+
+
+def test_renamed_column_keeps_both_citations(
+    extract_fixture: Callable[[str], StructureExtraction],
+) -> None:
+    result = extract_fixture("sql")
+    role = next(r for r in result.model.roles if r.id == "role:root/team-user/title")
+    assert [c.path for c in role.citations] == [
+        "migrations/V1__add.sql",
+        "migrations/V2__rename.sql",
+    ]
+    assert role.bindings[0].citation.path == "migrations/V2__rename.sql"
+    assert role.bindings[0].target == "team_user.title"
+
+
+def test_dropped_constraint_leaves_no_rule(
+    extract_fixture: Callable[[str], StructureExtraction],
+) -> None:
+    result = extract_fixture("sql")
+    assert not any(
+        r.id
+        in {
+            "validation_rule:root/team-user/uniqueness/user-id",
+            "validation_rule:root/team-user/uniqueness/title",
+        }
+        for r in result.model.validation_rules
+    )
+
+
+def test_unknown_alter_marks_table_uncertain(
+    extract_fixture: Callable[[str], StructureExtraction],
+) -> None:
+    result = extract_fixture("sql")
+    assert any(f.name == "notes" for f in result.model.fact_types)
+    assert any(
+        f.subject == "fact_type:root/notes" and f.reason == "unparsed_statement"
+        for f in result.findings
+    )
+
+
+def test_sql_replay_changes_current_columns_and_references(tmp_path: Path) -> None:
+    result = replay_sql(
+        tmp_path,
+        """
+CREATE TABLE users (id int PRIMARY KEY);
+CREATE TABLE notes (id int PRIMARY KEY, user_id int REFERENCES users(id), old text);
+ALTER TABLE notes ADD label varchar(20), ADD COLUMN discard int;
+ALTER TABLE notes MODIFY COLUMN label varchar(40) NOT NULL;
+ALTER TABLE notes CHANGE COLUMN label title varchar(80) NULL;
+ALTER TABLE notes ALTER COLUMN title TYPE text;
+ALTER TABLE notes ALTER COLUMN title SET NOT NULL;
+ALTER TABLE notes ALTER COLUMN title DROP NOT NULL;
+ALTER TABLE notes DROP COLUMN discard, DROP old;
+ALTER TABLE users RENAME COLUMN id TO key_id;
+RENAME TABLE users TO people;
+ALTER TABLE notes RENAME TO entries;
+""",
+    )
+    roles = {
+        r.name: r for r in result.model.roles if r.fact_type == "fact_type:root/entries"
+    }
+    assert set(roles) == {"id", "user_id", "title"}
+    assert roles["title"].datatype == "text"
+    assert roles["title"].mandatory is False
+    assert len(roles["title"].citations) == 6
+    rule = next(r for r in result.model.validation_rules if r.rule_kind == "subset")
+    assert rule.superset_fact_type == "fact_type:root/people"
+    assert rule.superset_roles == ("role:root/people/key-id",)
+    fact = next(f for f in result.model.fact_types if f.name == "entries")
+    assert len(fact.citations) == 2
+    assert not result.findings
+
+
+def test_sql_constraint_drops_and_table_drops_leave_no_rules(tmp_path: Path) -> None:
+    result = replay_sql(
+        tmp_path,
+        """
+CREATE TABLE users (id int PRIMARY KEY);
+CREATE TABLE notes (id int PRIMARY KEY, user_id int, state text);
+ALTER TABLE notes ADD CONSTRAINT fk FOREIGN KEY (user_id) REFERENCES users(id);
+ALTER TABLE notes DROP FOREIGN KEY fk;
+ALTER TABLE notes ADD UNIQUE KEY uq (state);
+ALTER TABLE notes DROP CONSTRAINT uq;
+ALTER TABLE notes ADD CONSTRAINT allowed CHECK (state IN ('a', 'b'));
+ALTER TABLE notes DROP CONSTRAINT allowed;
+ALTER TABLE notes DROP PRIMARY KEY;
+ALTER TABLE notes ADD PRIMARY KEY (id);
+ALTER TABLE notes DROP PRIMARY KEY;
+CREATE UNIQUE INDEX ix ON notes (user_id);
+DROP INDEX ix ON notes;
+CREATE TABLE gone (id int PRIMARY KEY);
+DROP TABLE gone;
+""",
+    )
+    assert not any(f.name == "gone" for f in result.model.fact_types)
+    assert not any(
+        r.fact_type == "fact_type:root/notes" for r in result.model.validation_rules
+    )
+    assert (
+        next(f for f in result.model.fact_types if f.name == "notes").identifies is None
+    )
+    assert not result.findings
+
+
+def test_duplicate_create_marks_uncertain_but_if_not_exists_is_noop(
+    tmp_path: Path,
+) -> None:
+    result = replay_sql(
+        tmp_path,
+        """
+CREATE TABLE notes (id int PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS notes (other text);
+CREATE TABLE notes (discard text);
+""",
+    )
+    assert {r.name for r in result.model.roles} == {"id"}
+    assert [f.reason for f in result.findings] == ["table_created_twice"]
+
+
+def test_unknown_table_operations_do_not_change_later_creation(tmp_path: Path) -> None:
+    result = replay_sql(
+        tmp_path,
+        """
+ALTER TABLE notes ADD title text;
+ALTER TABLE notes RENAME TO other;
+DROP TABLE notes;
+CREATE TABLE notes (id int PRIMARY KEY);
+""",
+    )
+    assert {f.name for f in result.model.fact_types} == {"notes"}
+    assert {r.name for r in result.model.roles} == {"id"}
+    assert all(f.subject is None for f in result.findings)
 
 
 @pytest.fixture
