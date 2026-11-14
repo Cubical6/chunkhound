@@ -1,16 +1,88 @@
 """Magento declarative storage and bounded third-party extraction contracts."""
 
+import re
 import shutil
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
+
 from chunkhound.domain_model.structure.contract import (
     RepositoryRef,
     StructureExtraction,
+    dump_structure,
+    parse_structure,
 )
 from chunkhound.domain_model.structure.extract import build_structure
 
 ExtractFixture = Callable[[str], StructureExtraction]
+
+
+@pytest.mark.parametrize(
+    "filename", ["db_schema.xml", "webapi.xml", "frontend/routes.xml", "di.xml"]
+)
+def test_malformed_xml_reports_error_without_losing_valid_elements(
+    tmp_path: Path, filename: str
+) -> None:
+    module = tmp_path / "app/code/Acme/Notes"
+    (module / "etc/frontend").mkdir(parents=True)
+    (module / "registration.php").write_text(
+        "<?php ComponentRegistrar::register("
+        "ComponentRegistrar::MODULE, 'Acme_Notes', __DIR__);"
+    )
+    (module / "etc/module.xml").write_text(
+        '<config><module name="Acme_Notes"/></config>'
+    )
+    schema = module / "etc/db_schema.xml"
+    schema.write_text(
+        '<schema><table name="notes"><column name="id" xsi:type="int"/>'
+        "</table></schema>"
+    )
+    path = module / "etc" / filename
+    if path != schema:
+        path.write_text("<config/>")
+    path.write_text(path.read_text() + "\n<")
+    repo = RepositoryRef(key="root", path=".", commit="1" * 40, dirty=False)
+    result = build_structure(tmp_path, (repo,))
+    (finding,) = [
+        f
+        for f in result.findings
+        if f.reason == "unreadable_source"
+        and f.citations[0].path == path.relative_to(tmp_path).as_posix()
+    ]
+    assert finding.kind == "unresolved"
+    assert finding.subject is None and finding.detail is None
+    assert finding.citations[0].start_line == finding.citations[0].end_line == 2
+    assert {fact.name for fact in result.model.fact_types} == {"notes"}
+    assert parse_structure(dump_structure(result)) == result
+
+
+def test_discarded_vendor_table_findings_have_no_dangling_subject(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    shutil.copytree(Path(__file__).parent / "fixtures/magento_schema", project)
+    # The referenced vendor table points to an unfollowed table. Columns
+    # without usable keys mean it cannot produce a fact type.
+    for path in project.rglob("db_schema.xml"):
+        text = path.read_text()
+        text = re.sub(
+            r'(<table name="customer_entity"[^>]*>)(.*?)(</table>)',
+            lambda match: match[1]
+            + re.sub(r'(name|column)="[^"]+"', r'\1="_"', match[2])
+            + match[3],
+            text,
+            flags=re.DOTALL,
+        )
+        path.write_text(text)
+    repo = RepositoryRef(key="root", path=".", commit="1" * 40, dirty=False)
+    result = build_structure(project, (repo,))
+    assert "customer_entity" not in {fact.name for fact in result.model.fact_types}
+    assert any(
+        f.reason == "vendor_not_followed" and f.subject is None for f in result.findings
+    )
+    dumped = dump_structure(result)
+    assert dump_structure(parse_structure(dumped)) == dumped
 
 
 def test_referenced_vendor_table_is_third_party_with_package(

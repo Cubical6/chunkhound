@@ -17,7 +17,8 @@ silently break:
     run. Rule-driven writes to those keys still win.
  5. `remote_config` in `.chunkhound.json` / `--config` is stripped with WARNING.
  6. Rule failing sub-model validation is skipped (`schema_error`), rest applies.
- 7. Depth-2 typo path → `schema_error` on both `set` and `remove`
+ 7. Nested typo paths/payloads → `schema_error`; valid depth-3 rules persist.
+    Depth-2 typo path → `schema_error` on both `set` and `remove`
     (typo `remove` must not surface as `no-op`).
  8. Rule with `min_chunkhound_version` > running version is skipped, rest applies.
  9. Rule with unparseable `min_chunkhound_version` → dedicated WARNING
@@ -90,9 +91,7 @@ def _install_fetch(
     fake = _FakeFetcher(envelope)
     # Pipeline imports fetcher as a module and calls fetcher.fetch — patch the
     # attribute on that module so both `from . import fetcher` sees it.
-    monkeypatch.setattr(
-        "chunkhound.core.config.remote.pipeline.fetcher.fetch", fake
-    )
+    monkeypatch.setattr("chunkhound.core.config.remote.pipeline.fetcher.fetch", fake)
     return fake
 
 
@@ -213,9 +212,7 @@ async def test_terminal_gate_rejects_cli_http_transport_non_loopback(
     messages: list[str] = []
     handler_id = logger.add(lambda m: messages.append(str(m)), level="ERROR")
     try:
-        await run_remote_config_fetch(
-            _args(command="mcp", transport="http"), "mcp"
-        )
+        await run_remote_config_fetch(_args(command="mcp", transport="http"), "mcp")
     finally:
         logger.remove(handler_id)
 
@@ -243,9 +240,7 @@ async def test_terminal_gate_rejects_cli_http_transport_cors(
     messages: list[str] = []
     handler_id = logger.add(lambda m: messages.append(str(m)), level="ERROR")
     try:
-        await run_remote_config_fetch(
-            _args(command="mcp", transport="http"), "mcp"
-        )
+        await run_remote_config_fetch(_args(command="mcp", transport="http"), "mcp")
     finally:
         logger.remove(handler_id)
 
@@ -278,9 +273,7 @@ async def test_terminal_gate_rejects_local_http_transport_non_loopback(
     messages: list[str] = []
     handler_id = logger.add(lambda m: messages.append(str(m)), level="ERROR")
     try:
-        await run_remote_config_fetch(
-            _args(command="mcp", path=project), "mcp"
-        )
+        await run_remote_config_fetch(_args(command="mcp", path=project), "mcp")
     finally:
         logger.remove(handler_id)
 
@@ -312,9 +305,7 @@ async def test_terminal_gate_rejects_local_http_transport_cors(
     messages: list[str] = []
     handler_id = logger.add(lambda m: messages.append(str(m)), level="ERROR")
     try:
-        await run_remote_config_fetch(
-            _args(command="mcp", path=project), "mcp"
-        )
+        await run_remote_config_fetch(_args(command="mcp", path=project), "mcp")
     finally:
         logger.remove(handler_id)
 
@@ -342,9 +333,7 @@ async def test_terminal_gate_accepts_preexisting_hazard_under_active_transport(
     }
     _install_fetch(monkeypatch, envelope)
 
-    await run_remote_config_fetch(
-        _args(command="mcp", transport="http"), "mcp"
-    )
+    await run_remote_config_fetch(_args(command="mcp", transport="http"), "mcp")
 
     data = _read_target(target)
     assert data["database"]["provider"] == "duckdb"
@@ -459,8 +448,7 @@ async def test_terminal_gate_rejects_cli_auth_token_masking_non_loopback(
 
     assert not target.exists()
     assert any("rejected (persisted)" in m for m in messages), (
-        f"expected persisted substrate to reject overlay mask, "
-        f"got messages={messages}"
+        f"expected persisted substrate to reject overlay mask, got messages={messages}"
     )
     assert not any("rejected (active)" in m for m in messages), (
         f"active substrate must be masked by --auth-token; if it also "
@@ -478,9 +466,7 @@ async def test_terminal_gate_rejects_local_host_masking_non_loopback(
     # file. Persisted skips local and must reject.
     project = tmp_path / "project"
     project.mkdir()
-    (project / ".chunkhound.json").write_text(
-        json.dumps({"mcp": {"host": "0.0.0.0"}})
-    )
+    (project / ".chunkhound.json").write_text(json.dumps({"mcp": {"host": "0.0.0.0"}}))
 
     target = _target_path(_isolate)
     assert not target.exists()
@@ -494,9 +480,7 @@ async def test_terminal_gate_rejects_local_host_masking_non_loopback(
     messages: list[str] = []
     handler_id = logger.add(lambda m: messages.append(str(m)), level="ERROR")
     try:
-        await run_remote_config_fetch(
-            _args(command="search", path=project), "search"
-        )
+        await run_remote_config_fetch(_args(command="search", path=project), "search")
     finally:
         logger.remove(handler_id)
 
@@ -652,9 +636,7 @@ async def test_self_register_preserves_rule_set_url(
     # discovery-layer (CLI/env) value — the envelope is authoritative for
     # server-driven migrations.
     target = _target_path(_isolate)
-    target.write_text(
-        json.dumps({"remote_config": {"url": "https://old.test/x.json"}})
-    )
+    target.write_text(json.dumps({"remote_config": {"url": "https://old.test/x.json"}}))
     envelope = {
         "version": 1,
         "rules": [
@@ -745,9 +727,7 @@ async def test_rule_set_url_accepted_when_loopback_http(
     loopback = "http://127.0.0.1:8080/config.json"
     envelope = {
         "version": 1,
-        "rules": [
-            {"id": "remote_config.url", "op": "set", "value": loopback}
-        ],
+        "rules": [{"id": "remote_config.url", "op": "set", "value": loopback}],
     }
     _install_fetch(monkeypatch, envelope)
 
@@ -863,9 +843,7 @@ async def test_explicit_config_remote_config_stripped_and_ignored_by_url_discove
 
     explicit_cfg = tmp_path / "explicit-config.json"
     malicious_url = "http://malicious.test/x.json"
-    explicit_cfg.write_text(
-        json.dumps({"remote_config": {"url": malicious_url}})
-    )
+    explicit_cfg.write_text(json.dumps({"remote_config": {"url": malicious_url}}))
 
     benign_url = "https://remote.test/config.json"
     args = _args(
@@ -923,6 +901,68 @@ async def test_rule_failing_sub_model_validation_is_skipped(
     )
 
 
+@pytest.mark.parametrize(
+    "op,path,value",
+    [
+        (op, path, value)
+        for op in ("set", "merge", "remove")
+        for path, value in (
+            ("domain.technical_tables.ad", ["typo_*"]),
+            ("domain.technical_tables", {"ad": ["typo_*"]}),
+            ("domain", {"technical_tables": {"ad": ["typo_*"]}}),
+        )
+        if op != "remove" or path == "domain.technical_tables.ad"
+    ],
+)
+async def test_nested_rules_apply_and_unknown_keys_warn(
+    _isolate: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    op: str,
+    path: str,
+    value: Any,
+) -> None:
+    target = _target_path(_isolate)
+    target.write_text(
+        json.dumps({"domain": {"technical_tables": {"remove": ["sessions"]}}})
+    )
+    _install_fetch(
+        monkeypatch,
+        {
+            "version": 1,
+            "rules": [
+                {"id": path, "op": op, "value": value},
+                {
+                    "id": "domain.technical_tables.add",
+                    "op": "set",
+                    "value": ["audit_*"],
+                },
+            ],
+        },
+    )
+
+    messages: list[str] = []
+    handler_id = logger.add(lambda m: messages.append(str(m)), level="INFO")
+    try:
+        await run_remote_config_fetch(_args(), "search")
+    finally:
+        logger.remove(handler_id)
+
+    assert _read_target(target)["domain"] == {
+        "technical_tables": {"add": ["audit_*"], "remove": ["sessions"]}
+    }
+    assert any(
+        "rule 1" in m and "schema_error: unknown path 'domain.technical_tables.ad'" in m
+        for m in messages
+    ), messages
+    assert not any(
+        "rule 1" in m and ("applied" in m or "no-op" in m) for m in messages
+    ), messages
+    assert any(
+        "rule 2" in m and "domain.technical_tables.add" in m and "applied" in m
+        for m in messages
+    ), messages
+
+
 async def test_leaf_segment_typo_is_skipped_with_warning(
     _isolate: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -956,9 +996,9 @@ async def test_leaf_segment_typo_is_skipped_with_warning(
     assert "provder" not in data.get("embedding", {})
     assert data.get("embedding", {}).get("provider") != "openai"
     # Operator sees a WARNING naming the bad path.
-    assert any(
-        "schema_error" in m and "embedding.provder" in m for m in messages
-    ), f"expected WARNING naming the typo path, got messages={messages}"
+    assert any("schema_error" in m and "embedding.provder" in m for m in messages), (
+        f"expected WARNING naming the typo path, got messages={messages}"
+    )
 
 
 async def test_remove_on_leaf_segment_typo_is_schema_error_not_no_op(
@@ -983,12 +1023,12 @@ async def test_remove_on_leaf_segment_typo_is_schema_error_not_no_op(
     finally:
         logger.remove(handler_id)
 
-    assert any(
-        "schema_error" in m and "embedding.provder" in m for m in messages
-    ), f"expected schema_error WARNING on typo remove, got messages={messages}"
-    assert not any(
-        "no-op" in m and "embedding.provder" in m for m in messages
-    ), f"typo remove must not log 'no-op', got messages={messages}"
+    assert any("schema_error" in m and "embedding.provder" in m for m in messages), (
+        f"expected schema_error WARNING on typo remove, got messages={messages}"
+    )
+    assert not any("no-op" in m and "embedding.provder" in m for m in messages), (
+        f"typo remove must not log 'no-op', got messages={messages}"
+    )
 
 
 async def test_parent_merge_with_unknown_nested_key_is_schema_error(
@@ -1027,13 +1067,12 @@ async def test_parent_merge_with_unknown_nested_key_is_schema_error(
     assert "provder" not in embedding
     assert embedding.get("provider") != "openai"
     # Operator sees a WARNING naming the bad path.
-    assert any(
-        "schema_error" in m and "embedding.provder" in m for m in messages
-    ), f"expected WARNING naming the typo path, got messages={messages}"
+    assert any("schema_error" in m and "embedding.provder" in m for m in messages), (
+        f"expected WARNING naming the typo path, got messages={messages}"
+    )
     # And crucially, no `applied` line for the embedding rule.
     assert not any(
-        "applied" in m and "op=merge" in m and "'embedding'" in m
-        for m in messages
+        "applied" in m and "op=merge" in m and "'embedding'" in m for m in messages
     ), f"typo merge must not log 'applied', got messages={messages}"
 
 
@@ -1066,20 +1105,18 @@ async def test_parent_set_with_unknown_nested_key_is_schema_error(
     embedding = data.get("embedding", {})
     assert "provder" not in embedding
     assert embedding.get("provider") != "openai"
-    assert any(
-        "schema_error" in m and "embedding.provder" in m for m in messages
-    ), f"expected WARNING naming the typo path, got messages={messages}"
+    assert any("schema_error" in m and "embedding.provder" in m for m in messages), (
+        f"expected WARNING naming the typo path, got messages={messages}"
+    )
     assert not any(
-        "applied" in m and "op=set" in m and "'embedding'" in m
-        for m in messages
+        "applied" in m and "op=set" in m and "'embedding'" in m for m in messages
     ), f"typo set must not log 'applied', got messages={messages}"
 
 
 async def test_deep_path_with_dict_value_defers_to_sub_model_validation(
     _isolate: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Locks in the ``len(segments) == 1`` guard on the payload-key pre-check
-    # in ``rules.py`` (see comment at the guard site for the full rationale).
+    # Payload-key checks apply only to BaseModel targets, not scalar leaves.
     from loguru import logger
 
     envelope = {
@@ -1109,8 +1146,7 @@ async def test_deep_path_with_dict_value_defers_to_sub_model_validation(
     # Operator sees a WARNING from sub-model validation — proves the fix
     # deferred to pydantic instead of the (wrong) parent-payload key check.
     assert any(
-        "schema_error" in m and "sub-model validation failed" in m
-        for m in messages
+        "schema_error" in m and "sub-model validation failed" in m for m in messages
     ), (
         "expected schema_error WARNING from sub-model validation, "
         f"got messages={messages}"
@@ -1183,9 +1219,9 @@ async def test_rule_unparseable_version_is_skipped_with_warning(
     data = _read_target(_target_path(_isolate))
     assert data.get("database", {}).get("provider") != "lancedb"
     assert data["mcp"]["host"] == "127.0.0.1"
-    assert any(
-        "unparseable" in m and "not-a-version" in m for m in messages
-    ), f"expected unparseable-version WARNING, got messages={messages}"
+    assert any("unparseable" in m and "not-a-version" in m for m in messages), (
+        f"expected unparseable-version WARNING, got messages={messages}"
+    )
 
 
 async def test_envelope_min_version_too_high_discards_all(
@@ -1286,9 +1322,7 @@ async def test_no_write_when_dict_unchanged(
     target = _target_path(_isolate)
     url = "https://remote.test/config.json"
     target.write_text(
-        json.dumps(
-            {"mcp": {"host": "127.0.0.1"}, "remote_config": {"url": url}}
-        )
+        json.dumps({"mcp": {"host": "127.0.0.1"}, "remote_config": {"url": url}})
     )
     bak = target.with_suffix(target.suffix + ".bak")
 
@@ -1364,8 +1398,7 @@ async def test_successful_apply_emits_info_audit_log(
         logger.remove(handler_id)
 
     assert any(
-        "applied" in m and "embedding.api_key" in m and "op=set" in m
-        for m in messages
+        "applied" in m and "embedding.api_key" in m and "op=set" in m for m in messages
     ), f"expected INFO audit line with op + path, got messages={messages}"
     assert not any("sk-secret" in m for m in messages), (
         f"rule value must not appear in logs, got messages={messages}"
@@ -1423,12 +1456,12 @@ async def test_remove_on_missing_path_logs_no_op(
     finally:
         logger.remove(handler_id)
 
-    assert any(
-        "no-op" in m and "database.provider" in m for m in messages
-    ), f"expected no-op INFO line, got messages={messages}"
-    assert not any(
-        "applied" in m and "database.provider" in m for m in messages
-    ), f"remove on missing path must not log 'applied', got messages={messages}"
+    assert any("no-op" in m and "database.provider" in m for m in messages), (
+        f"expected no-op INFO line, got messages={messages}"
+    )
+    assert not any("applied" in m and "database.provider" in m for m in messages), (
+        f"remove on missing path must not log 'applied', got messages={messages}"
+    )
 
 
 async def test_rule_setting_refused_path_emits_scrub_warning(
@@ -1455,9 +1488,9 @@ async def test_rule_setting_refused_path_emits_scrub_warning(
     finally:
         logger.remove(handler_id)
 
-    assert any(
-        "refused_path" in m and "database.path" in m for m in messages
-    ), f"expected refused_path WARNING naming the key, got messages={messages}"
+    assert any("refused_path" in m and "database.path" in m for m in messages), (
+        f"expected refused_path WARNING naming the key, got messages={messages}"
+    )
     assert not any("/hijacked" in m for m in messages), (
         f"rule value must not appear in logs, got messages={messages}"
     )
@@ -1498,9 +1531,9 @@ async def test_rule_setting_refused_path_over_existing_disk_value_emits_warning(
     finally:
         logger.remove(handler_id)
 
-    assert any(
-        "refused_path" in m and "database.path" in m for m in messages
-    ), f"expected refused_path WARNING, got messages={messages}"
+    assert any("refused_path" in m and "database.path" in m for m in messages), (
+        f"expected refused_path WARNING, got messages={messages}"
+    )
     assert not any("/hijacked" in m for m in messages), (
         f"rule value must not leak, got messages={messages}"
     )
@@ -1535,9 +1568,7 @@ async def test_operator_owned_disk_value_does_not_emit_scrub_warning(
     finally:
         logger.remove(handler_id)
 
-    assert not any(
-        "refused_path" in m or "database.path" in m for m in messages
-    ), (
+    assert not any("refused_path" in m or "database.path" in m for m in messages), (
         "scrub must be silent when no rule touched the refused key, got "
         f"messages={messages}"
     )
@@ -1576,9 +1607,9 @@ async def test_parent_merge_sneaking_refused_subkey_emits_scrub_warning(
     finally:
         logger.remove(handler_id)
 
-    assert any(
-        "refused_path" in m and "database.path" in m for m in messages
-    ), f"expected refused_path WARNING naming the key, got messages={messages}"
+    assert any("refused_path" in m and "database.path" in m for m in messages), (
+        f"expected refused_path WARNING naming the key, got messages={messages}"
+    )
     assert not any("/hijacked" in m for m in messages), (
         f"rule value must not leak, got messages={messages}"
     )
@@ -1599,9 +1630,9 @@ async def test_write_atomicity_preserves_prior_content_on_mid_write_failure(
     # have already truncated the file — corrupting on-disk state and making
     # every subsequent chunkhound invocation fail config load.
     target = _target_path(_isolate)
-    original_content = json.dumps(
-        {"mcp": {"host": "127.0.0.1"}}, indent=2, sort_keys=True
-    ) + "\n"
+    original_content = (
+        json.dumps({"mcp": {"host": "127.0.0.1"}}, indent=2, sort_keys=True) + "\n"
+    )
     target.write_text(original_content)
     original_bytes = target.read_bytes()
 
@@ -1614,9 +1645,7 @@ async def test_write_atomicity_preserves_prior_content_on_mid_write_failure(
     def _raise_enospc(*_a, **_kw):
         raise OSError(28, "No space left on device")
 
-    monkeypatch.setattr(
-        "chunkhound.utils.atomic_write.json.dump", _raise_enospc
-    )
+    monkeypatch.setattr("chunkhound.utils.atomic_write.json.dump", _raise_enospc)
 
     with pytest.raises(SystemExit) as excinfo:
         await run_remote_config_fetch(_args(), "search")
@@ -1645,9 +1674,9 @@ async def test_unexpected_bug_in_pipeline_logs_traceback_and_returns(
     from chunkhound.core.config.remote import pipeline as pipeline_mod
 
     target = _target_path(_isolate)
-    original_content = json.dumps(
-        {"mcp": {"host": "127.0.0.1"}}, indent=2, sort_keys=True
-    ) + "\n"
+    original_content = (
+        json.dumps({"mcp": {"host": "127.0.0.1"}}, indent=2, sort_keys=True) + "\n"
+    )
     target.write_text(original_content)
     original_bytes = target.read_bytes()
 

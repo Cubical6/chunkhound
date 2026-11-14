@@ -167,6 +167,7 @@ def translate(
                             span=table.defined_at,
                             columns=table.columns,
                             constraints=table.constraints,
+                            model_class=table.model_class,
                         ),
                     )
                 )
@@ -294,7 +295,16 @@ def translate(
             lower_mandatory = True if column.name in lower_primary else column.mandatory
             if lower_mandatory is None:
                 continue
-            if mandatory != lower_mandatory:
+            if mandatory is None:
+                columns[key][column.name] = previous_column.model_copy(
+                    update={
+                        "mandatory": lower_mandatory,
+                        "origin": tuple(
+                            dict.fromkeys((*previous_column.origin, *column.origin))
+                        ),
+                    }
+                )
+            elif mandatory != lower_mandatory:
                 claims.append(
                     DivergentClaim(
                         subject=identity.role_id(fid, column.name),

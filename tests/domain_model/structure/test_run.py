@@ -63,6 +63,7 @@ def test_repository_without_commit_stops_the_run(
     tmp_path: Path, isolated_git: None
 ) -> None:
     repository(tmp_path, commit=False)
+    (tmp_path / "schema.sql").write_text("CREATE TABLE items (id INT PRIMARY KEY);")
     with pytest.raises(StructureExtractionError) as error:
         extract_structure(tmp_path)
     assert error.value.code == "repository_without_commit"
@@ -70,6 +71,32 @@ def test_repository_without_commit_stops_the_run(
     assert result.returncode == 2
     assert "repository_without_commit" in result.stderr
     assert not result.stdout
+
+
+def test_workspace_only_requires_commits_for_owned_sources(
+    tmp_path: Path, isolated_git: None
+) -> None:
+    for name in ("backend", "frontend"):
+        project = tmp_path / name
+        repository(project)
+        (project / "schema.sql").write_text("CREATE TABLE items (id INT PRIMARY KEY);")
+        git(project, "add", "schema.sql")
+        git(project, "commit", "-qm", "Add example schema")
+    result = extract_structure(tmp_path)
+    assert {repo.key for repo in result.repositories} == {"backend", "frontend"}
+    assert {fact.repository for fact in result.model.fact_types} == {
+        "backend",
+        "frontend",
+    }
+    assert parse_structure(dump_structure(result)) == result
+    for role in result.model.roles:
+        assert role.citations[0].commit == git(
+            tmp_path / role.repository, "rev-parse", "HEAD"
+        )
+    (tmp_path / "schema.sql").write_text("CREATE TABLE notes (id INT PRIMARY KEY);")
+    with pytest.raises(StructureExtractionError) as error:
+        extract_structure(tmp_path)
+    assert error.value.code == "repository_without_commit"
 
 
 def test_repository_key_collision_stops_the_run(
@@ -157,6 +184,27 @@ def test_unreadable_file_does_not_stop_the_run(
         "unreadable_source",
     }
     assert seen == ["ok.sql"]
+
+
+def test_failed_reader_cites_the_source_that_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "a.sql").write_text("CREATE TABLE items (id INT PRIMARY KEY);")
+    (tmp_path / "b.sql").write_text("CREATE TABLE notes (id INT PRIMARY KEY);")
+    original_read = extraction_module.read_file
+
+    def read_source(*args, **kwargs):
+        if args[1] == "b.sql":
+            raise ValueError("Source unavailable")
+        return original_read(*args, **kwargs)
+
+    monkeypatch.setattr(extraction_module, "read_file", read_source)
+    repo = RepositoryRef(key="root", path=".", commit=COMMIT, dirty=False)
+    result = build_structure(tmp_path, (repo,))
+    (finding,) = result.findings
+    assert finding.reason == "unreadable_source"
+    assert finding.citations[0].path == "b.sql"
+    assert finding.citations[0].commit == COMMIT
 
 
 def test_failed_reader_does_not_stop_other_readers(

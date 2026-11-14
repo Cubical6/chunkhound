@@ -330,6 +330,18 @@ def test_type_matching_a_table_adds_citation_or_divergent_claim(tmp_path: Path) 
     assert not lighthouse.findings
 
 
+def test_datatype_excludes_all_non_null_markers(tmp_path: Path) -> None:
+    (tmp_path / "schema.graphql").write_text(
+        "type Invoice { id: ID! total: Float! ids: [ID!]! optional: [ID!] }"
+    )
+    result = build_structure(tmp_path, REPOSITORIES)
+    roles = {role.name: role for role in result.model.roles}
+    assert roles["total"].datatype == "Float" and roles["total"].mandatory is True
+    assert roles["ids"].datatype == "[ID]" and roles["ids"].mandatory is True
+    assert roles["optional"].datatype == "[ID]"
+    assert roles["optional"].mandatory is False
+
+
 @pytest.mark.parametrize("id_type", ["ID", "ID!"])
 def test_type_without_table_becomes_fact_type(tmp_path: Path, id_type: str) -> None:
     root = project(tmp_path, "graphql_plain")
@@ -344,8 +356,8 @@ def test_type_without_table_becomes_fact_type(tmp_path: Path, id_type: str) -> N
     assert invoice.identifies == "concept:root/invoice"
     assert invoice.roles[0] == "role:root/invoice/id"
     roles = {r.name: r for r in result.model.roles if r.fact_type == invoice.id}
-    assert roles["id"].mandatory is True and roles["id"].datatype == id_type
-    assert roles["total"].datatype == "Float!" and roles["total"].mandatory is True
+    assert roles["id"].mandatory is True and roles["id"].datatype == "ID"
+    assert roles["total"].datatype == "Float" and roles["total"].mandatory is True
     assert roles["issued"].datatype == "Date" and roles["issued"].mandatory is False
     assert roles["issued"].citations[0].path == "extend.gql"
     assert roles["team"].concept == "concept:root/team"

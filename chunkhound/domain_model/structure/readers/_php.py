@@ -14,9 +14,11 @@ def text(node: Node | None) -> str:
 
 
 def walk(node: Node) -> Iterator[Node]:
-    yield node
-    for child in node.named_children:
-        yield from walk(child)
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        yield current
+        stack.extend(reversed(current.named_children))
 
 
 def literal_text(node: Node | None) -> str | None:

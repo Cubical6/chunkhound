@@ -9,10 +9,13 @@ from typing import TYPE_CHECKING
 
 from tree_sitter_language_pack import get_parser
 
+from chunkhound.domain_model.model import Citation
+from chunkhound.domain_model.structure.contract import Finding
 from chunkhound.domain_model.structure.files import select_files
 from chunkhound.domain_model.structure.readers import _php
 from chunkhound.domain_model.structure.readers._psr4 import PHPType, file_scopes
 from chunkhound.domain_model.structure.readers._xml import Element, parse_xml
+from chunkhound.domain_model.structure.schema import Span
 
 if TYPE_CHECKING:
     from chunkhound.domain_model.structure.extract import ReadContext
@@ -31,7 +34,31 @@ def is_vendor(path: str) -> bool:
 
 def read_xml(ctx: ReadContext, path: str, reader: str) -> tuple[Element, ...]:
     source = ctx.read(path)
-    return parse_xml("\n".join(source.lines), path, reader) if source else ()
+    if source is None:
+        return ()
+    errors: list[Span] = []
+    elements = parse_xml("\n".join(source.lines), path, reader, errors)
+    if errors:
+        repo = ctx.repository_of(path)
+        error = errors[0]
+        ctx.findings.append(
+            Finding(
+                kind="unresolved",
+                subject=None,
+                reason="unreadable_source",
+                detail=None,
+                citations=(
+                    Citation(
+                        repository=repo.key,
+                        path=path,
+                        start_line=error.start_line,
+                        end_line=error.end_line,
+                        commit=repo.commit,
+                    ),
+                ),
+            )
+        )
+    return elements
 
 
 def package_detail(ctx: ReadContext, module_path: str) -> str | None:

@@ -24,7 +24,9 @@ from chunkhound.core.config.llm_config import LLMConfig
 from chunkhound.core.config.mcp_config import MCPConfig
 from chunkhound.core.config.remote.rules import (
     ENCLOSING_SUB_MODEL,
+    _check_payload_keys,
     _predicate_matches,
+    _resolve_path_model,
     _unwrap_optional_basemodel,
     parse_path,
 )
@@ -87,40 +89,44 @@ class TestPredicateMatches:
         assert (matches, err) == (False, None)
 
 
-def test_config_tree_is_depth_2() -> None:
-    """Tripwire for the depth-2 assumption in ``apply_rule``'s payload check.
+def test_config_tree_is_validated_at_every_model_depth() -> None:
+    """Tripwire for depth-agnostic rule-id and payload-key validation.
 
-    ``apply_rule`` validates ``segments[1]`` against the sub-model's fields
-    and ``_check_payload_keys`` walks payload dicts one level via
-    ``_unwrap_optional_basemodel``. Every sub-config in the real tree
-    stops at scalar leaves today, so the walk only ever reaches depth 2
-    through real config.
-
-    If a sub-config gains a nested ``BaseModel`` field this test fails.
-    Before relaxing the assertion:
-    1. Extend the walker in ``apply_rule`` / ``_check_payload_keys`` to
-       validate segments at the new depth — an unknown key beyond depth 2
-       would otherwise be silently absorbed by ``extra="ignore"``.
-    2. Add a pipeline_e2e test exercising a rule like
-       ``id=<sub>.<nested>.<leaf>`` end-to-end.
+    Every real nested BaseModel must be reachable, accept its known fields,
+    and reject an unknown key via both rule ids and ancestor payloads.
+    If the config tree gains an unsupported shape:
+    1. Extend both walkers without treating arbitrary dict keys as fields.
+    2. Add a pipeline_e2e contract test for that shape before relaxing this
+       guard (including operator-visible schema_error and no mutation).
     """
-    violations: list[str] = []
-    for top_name, top_info in Config.model_fields.items():
-        top_model = _unwrap_optional_basemodel(top_info.annotation)
-        if top_model is None:
-            continue  # scalar top-level field — no sub-tree
-        for nested_name, nested_info in top_model.model_fields.items():
-            nested_model = _unwrap_optional_basemodel(nested_info.annotation)
-            if nested_model is not None:
-                violations.append(
-                    f"{top_name}.{nested_name} → nested {nested_model.__name__}"
-                )
 
-    assert not violations, (
-        "Config tree gained BaseModel-typed fields under a sub-config — "
-        f"the depth-2 walker in remote/rules.py must be extended: "
-        f"{violations}. See test docstring for the checklist."
-    )
+    def walk(model: type[BaseModel], prefix: list[str]) -> None:
+        assert _resolve_path_model(prefix) == (model, None)
+        typo = "__unknown_config_field__"
+        assert typo not in model.model_fields
+        bad_path = [*prefix, typo]
+        assert _resolve_path_model(bad_path)[1] == ".".join(bad_path)
+
+        # Exercise payload traversal from every ancestor, not just the target.
+        payload: typing.Any = {typo: None}
+        for depth in range(len(prefix), -1, -1):
+            ancestor, error = _resolve_path_model(prefix[:depth])
+            assert error is None and ancestor is not None
+            assert _check_payload_keys(ancestor, payload, prefix[:depth]) == (
+                ".".join(bad_path)
+            )
+            if depth:
+                payload = {prefix[depth - 1]: payload}
+
+        for name, info in model.model_fields.items():
+            nested = _unwrap_optional_basemodel(info.annotation)
+            path = [*prefix, name]
+            assert _resolve_path_model(path) == (nested, None)
+            assert _check_payload_keys(model, {name: None}, prefix) is None
+            if nested is not None:
+                walk(nested, path)
+
+    walk(Config, [])
 
 
 def test_config_has_no_ambiguous_basemodel_unions() -> None:
@@ -145,9 +151,7 @@ def test_config_has_no_ambiguous_basemodel_unions() -> None:
                 if isinstance(c, type) and issubclass(c, BaseModel)
             ]
             if len(models) > 1:
-                violations.append(
-                    f"{prefix}{name}: {[m.__name__ for m in models]}"
-                )
+                violations.append(f"{prefix}{name}: {[m.__name__ for m in models]}")
             elif len(models) == 1:
                 walk(models[0], f"{prefix}{name}.")
 
