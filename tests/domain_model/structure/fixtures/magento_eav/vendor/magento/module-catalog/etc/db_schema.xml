@@ -1,0 +1,9 @@
+<schema xmlns:xsi="urn:test">
+  <table name="catalog_product_entity">
+    <column xsi:type="int" name="entity_id" nullable="false"/>
+    <constraint xsi:type="primary" referenceId="PRIMARY"><column name="entity_id"/></constraint>
+    <constraint xsi:type="foreign" referenceId="SET" column="attribute_set_id" referenceTable="eav_attribute_set" referenceColumn="id"/>
+    <column xsi:type="int" name="attribute_set_id"/>
+  </table>
+  <table name="eav_attribute_set"><column xsi:type="int" name="id"/></table>
+</schema>
