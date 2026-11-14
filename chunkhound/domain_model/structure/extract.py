@@ -18,6 +18,9 @@ from chunkhound.domain_model.structure.files import (
     repository_paths,
     select_files,
 )
+from chunkhound.domain_model.structure.readers.laravel_migrations import (
+    LaravelMigrationsReader,
+)
 from chunkhound.domain_model.structure.readers.magento_schema import (
     MagentoSchemaReader,
     third_party_findings,
@@ -80,7 +83,12 @@ class Reader(Protocol):
     def read(self, ctx: ReadContext) -> None: ...
 
 
-READERS: list[Reader] = [SQLReader(), PrismaReader(), MagentoSchemaReader()]
+READERS: list[Reader] = [
+    SQLReader(),
+    PrismaReader(),
+    MagentoSchemaReader(),
+    LaravelMigrationsReader(),
+]
 
 
 def _build(ctx: ReadContext) -> StructureExtraction:

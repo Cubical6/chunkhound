@@ -1,0 +1,581 @@
+{
+  "schema_version": 1,
+  "repositories": [
+    {
+      "key": "backend",
+      "path": "backend",
+      "commit": "1111111111111111111111111111111111111111",
+      "dirty": false
+    }
+  ],
+  "model": {
+    "schema_version": 1,
+    "concepts": [
+      {
+        "id": "concept:backend/team-user",
+        "repository": "backend",
+        "term": "team_user",
+        "plural": null,
+        "definition": null,
+        "synonyms": [],
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_10_000000_create_team_user_table.php",
+            "start_line": 12,
+            "end_line": 18,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      },
+      {
+        "id": "concept:backend/teams",
+        "repository": "backend",
+        "term": "teams",
+        "plural": null,
+        "definition": null,
+        "synonyms": [],
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_01_000000_create_teams_and_users.php",
+            "start_line": 8,
+            "end_line": 8,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      },
+      {
+        "id": "concept:backend/users",
+        "repository": "backend",
+        "term": "users",
+        "plural": null,
+        "definition": null,
+        "synonyms": [],
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_01_000000_create_teams_and_users.php",
+            "start_line": 9,
+            "end_line": 9,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      }
+    ],
+    "fact_types": [
+      {
+        "id": "fact_type:backend/team-user",
+        "repository": "backend",
+        "name": "team_user",
+        "templates": [
+          "team_user(<id>)",
+          "team_user(<id>) has team_id <team_id>",
+          "team_user(<id>) has user_id <user_id>",
+          "team_user(<id>) has role <role>"
+        ],
+        "roles": [
+          "role:backend/team-user/id",
+          "role:backend/team-user/team-id",
+          "role:backend/team-user/user-id",
+          "role:backend/team-user/role"
+        ],
+        "identifies": "concept:backend/team-user",
+        "bindings": [
+          {
+            "repository": "backend",
+            "target": "team_user",
+            "citation": {
+              "repository": "backend",
+              "path": "backend/database/migrations/2024_01_10_000000_create_team_user_table.php",
+              "start_line": 12,
+              "end_line": 18,
+              "commit": "1111111111111111111111111111111111111111"
+            }
+          }
+        ],
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_10_000000_create_team_user_table.php",
+            "start_line": 12,
+            "end_line": 18,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      },
+      {
+        "id": "fact_type:backend/teams",
+        "repository": "backend",
+        "name": "teams",
+        "templates": [
+          "teams(<id>)"
+        ],
+        "roles": [
+          "role:backend/teams/id"
+        ],
+        "identifies": "concept:backend/teams",
+        "bindings": [
+          {
+            "repository": "backend",
+            "target": "teams",
+            "citation": {
+              "repository": "backend",
+              "path": "backend/database/migrations/2024_01_01_000000_create_teams_and_users.php",
+              "start_line": 8,
+              "end_line": 8,
+              "commit": "1111111111111111111111111111111111111111"
+            }
+          }
+        ],
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_01_000000_create_teams_and_users.php",
+            "start_line": 8,
+            "end_line": 8,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      },
+      {
+        "id": "fact_type:backend/users",
+        "repository": "backend",
+        "name": "users",
+        "templates": [
+          "users(<id>)"
+        ],
+        "roles": [
+          "role:backend/users/id"
+        ],
+        "identifies": "concept:backend/users",
+        "bindings": [
+          {
+            "repository": "backend",
+            "target": "users",
+            "citation": {
+              "repository": "backend",
+              "path": "backend/database/migrations/2024_01_01_000000_create_teams_and_users.php",
+              "start_line": 9,
+              "end_line": 9,
+              "commit": "1111111111111111111111111111111111111111"
+            }
+          }
+        ],
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_01_000000_create_teams_and_users.php",
+            "start_line": 9,
+            "end_line": 9,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      }
+    ],
+    "roles": [
+      {
+        "id": "role:backend/team-user/id",
+        "repository": "backend",
+        "fact_type": "fact_type:backend/team-user",
+        "name": "id",
+        "concept": "concept:backend/team-user",
+        "datatype": "id",
+        "mandatory": true,
+        "bindings": [
+          {
+            "repository": "backend",
+            "target": "team_user.id",
+            "citation": {
+              "repository": "backend",
+              "path": "backend/database/migrations/2024_01_10_000000_create_team_user_table.php",
+              "start_line": 13,
+              "end_line": 13,
+              "commit": "1111111111111111111111111111111111111111"
+            }
+          }
+        ],
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_10_000000_create_team_user_table.php",
+            "start_line": 13,
+            "end_line": 13,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      },
+      {
+        "id": "role:backend/team-user/role",
+        "repository": "backend",
+        "fact_type": "fact_type:backend/team-user",
+        "name": "role",
+        "concept": null,
+        "datatype": "enum",
+        "mandatory": true,
+        "bindings": [
+          {
+            "repository": "backend",
+            "target": "team_user.role",
+            "citation": {
+              "repository": "backend",
+              "path": "backend/database/migrations/2024_01_10_000000_create_team_user_table.php",
+              "start_line": 16,
+              "end_line": 16,
+              "commit": "1111111111111111111111111111111111111111"
+            }
+          }
+        ],
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_10_000000_create_team_user_table.php",
+            "start_line": 16,
+            "end_line": 16,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      },
+      {
+        "id": "role:backend/team-user/team-id",
+        "repository": "backend",
+        "fact_type": "fact_type:backend/team-user",
+        "name": "team_id",
+        "concept": "concept:backend/teams",
+        "datatype": "foreignId",
+        "mandatory": true,
+        "bindings": [
+          {
+            "repository": "backend",
+            "target": "team_user.team_id",
+            "citation": {
+              "repository": "backend",
+              "path": "backend/database/migrations/2024_01_10_000000_create_team_user_table.php",
+              "start_line": 14,
+              "end_line": 14,
+              "commit": "1111111111111111111111111111111111111111"
+            }
+          }
+        ],
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_10_000000_create_team_user_table.php",
+            "start_line": 14,
+            "end_line": 14,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      },
+      {
+        "id": "role:backend/team-user/user-id",
+        "repository": "backend",
+        "fact_type": "fact_type:backend/team-user",
+        "name": "user_id",
+        "concept": "concept:backend/users",
+        "datatype": "foreignId",
+        "mandatory": true,
+        "bindings": [
+          {
+            "repository": "backend",
+            "target": "team_user.user_id",
+            "citation": {
+              "repository": "backend",
+              "path": "backend/database/migrations/2024_01_10_000000_create_team_user_table.php",
+              "start_line": 15,
+              "end_line": 15,
+              "commit": "1111111111111111111111111111111111111111"
+            }
+          }
+        ],
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_10_000000_create_team_user_table.php",
+            "start_line": 15,
+            "end_line": 15,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      },
+      {
+        "id": "role:backend/teams/id",
+        "repository": "backend",
+        "fact_type": "fact_type:backend/teams",
+        "name": "id",
+        "concept": "concept:backend/teams",
+        "datatype": "id",
+        "mandatory": true,
+        "bindings": [
+          {
+            "repository": "backend",
+            "target": "teams.id",
+            "citation": {
+              "repository": "backend",
+              "path": "backend/database/migrations/2024_01_01_000000_create_teams_and_users.php",
+              "start_line": 8,
+              "end_line": 8,
+              "commit": "1111111111111111111111111111111111111111"
+            }
+          }
+        ],
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_01_000000_create_teams_and_users.php",
+            "start_line": 8,
+            "end_line": 8,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      },
+      {
+        "id": "role:backend/users/id",
+        "repository": "backend",
+        "fact_type": "fact_type:backend/users",
+        "name": "id",
+        "concept": "concept:backend/users",
+        "datatype": "id",
+        "mandatory": true,
+        "bindings": [
+          {
+            "repository": "backend",
+            "target": "users.id",
+            "citation": {
+              "repository": "backend",
+              "path": "backend/database/migrations/2024_01_01_000000_create_teams_and_users.php",
+              "start_line": 9,
+              "end_line": 9,
+              "commit": "1111111111111111111111111111111111111111"
+            }
+          }
+        ],
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_01_000000_create_teams_and_users.php",
+            "start_line": 9,
+            "end_line": 9,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      }
+    ],
+    "validation_rules": [
+      {
+        "id": "validation_rule:backend/team-user/subset/team-id",
+        "repository": "backend",
+        "fact_type": "fact_type:backend/team-user",
+        "rule_kind": "subset",
+        "roles": [
+          "role:backend/team-user/team-id"
+        ],
+        "superset_fact_type": "fact_type:backend/teams",
+        "superset_roles": [
+          "role:backend/teams/id"
+        ],
+        "allowed_values": [],
+        "name": null,
+        "statement": null,
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_10_000000_create_team_user_table.php",
+            "start_line": 14,
+            "end_line": 14,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      },
+      {
+        "id": "validation_rule:backend/team-user/subset/user-id",
+        "repository": "backend",
+        "fact_type": "fact_type:backend/team-user",
+        "rule_kind": "subset",
+        "roles": [
+          "role:backend/team-user/user-id"
+        ],
+        "superset_fact_type": "fact_type:backend/users",
+        "superset_roles": [
+          "role:backend/users/id"
+        ],
+        "allowed_values": [],
+        "name": null,
+        "statement": null,
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_10_000000_create_team_user_table.php",
+            "start_line": 15,
+            "end_line": 15,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      },
+      {
+        "id": "validation_rule:backend/team-user/uniqueness/id",
+        "repository": "backend",
+        "fact_type": "fact_type:backend/team-user",
+        "rule_kind": "uniqueness",
+        "roles": [
+          "role:backend/team-user/id"
+        ],
+        "superset_fact_type": null,
+        "superset_roles": [],
+        "allowed_values": [],
+        "name": null,
+        "statement": null,
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_10_000000_create_team_user_table.php",
+            "start_line": 13,
+            "end_line": 13,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      },
+      {
+        "id": "validation_rule:backend/team-user/uniqueness/team-id+user-id",
+        "repository": "backend",
+        "fact_type": "fact_type:backend/team-user",
+        "rule_kind": "uniqueness",
+        "roles": [
+          "role:backend/team-user/team-id",
+          "role:backend/team-user/user-id"
+        ],
+        "superset_fact_type": null,
+        "superset_roles": [],
+        "allowed_values": [],
+        "name": null,
+        "statement": null,
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_10_000000_create_team_user_table.php",
+            "start_line": 17,
+            "end_line": 17,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      },
+      {
+        "id": "validation_rule:backend/team-user/value/role",
+        "repository": "backend",
+        "fact_type": "fact_type:backend/team-user",
+        "rule_kind": "value",
+        "roles": [
+          "role:backend/team-user/role"
+        ],
+        "superset_fact_type": null,
+        "superset_roles": [],
+        "allowed_values": [
+          "member",
+          "lead"
+        ],
+        "name": null,
+        "statement": null,
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_10_000000_create_team_user_table.php",
+            "start_line": 16,
+            "end_line": 16,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      },
+      {
+        "id": "validation_rule:backend/teams/uniqueness/id",
+        "repository": "backend",
+        "fact_type": "fact_type:backend/teams",
+        "rule_kind": "uniqueness",
+        "roles": [
+          "role:backend/teams/id"
+        ],
+        "superset_fact_type": null,
+        "superset_roles": [],
+        "allowed_values": [],
+        "name": null,
+        "statement": null,
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_01_000000_create_teams_and_users.php",
+            "start_line": 8,
+            "end_line": 8,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      },
+      {
+        "id": "validation_rule:backend/users/uniqueness/id",
+        "repository": "backend",
+        "fact_type": "fact_type:backend/users",
+        "rule_kind": "uniqueness",
+        "roles": [
+          "role:backend/users/id"
+        ],
+        "superset_fact_type": null,
+        "superset_roles": [],
+        "allowed_values": [],
+        "name": null,
+        "statement": null,
+        "status": "extracted",
+        "citations": [
+          {
+            "repository": "backend",
+            "path": "backend/database/migrations/2024_01_01_000000_create_teams_and_users.php",
+            "start_line": 9,
+            "end_line": 9,
+            "commit": "1111111111111111111111111111111111111111"
+          }
+        ],
+        "human_sources": []
+      }
+    ],
+    "derivation_rules": [],
+    "exchange_rules": [],
+    "event_rules": [],
+    "ground_facts": []
+  },
+  "anchors": [],
+  "findings": [],
+  "divergent_claims": []
+}

@@ -36,7 +36,6 @@ _MODIFIERS = {
     "DEFAULT",
     "COMMENT",
     "COLLATE",
-    "CHARACTER",
     "CHARSET",
     "AUTO_INCREMENT",
     "GENERATED",
@@ -187,6 +186,7 @@ class _Statement:
     path: str
     text: str
     line: int
+    copy_rows: tuple[tuple[str, ...], ...] = ()
 
     def span(self, tokens: list[_Token] | None = None) -> Span:
         start = tokens[0].start if tokens else 0
@@ -310,16 +310,116 @@ def _constraint(
     )
 
 
+def is_laravel_dump(path: str) -> bool:
+    """Schema dumps belong to the Laravel replay, not a second SQL schema."""
+    return bool(re.search(r"(?:^|/)database/schema/[^/]+\.sql$", path))
+
+
+def sql_statements(path: str, data: bytes) -> list[_Statement]:
+    """Recover statement boundaries once for both standalone SQL and dumps."""
+    statements: list[_Statement] = []
+    masked = bytearray(data)
+    consumed = 0
+    # pg_dump COPY payloads are data, not SQL. Hide entire blocks from the
+    # grammar while retaining byte offsets and line numbers for later DDL.
+    for header in re.finditer(
+        rb"(?im)^[ \t]*COPY[ \t]+[^\r\n]*\bFROM[ \t]+stdin[ \t]*;[ \t]*(?:\r?\n|$)",
+        data,
+    ):
+        if header.start() < consumed:
+            continue
+        terminator = re.search(rb"(?m)^\\\.\r?(?:\n|$)", data[header.end() :])
+        rows_end = header.end() + terminator.start() if terminator else len(data)
+        consumed = header.end() + terminator.end() if terminator else len(data)
+        rows = tuple(
+            tuple(row.split("\t"))
+            for row in data[header.end() : rows_end].decode("utf-8").splitlines()
+        )
+        statements.append(
+            _Statement(
+                path,
+                header.group().decode("utf-8").strip().removesuffix(";"),
+                data[: header.start()].count(b"\n") + 1,
+                rows,
+            )
+        )
+        masked[header.start() : consumed] = re.sub(
+            rb"[^\r\n]", b" ", data[header.start() : consumed]
+        )
+    data = bytes(masked)
+    tree = get_parser("sql").parse(data)
+    # Grammar recovery may split CREATE into a statement and a sibling ERROR.
+    # Reunite those fragments at the tree's top-level terminators.
+    start: tuple[int, int] | None = None
+    end = 0
+    for node in (*tree.root_node.children, None):
+        if node is None or node.type == ";":
+            if start is not None:
+                statements.append(
+                    _Statement(path, data[start[0] : end].decode("utf-8"), start[1])
+                )
+            start = None
+        elif node.type != "comment":
+            if start is None:
+                start = (node.start_byte, node.start_point.row + 1)
+            end = node.end_byte
+    return sorted(statements, key=lambda statement: statement.line)
+
+
+def dumped_migrations(statements: list[_Statement]) -> set[str]:
+    """Read only literal migration names from the dump's migration ledger."""
+    names: set[str] = set()
+    for statement in statements:
+        cursor = _Cursor(_tokens(statement.text))
+        try:
+            if cursor.accept("COPY"):
+                table = cursor.identifier()
+                columns = _names(cursor.group())
+                cursor.expect("FROM")
+                cursor.expect("STDIN")
+                if table == "migrations":
+                    index = columns.index("migration")
+                    for row in statement.copy_rows:
+                        if index < len(row) and row[index] != r"\N":
+                            names.add(
+                                re.sub(
+                                    r"\\(.)",
+                                    lambda m: {"t": "\t", "n": "\n", "r": "\r"}.get(
+                                        m[1], m[1]
+                                    ),
+                                    row[index],
+                                )
+                            )
+                continue
+            if not cursor.accept("INSERT"):
+                continue
+            cursor.expect("INTO")
+            if cursor.identifier() != "migrations":
+                continue
+            columns = _names(cursor.group()) if cursor.at("(") else ()
+            index = columns.index("migration") if columns else 1
+            cursor.expect("VALUES")
+            while cursor.at("("):
+                values = _parts(cursor.group())
+                value = values[index]
+                if len(value) == 1 and value[0].text.startswith(("'", '"')):
+                    names.add(_values(value)[0])
+                if not cursor.accept(","):
+                    break
+        except (_UnparsedError, ValueError, IndexError):
+            continue
+    return names
+
+
 class SQLReader:
     name = "sql"
     patterns: tuple[str, ...] = ("**/*.sql",)
 
     def read(self, ctx: "ReadContext") -> None:
-        parser = get_parser("sql")
         statements: list[tuple[Schema, _Statement]] = []
         schemas: dict[str, Schema] = {}
         for path in sorted(ctx.paths, key=natural_order):
-            if re.match(r"U\d", path.rsplit("/", 1)[-1]):
+            if is_laravel_dump(path) or re.match(r"U\d", path.rsplit("/", 1)[-1]):
                 continue
             source = ctx.read(path)
             if source is None:
@@ -329,27 +429,14 @@ class SQLReader:
                 schemas[repository] = Schema(reader=self.name, repository=repository)
                 ctx.schemas.append(schemas[repository])
             data = "\n".join(source.lines).encode("utf-8")
-            tree = parser.parse(data)
-            # Grammar recovery may split a CREATE into a statement and a sibling
-            # ERROR. Reunite those fragments at the tree's top-level terminators.
-            start: tuple[int, int] | None = None
-            end = 0
-            for node in (*tree.root_node.children, None):
-                if node is None or node.type == ";":
-                    if start is not None:
-                        statements.append(
-                            (
-                                schemas[repository],
-                                _Statement(
-                                    path, data[start[0] : end].decode("utf-8"), start[1]
-                                ),
-                            )
-                        )
-                    start = None
-                elif node.type != "comment":
-                    if start is None:
-                        start = (node.start_byte, node.start_point.row + 1)
-                    end = node.end_byte
+            statements.extend(
+                (schemas[repository], statement)
+                for statement in sql_statements(path, data)
+            )
+        self.replay(statements)
+
+    def replay(self, statements: list[tuple[Schema, _Statement]]) -> None:
+        """Apply DDL to the supplied schemas, including Laravel dump schemas."""
         enums: dict[tuple[str, str], tuple[tuple[str, ...], Span]] = {}
         for schema, statement in statements:
             cursor = _Cursor(_tokens(statement.text))
@@ -695,9 +782,13 @@ class SQLReader:
             try:
                 column_name = item.identifier()
                 start = item.index
-                while (
-                    item.index < len(part) and part[item.index].upper not in _MODIFIERS
-                ):
+                while item.index < len(part):
+                    if part[item.index].upper in _MODIFIERS or (
+                        (item.at("CHARACTER") or item.at("CHAR"))
+                        and item.index + 1 < len(part)
+                        and part[item.index + 1].upper == "SET"
+                    ):
+                        break
                     if item.at("("):
                         item.group()
                     else:

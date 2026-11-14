@@ -50,8 +50,10 @@ def test_pg_dump_keys_survive_irrelevant_ddl(
         for r in result.model.roles
         if r.fact_type == "fact_type:root/messages"
     }
-    assert set(message_roles) == {"id", "user_id", "title"}
+    assert set(message_roles) == {"id", "user_id", "title", "label", "code"}
     assert message_roles["title"].datatype == "varchar(10)"
+    assert message_roles["label"].datatype == "character varying(255)"
+    assert message_roles["code"].datatype == "character(10)"
     assert len(message_roles["id"].citations) == 1
     assert message_roles["id"].bindings[0].citation.start_line == 10
     users = next(f for f in result.model.fact_types if f.id == "fact_type:root/users")
@@ -59,6 +61,19 @@ def test_pg_dump_keys_survive_irrelevant_ddl(
     user_id = next(r for r in result.model.roles if r.id == "role:root/users/id")
     assert len(user_id.citations) == 1
     assert user_id.bindings[0].citation.start_line == 2
+
+
+def test_character_set_clauses_are_not_part_of_the_datatype(tmp_path: Path) -> None:
+    result = replay_sql(
+        tmp_path,
+        "CREATE TABLE codes (a char(4) CHAR SET ascii, "
+        "b varchar(10) CHARACTER SET utf8mb4);",
+    )
+    assert {r.name: r.datatype for r in result.model.roles} == {
+        "a": "char(4)",
+        "b": "varchar(10)",
+    }
+    assert not result.findings
 
 
 def test_migrations_replay_in_natural_order(
