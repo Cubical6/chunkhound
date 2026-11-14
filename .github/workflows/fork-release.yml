@@ -1,0 +1,348 @@
+name: Fork rolling release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/fork-release.yml
+      - .github/actions/build-native-wheel/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  version:
+    if: github.repository != 'chunkhound/chunkhound'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      cargo_version: ${{ steps.version.outputs.cargo_version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Fetch upstream version tags (runner only)
+        run: |
+          set -euo pipefail
+          git fetch --no-tags https://github.com/chunkhound/chunkhound.git '+refs/tags/v*:refs/tags/v*'
+      - uses: astral-sh/setup-uv@v3
+      - name: Derive hatch-vcs default version and Cargo SemVer
+        id: version
+        run: |
+          set -euo pipefail
+          uv run --no-project --python 3.12 --with hatch-vcs python - <<'PY'
+          import os
+          from setuptools_scm import get_version
+          from packaging.version import Version
+
+          def cargo_version(version):
+              parsed = Version(version)
+              assert parsed.post is None and parsed.epoch == 0, version
+              segments = []
+              if parsed.pre is not None:
+                  segments.append(f'{parsed.pre[0]}{parsed.pre[1]}')
+              if parsed.dev is not None:
+                  segments.append(f'dev{parsed.dev}')
+              cargo = parsed.base_version
+              if segments:
+                  cargo += '-' + '.'.join(segments)
+              public_version = version.split('+')[0]
+              assert Version(cargo) == Version(public_version), (cargo, public_version)
+              return cargo
+
+          version = get_version()
+          assert not version.startswith('0.'), f'Missing upstream tags: {version}'
+          cargo = cargo_version(version)
+          print(f'version={version}\ncargo_version={cargo}')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'version={version}\ncargo_version={cargo}\n')
+          PY
+
+  python-wheels:
+    if: github.repository != 'chunkhound/chunkhound'
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Fetch upstream version tags (runner only)
+        run: |
+          set -euo pipefail
+          git fetch --no-tags https://github.com/chunkhound/chunkhound.git '+refs/tags/v*:refs/tags/v*'
+      - uses: astral-sh/setup-uv@v3
+      - name: Build Linux and portable Python wheels
+        run: |
+          set -euo pipefail
+          CHUNKHOUND_BUILD_PACKAGED_WATCHMAN_RUNTIME=1 uv build --wheel --out-dir python-wheels/linux
+          uv build --wheel --out-dir python-wheels/macos
+          uv export --frozen --no-dev --no-hashes --no-emit-project > constraints.raw.txt
+          uv run --no-project --python 3.12 python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ['VERSION']
+          for platform, tag in [('linux', 'manylinux_2_31_x86_64'), ('macos', 'any')]:
+              wheels = list(Path(f'python-wheels/{platform}').glob('*.whl'))
+              assert [p.name for p in wheels] == [f'chunkhound-{version}-py3-none-{tag}.whl'], wheels
+          # The lock pins yanked propcache 0.4.0. Explicitly replace that pin
+          # for verification AND consumers, without modifying the upstream lock.
+          # Remove this override once the lock no longer contains 0.4.0.
+          lines = []
+          for line in Path('constraints.raw.txt').read_text().splitlines():
+              if re.match(r'(?i)^chunkhound[-_]native\b', line):
+                  continue
+              line = re.sub(r'(?i)^propcache==0\.4\.0(?=\s|;|$)', 'propcache==0.5.4', line)
+              lines.append(line)
+          Path('python-wheels/constraints.txt').write_text('\n'.join(lines) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fork-python-wheels
+          path: python-wheels/
+          if-no-files-found: error
+
+  native-wheels:
+    if: github.repository != 'chunkhound/chunkhound'
+    needs: version
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # Free public-repo Intel runner; retirement planned for fall 2027.
+        os: [ubuntu-latest, macos-15-intel]
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      CARGO_VERSION: ${{ needs.version.outputs.cargo_version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Fetch upstream version tags (runner only)
+        run: |
+          set -euo pipefail
+          git fetch --no-tags https://github.com/chunkhound/chunkhound.git '+refs/tags/v*:refs/tags/v*'
+      - uses: astral-sh/setup-uv@v3
+      - name: Patch exactly one package version
+        run: |
+          set -euo pipefail
+          uv run --no-project --python 3.12 python - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          path = Path('Cargo.toml')
+          text = path.read_text()
+          sections = list(re.finditer(r'(?ms)^\[package\][ \t]*\n(.*?)(?=^\[|\Z)', text))
+          assert len(sections) == 1, 'Expected exactly one [package] section'
+          section = sections[0]
+          replacement, count = re.subn(
+              r'(?m)^version\s*=\s*"[^"]*"[^\n]*$',
+              f'version = "{os.environ["CARGO_VERSION"]}"', section.group(1),
+          )
+          assert count == 1, f'Expected one [package] version, got {count}'
+          patched = text[:section.start(1)] + replacement + text[section.end(1):]
+          assert tomllib.loads(patched)['package']['version'] == os.environ['CARGO_VERSION']
+          path.write_text(patched)
+          PY
+      - uses: ./.github/actions/build-native-wheel
+        with:
+          skip-tag-version-patch: 'true'
+          out-dir: native-wheels
+      - name: Check public version and native platform
+        run: |
+          set -euo pipefail
+          uv run --no-project --python 3.12 python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          wheels = list(Path('native-wheels').glob('*.whl'))
+          assert len(wheels) == 1, wheels
+          name = wheels[0].name
+          public = os.environ['VERSION'].split('+')[0]
+          # Both the wheel version field and VERSION's public part are PEP 440-normalized.
+          assert name.split('-')[0:2] == ['chunkhound_native', public], name
+          tag = name.removesuffix('.whl').split('-')[-1]
+          pattern = r'manylinux_2_31_x86_64' if os.environ['RUNNER_OS'] == 'Linux' else r'macosx_\d+_\d+_x86_64'
+          assert re.fullmatch(pattern, tag), name
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fork-native-${{ matrix.os }}
+          path: native-wheels/*.whl
+          if-no-files-found: error
+
+  verify:
+    if: github.repository != 'chunkhound/chunkhound'
+    needs: [version, python-wheels, native-wheels]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15-intel]
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v3
+      - uses: actions/download-artifact@v4
+        with:
+          name: fork-python-wheels
+          path: artifacts/python
+      - uses: actions/download-artifact@v4
+        with:
+          name: fork-native-${{ matrix.os }}
+          path: artifacts/native
+      - name: Verify installed wheels outside the checkout
+        run: |
+          set -euo pipefail
+          workspace="$GITHUB_WORKSPACE"
+          work="$(mktemp -d "$RUNNER_TEMP/fork-verify.XXXXXX")"
+          uv venv --python 3.12 "$work/venv"
+          cd "$work"
+          python="$work/venv/bin/python"
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            uv pip install --python "$python" -c "$workspace/artifacts/python/constraints.txt" \
+              "$workspace"/artifacts/native/*.whl "$workspace"/artifacts/python/linux/*.whl
+            actual="$("$work/venv/bin/chunkhound" --version)"
+            [[ "$actual" == "chunkhound $VERSION" ]]
+          else
+            # Locked dependencies lack Intel macOS wheels; no dependency resolution.
+            uv pip install --python "$python" --no-deps \
+              "$workspace"/artifacts/native/*.whl "$workspace"/artifacts/python/macos/*.whl
+          fi
+          "$python" - <<'PY'
+          import os
+          from importlib.metadata import version
+          import chunkhound_native
+
+          assert version('chunkhound') == os.environ['VERSION']
+          assert hasattr(chunkhound_native, 'recover_compaction_swap')
+          PY
+          # This script uses only stdlib and the installed native extension.
+          "$python" "$workspace/scripts/smoke_test_native_wheel.py"
+
+  publish:
+    if: >-
+      github.repository != 'chunkhound/chunkhound' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: [version, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: fork-release-publish
+      cancel-in-progress: false
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      # GITHUB_TOKEN events do not trigger upstream release.yml's PyPI publisher.
+      # Never replace this with a PAT or GitHub App token.
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: fork-*
+          path: artifacts
+      - uses: astral-sh/setup-uv@v3
+      - name: Assemble archives and integrity manifest in a clean directory
+        run: |
+          set -euo pipefail
+          mkdir release-assets
+          uv run --no-project --python 3.12 python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import tarfile
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          artifacts = Path('artifacts')
+          output = Path('release-assets')
+          manifest = {
+              'schema': 1,
+              'version': os.environ['VERSION'],
+              'public_version': os.environ['VERSION'].split('+')[0],
+              'commit': os.environ['GITHUB_SHA'],
+              'ref': os.environ['GITHUB_REF'],
+              'built_at': datetime.now(timezone.utc).isoformat(),
+              'run_url': f'{os.environ["GITHUB_SERVER_URL"]}/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{os.environ["GITHUB_RUN_ID"]}',
+              'archives': [],
+          }
+          def sha256(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def one(pattern):
+              matches = list(artifacts.glob(pattern))
+              assert len(matches) == 1, (pattern, matches)
+              return matches[0]
+
+          for platform, runner in [('linux', 'ubuntu-latest'), ('macos', 'macos-15-intel')]:
+              files = [one(f'fork-python-wheels/{platform}/*.whl'), one(f'fork-native-{runner}/*.whl')]
+              if platform == 'linux':
+                  files.append(one('fork-python-wheels/constraints.txt'))
+              files.sort(key=lambda path: path.name)
+              archive = output / f'chunkhound-fork-{platform}-x86_64.tar'
+              with tarfile.open(archive, 'w', format=tarfile.USTAR_FORMAT) as tar:
+                  for path in files:
+                      info = tar.gettarinfo(str(path), arcname=path.name)
+                      info.uid = info.gid = info.mtime = 0
+                      info.uname = info.gname = ''
+                      info.mode = 0o644
+                      with path.open('rb') as source:
+                          tar.addfile(info, source)
+              manifest['archives'].append({
+                  'name': archive.name, 'sha256': sha256(archive),
+                  'size': archive.stat().st_size,
+                  'files': [{'name': path.name, 'sha256': sha256(path)} for path in files],
+              })
+          manifest_path = output / 'manifest.json'
+          manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
+          checksummed = sorted(output.iterdir())
+          (output / 'SHA256SUMS').write_text(''.join(f'{sha256(path)}  {path.name}\n' for path in checksummed))
+          PY
+      - name: Move rolling tag and publish (manifest last)
+        run: |
+          set -euo pipefail
+          # No digits: setuptools-scm uses git describe --match "*[0-9]*".
+          # A digit-bearing rolling tag would corrupt future version derivation.
+          tag=fork-latest
+          existing="$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq '.[] | select(.ref == "refs/tags/fork-latest") | .ref')"
+          if [[ -n "$existing" ]]; then
+            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$tag" -f sha="$GITHUB_SHA" -F force=true
+          else
+            gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA"
+          fi
+          printf 'Version: %s\nCommit: %s\n\nDownload the archive for your platform, verify its hash against manifest.json, and extract it. On Linux: uv pip install -c constraints.txt ./*.whl\nIntel macOS: the archive supplies wheels only; manage dependencies separately (locked pins are not Intel-compatible).\n' \
+            "$VERSION" "$GITHUB_SHA" > release-notes.txt
+          release_id="$(gh api --paginate "repos/$GH_REPO/releases" --jq '.[] | select(.tag_name == "fork-latest") | .id')"
+          if [[ -z "$release_id" ]]; then
+            gh release create "$tag" --verify-tag --prerelease --latest=false \
+              --title "Fork build $VERSION" --notes-file release-notes.txt
+          else
+            gh release edit "$tag" --prerelease --latest=false \
+              --title "Fork build $VERSION" --notes-file release-notes.txt
+          fi
+          gh release upload "$tag" release-assets/*.tar release-assets/SHA256SUMS --clobber
+          gh release upload "$tag" release-assets/manifest.json --clobber
