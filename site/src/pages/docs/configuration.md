@@ -394,6 +394,30 @@ When a newer model supersedes the one in use, an interactive `chunkhound index` 
 | `azure_endpoint` | `string` | `null` | Azure OpenAI endpoint (mutually exclusive with `base_url`) |
 | `azure_deployment` | `string` | `null` | Azure OpenAI deployment name |
 
+### MCP search strategy
+
+Configuring `rerank_model` switches every semantic `search` call of the MCP server to multi-hop search with reranking. `code_research` needs the reranker, but for plain `search` the extra rerank requests can cost more latency than they return in quality. `mcp.search_strategy` decides which strategy the MCP `search` tool uses:
+
+| Value | Behavior |
+|---|---|
+| `"auto"` (default) | Multi-hop with reranking when the embedding provider supports reranking, single-hop otherwise |
+| `"single_hop"` | Always single-hop vector search, no rerank requests |
+| `"multi_hop"` | Always multi-hop with reranking |
+
+```json
+{
+  "embedding": {
+    "rerank_model": "my-reranker",
+    "rerank_url": "http://localhost:8001/rerank"
+  },
+  "mcp": {
+    "search_strategy": "single_hop"
+  }
+}
+```
+
+The setting applies to the stdio and HTTP transports and can also be set with `CHUNKHOUND_MCP__SEARCH_STRATEGY`. It does not affect `code_research`, which selects its own search strategy and keeps using the reranker, nor the `chunkhound search` command, which has its own `--single-hop` and `--multi-hop` flags.
+
 ## Database Backends
 
 | Backend | Status | Recommended |
@@ -777,6 +801,7 @@ Most environment variables use the `CHUNKHOUND_` prefix with `__` (double unders
 | `CHUNKHOUND_EMBEDDING__RERANK_SSL_VERIFY` | Verify TLS certificates for rerank requests (overrides `ssl_verify`) |
 | `CHUNKHOUND_EMBEDDING__RERANK_FORMAT` | Reranking API format: `cohere`, `tei`, or `auto` |
 | `CHUNKHOUND_EMBEDDING__RERANK_BATCH_SIZE` | Max documents per rerank request |
+| `CHUNKHOUND_MCP__SEARCH_STRATEGY` | Strategy for the MCP `search` tool: `auto`, `single_hop`, or `multi_hop` (see [MCP search strategy](#mcp-search-strategy)) |
 | `CHUNKHOUND_EMBEDDING__TIMEOUT` | Request timeout in seconds (default: 30) |
 | `CHUNKHOUND_EMBEDDING__MAX_RETRIES` | Max retry attempts on failure (default: 3) |
 | `CHUNKHOUND_EMBEDDING__API_VERSION` | Azure OpenAI API version (`YYYY-MM-DD`) |
