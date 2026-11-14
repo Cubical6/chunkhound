@@ -12,10 +12,12 @@ The service coordinates:
 """
 
 import asyncio
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from chunkhound.core import decision_log
 from chunkhound.core.utils.structured_reasoning_diagnostics import (
     current_empty_failures,
     structured_reasoning_failure_key,
@@ -103,6 +105,7 @@ class PluggableResearchService(ProgressEmitterMixin):
         progress: "TreeProgressDisplay | None" = None,
         path_filter: str | None = None,
         config: "ResearchConfig | None" = None,
+        algorithm: str | None = None,
     ):
         """Initialize pluggable research service.
 
@@ -117,6 +120,7 @@ class PluggableResearchService(ProgressEmitterMixin):
             path_filter: Optional path filter to limit research scope
             config: Optional ResearchConfig for query expansion settings.
                 If None, falls back to hardcoded constants.
+            algorithm: Actual algorithm selected by the factory, if known.
         """
         self._db_services = database_services
         self._embedding_manager = embedding_manager
@@ -130,6 +134,7 @@ class PluggableResearchService(ProgressEmitterMixin):
         self._quality_validator = QualityValidator(llm_manager)
         self._path_filter = path_filter
         self._config = config
+        self._algorithm = algorithm
         self._unified_search_helper = UnifiedSearch(
             db_services=database_services,
             embedding_manager=embedding_manager,
@@ -205,12 +210,75 @@ class PluggableResearchService(ProgressEmitterMixin):
         """
         token = current_empty_failures.set({})
         try:
-            return await self._deep_research_impl(query, previous_query)
+            if not decision_log.is_enabled():
+                return await self._deep_research_impl(query, previous_query)
+            with decision_log.trace():
+                started = monotonic()
+                before = self._decision_log_usage()
+                payload: dict[str, Any] = {
+                    "query": query,
+                    "algorithm": self._algorithm,
+                    "has_path_filter": bool(self._path_filter),
+                    "is_follow_up": bool(previous_query),
+                    "depth_reached": None,
+                    "nodes_explored": None,
+                    "chunks_analyzed": None,
+                    "num_clusters": None,
+                    "synthesis_mode": None,
+                    "answer_chars": None,
+                    "success": False,
+                    "error_type": None,
+                }
+                try:
+                    result = await self._deep_research_impl(
+                        query, previous_query, payload
+                    )
+                    payload["answer_chars"] = len(result.get("answer", ""))
+                    metadata = result.get("metadata", {})
+                    for key in ("depth_reached", "nodes_explored", "chunks_analyzed"):
+                        payload[key] = metadata.get(key)
+                    payload["success"] = True
+                    return result
+                except BaseException as exc:
+                    payload["error_type"] = type(exc).__name__
+                    raise
+                finally:
+                    after = self._decision_log_usage()
+                    payload["llm_usage"] = {
+                        role: {
+                            key: value - before[role].get(key, 0)
+                            for key, value in counters.items()
+                        }
+                        for role, counters in after.items()
+                        if role in before
+                    }
+                    payload["elapsed_s"] = monotonic() - started
+                    decision_log.record("research_run", payload)
         finally:
             current_empty_failures.reset(token)
 
+    def _decision_log_usage(self) -> dict[str, dict[str, int | float]]:
+        """Snapshot numeric role counters only; telemetry must never fail a run."""
+        try:
+            stats = self._llm_manager.get_usage_stats()
+            usage = {}
+            for role in ("utility", "synthesis"):
+                counters = {
+                    key: value
+                    for key, value in stats.get(role, {}).items()
+                    if isinstance(value, (int, float)) and not isinstance(value, bool)
+                }
+                if counters:
+                    usage[role] = counters
+            return usage
+        except Exception:
+            return {}
+
     async def _deep_research_impl(
-        self, query: str, previous_query: str | None
+        self,
+        query: str,
+        previous_query: str | None,
+        decision_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         logger.info(f"Starting deep research for query: '{query}'")
 
@@ -306,6 +374,13 @@ class PluggableResearchService(ProgressEmitterMixin):
             path_filter=self._path_filter,
             constants_context=constants_context,
         )
+
+        if decision_payload is not None:
+            decision_payload.update(
+                depth_reached=exploration_stats.get("depth_reached", 1),
+                nodes_explored=exploration_stats.get("nodes_explored", 1),
+                chunks_analyzed=len(expanded_chunks),
+            )
 
         logger.info(
             f"Exploration complete: {exploration_stats.get('chunks_total', len(expanded_chunks))} total chunks, "
@@ -408,6 +483,12 @@ class PluggableResearchService(ProgressEmitterMixin):
                 evidence_table=evidence_ledger.format_progress_table(),
                 constants_count=evidence_ledger.constants_count,
                 facts_count=evidence_ledger.facts_count,
+            )
+
+        if decision_payload is not None:
+            decision_payload["num_clusters"] = cluster_metadata["num_clusters"]
+            decision_payload["synthesis_mode"] = (
+                "single_pass" if cluster_metadata["num_clusters"] == 1 else "map_reduce"
             )
 
         # If only 1 cluster, use single-pass (no benefit from map-reduce)

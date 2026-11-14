@@ -155,7 +155,7 @@ Hooguit ~15 regels:
 - **Notes:** voeg de log-asserties toe als één geparametriseerde test over de bestaande fixtures, niet als kopie van elke test. Elke zoekopdracht opent een eigen `decision_log.trace()`. Binnen een onderzoeksrun krijgt het zoekrecord daardoor een eigen `trace_id` en het trace-id van de run als `parent_trace_id`; daarbuiten is `parent_trace_id` `null`.
 
 ## Phase 4: onderzoeksrun instrumenteren
-- [ ] Done
+- [x] Done
 - **Depends on:** Phase 2
 - **Model:** `openai-codex/gpt-6.1-sol` / `medium`
 - **Goal:** elke `deep_research`-aanroep schrijft één `research_run`-record, ook als de run faalt, en de zoekrecords binnen de run verwijzen ernaar.
@@ -229,6 +229,7 @@ Hooguit ~15 regels:
 | 2026-11-14 | 1 | `01a1d761-73a2-7440-a3c6-7394680a32cf` | zie `git log` | 31 gerichte tests en 14 smoke-tests groen. De standaardwaarden staan in `research_config.py` om een circulaire import te vermijden. Eén correctieronde: ongebruikte re-exports verwijderd, docstring bijgewerkt. |
 | 2026-11-14 | 2 | `01a1d768-0556-7440-a3c6-73978dae849d` | zie `git log` | 9 contracttests voor het log; config- en smoke-tests groen. De CLI zet het log alleen op voor de commando's die ook analytics krijgen (o.a. `search`, `research`, `map`, `autodoc`). Trace-notitie van fase 3 aangescherpt. |
 | 2026-11-14 | 3 | `01a1d76b-3313-7440-a3c6-7399088a8556` | zie `git log` | Eén geparametriseerde contracttest over 11 scenario's (alle zeven stopredenen en beide single-hop-redenen). `rounds` bevat ook de ronde waarop de policy stopt; `n_rounds` telt alleen de rondes die de stopcontrole doorkwamen, dus bij `score_drop` en `min_relevance` is `len(rounds) == n_rounds + 1`. Bij een rerank-fout is er geen ronde-item. |
+| 2026-11-14 | 4 | `01a1d771-8827-7440-a3c6-739b655ea686` | zie `git log` | Zes contractgevallen; 268 gerichte tests en 14 smoke-tests groen. De sessie werd één keer onderbroken en in dezelfde sessie hervat. Met het log uit vraagt de run geen tellers op. `llm_usage` is leeg als de provider geen tellers geeft of het opvragen faalt. De hergebruikte nep-zoekservice vervangt `SearchService`; de test schrijft daarom op die grens een proefrecord in een eigen trace en controleert dat het de run als `parent_trace_id` heeft (v1, v2, v3 en de terugval naar v1). Overerving via `asyncio.gather` is gedekt door de test van het log zelf uit fase 2. Bij "geen codecontext gevonden" is `success` `true` en zijn `num_clusters` en `synthesis_mode` `null`. |
 
 ---
 
