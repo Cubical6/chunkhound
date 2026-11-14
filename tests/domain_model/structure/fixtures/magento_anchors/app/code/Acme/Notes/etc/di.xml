@@ -1,0 +1,3 @@
+<config>
+    <preference for="Acme\Notes\Api\NoteRepositoryInterface" type="Acme\Notes\Model\NoteRepository"/>
+</config>

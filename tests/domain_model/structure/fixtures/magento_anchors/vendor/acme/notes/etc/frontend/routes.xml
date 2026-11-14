@@ -1,0 +1,7 @@
+<config>
+    <router id="standard">
+        <route id="vendor_notes" frontName="vendor-notes">
+            <module name="Vendor_Notes"/>
+        </route>
+    </router>
+</config>
