@@ -701,9 +701,9 @@ Controls the `code_research` MCP tool and `chunkhound research` command.
 | `regex_scan_page_size` | `int` | `100` | `CHUNKHOUND_RESEARCH_REGEX_SCAN_PAGE_SIZE` | Internal pagination batch size for regex exclusion scanning (50-200) |
 | `multi_hop_time_limit` | `number` | `5.0` | `CHUNKHOUND_RESEARCH_MULTI_HOP_TIME_LIMIT` | Max seconds for evidence expansion (1.0-15.0) |
 | `multi_hop_result_limit` | `int` | `500` | `CHUNKHOUND_RESEARCH_MULTI_HOP_RESULT_LIMIT` | Max chunks accumulated during multi-hop expansion (100-2000) |
-| `multi_hop_min_candidates` | `int` | `5` | `CHUNKHOUND_RESEARCH_MULTI_HOP_MIN_CANDIDATES` | Min candidates above threshold to continue expansion (1-20) |
-| `multi_hop_score_degradation` | `number` | `0.15` | `CHUNKHOUND_RESEARCH_MULTI_HOP_SCORE_DEGRADATION` | Max score drop in top-5 before terminating expansion (0.05-0.5) |
-| `multi_hop_min_relevance` | `number` | `0.3` | `CHUNKHOUND_RESEARCH_MULTI_HOP_MIN_RELEVANCE` | Quality floor for expansion candidates (0.1-0.8) |
+| `multi_hop_min_candidates` | `int` | `5` | `CHUNKHOUND_RESEARCH_MULTI_HOP_MIN_CANDIDATES` | Top-N size for multi-hop expansion: the number of positive-score candidates needed to expand, and the number of top chunks whose scores the two stop rules below watch (1-20) |
+| `multi_hop_score_degradation` | `number` | `0.15` | `CHUNKHOUND_RESEARCH_MULTI_HOP_SCORE_DEGRADATION` | Stop expansion when the score of a watched chunk drops by at least this amount after a rerank (0.05-0.5) |
+| `multi_hop_min_relevance` | `number` | `0.3` | `CHUNKHOUND_RESEARCH_MULTI_HOP_MIN_RELEVANCE` | Stop expansion when the lowest score in the top-N falls below this floor (0.1-0.8) |
 | `depth_exploration_enabled` | `bool` | `true` | `CHUNKHOUND_RESEARCH_DEPTH_EXPLORATION_ENABLED` | Enable depth exploration to find more chunks in discovered files |
 | `max_exploration_files` | `int` | `5` | `CHUNKHOUND_RESEARCH_MAX_EXPLORATION_FILES` | Max files to explore for additional aspects, top-K by score (1-15) |
 | `exploration_queries_per_file` | `int` | `2` | `CHUNKHOUND_RESEARCH_EXPLORATION_QUERIES_PER_FILE` | Number of aspect-based queries to generate per file (1-3) |
@@ -761,6 +761,96 @@ The `algorithm` setting controls how ChunkHound explores your codebase to answer
 - `v3` is the right default for open-ended research questions ("how does authentication flow through this system?")
 
 Gap detection parameters (`min_gaps`, `max_gaps`, `gap_similarity_threshold`) only affect v2 and v3. They are silently ignored for v1.
+
+## Decision Log
+
+The decision log is an optional local file that records why a search or research run went the way it did: which strategy was chosen, why multi-hop expansion stopped, and how much a research run cost. Use it to tune the multi-hop settings above against your own queries. It is off by default.
+
+| Option | Type | Default | Env Var | Description |
+|---|---|---|---|---|
+| `enabled` | `bool` | `false` | `CHUNKHOUND_DECISION_LOG__ENABLED` | Write decision records |
+| `path` | `string` | `.chunkhound/decisions.jsonl` | `CHUNKHOUND_DECISION_LOG__PATH` | Log file. A relative path starts at the project root |
+| `max_size_mb` | `number` | `50` | `CHUNKHOUND_DECISION_LOG__MAX_SIZE_MB` | Rotate the file above this size |
+
+```json
+{
+  "decision_log": {
+    "enabled": true
+  }
+}
+```
+
+The MCP server writes to the log, and so do the CLI commands that search or run research, such as `chunkhound search` and `chunkhound research`.
+
+**Privacy.** Records contain the text of your queries, and the research records also contain the follow-up questions and gap queries the LLM generated. They never contain chunk or file content. The file stays on your machine: ChunkHound never uploads it.
+
+**Rotation.** When the file grows past `max_size_mb`, ChunkHound renames it to `decisions.jsonl.1` and starts a new file. It keeps one old file; the next rotation overwrites it.
+
+**Failures.** Logging never fails a search or a research run. If the file cannot be written, ChunkHound skips the record and reports the problem only in the debug log.
+
+### Record format (schema version 1)
+
+The file holds one JSON object per line. Every record has these fields:
+
+| Field | Description |
+|---|---|
+| `schema_version` | `1` |
+| `ts` | Time of writing, ISO 8601 in UTC |
+| `event` | Record type, see below |
+| `trace_id` | ID of the operation that wrote the record |
+| `parent_trace_id` | `trace_id` of the enclosing research run, or `null` |
+| `chunkhound_version` | ChunkHound version |
+
+Each semantic search has its own `trace_id`. A search that runs inside a research run has the run's `trace_id` as its `parent_trace_id`, so you can group all searches of one run.
+
+**`multi_hop_search`**: one record per semantic search that used multi-hop expansion.
+
+| Field | Description |
+|---|---|
+| `query`, `page_size`, `has_path_filter` | The request |
+| `provider`, `model` | Embedding provider and model |
+| `strategy_reason` | Why multi-hop was used: `provider_supports_reranking` or `forced` |
+| `policy` | The limits in effect: `min_candidates`, `score_drop_threshold`, `min_relevance_floor`, `time_limit`, `result_limit`, `exhaustive_mode` |
+| `initial` | `n_results` and `top_scores` after the first rerank |
+| `rounds` | One entry per expansion round: `round`, `n_new_candidates`, `n_total`, `top_scores`, `max_score_drop`, `min_top_score`, `elapsed_s` |
+| `stop_reason` | Why expansion stopped, see the table below |
+| `n_rounds` | Number of expansion rounds that passed the stop check |
+| `n_candidates`, `n_returned` | Chunks collected, and chunks returned on this page |
+| `elapsed_s` | Duration of the search in seconds |
+
+`top_scores` holds the scores of the top-N chunks, where N is `multi_hop_min_candidates`. When expansion stops on `score_drop` or `min_relevance`, `rounds` also contains the round that triggered the stop, so it has one entry more than `n_rounds`.
+
+| `stop_reason` | Meaning | Setting |
+|---|---|---|
+| `time_limit` | The time budget ran out | `multi_hop_time_limit` |
+| `result_limit` | Enough chunks were collected | `multi_hop_result_limit` |
+| `insufficient_candidates` | Too few candidates with a positive score to expand from | `multi_hop_min_candidates` |
+| `no_new_candidates` | A round found no chunks that were not already collected | |
+| `score_drop` | The score of a watched chunk dropped too far after a rerank | `multi_hop_score_degradation` |
+| `min_relevance` | The lowest score in the top-N fell below the floor | `multi_hop_min_relevance` |
+| `rerank_error` | The reranker failed; the search returns what it had | |
+
+**`single_hop_search`**: one record per semantic search without expansion. Fields: `query`, `page_size`, `has_path_filter`, `provider`, `model`, `strategy_reason` (`no_reranker` or `forced`), `n_returned`, `elapsed_s`.
+
+**`research_run`**: one record per `code_research` call or `chunkhound research` run, also when the run fails.
+
+| Field | Description |
+|---|---|
+| `query`, `has_path_filter`, `is_follow_up` | The request. The text of a previous query is not logged |
+| `algorithm` | `v1`, `v2` or `v3`, see [Algorithm Versions](#algorithm-versions) |
+| `depth_reached`, `nodes_explored`, `chunks_analyzed` | Size of the exploration |
+| `num_clusters` | Number of clusters the sources were split into |
+| `synthesis_mode` | `single_pass` for one cluster, `map_reduce` for more |
+| `answer_chars` | Length of the answer |
+| `llm_usage` | Requests and tokens used during the run, per role (`utility`, `synthesis`). The counters are the ones the LLM provider reports; it is empty when the provider reports none |
+| `success`, `error_type` | Outcome, and the exception type on failure |
+| `elapsed_s` | Duration of the run in seconds |
+
+Fields that the run did not reach are `null`. A run that finds no code context succeeds with `num_clusters` and `synthesis_mode` set to `null`.
+
+**`followup_filter`**: one record each time generated follow-up questions are filtered (algorithms v1 and v3). Fields: `n_candidates`, `n_kept`, `candidates` (the question texts), `kept` (indexes into `candidates`), and `fallback`. `fallback` is `true` when the LLM call failed or returned no valid selection; ChunkHound then keeps the first questions in their original order.
+
+**`gap_selection`**: one record each time gap detection selects which gaps to fill (algorithms v2 and v3). Fields: `n_candidates`, `n_selected`, `scores` (all candidate scores, descending), `elbow_index` (the elbow found in the score curve, or `null`), and `selected` (indexes into `scores`).
 
 ## C4 Map Sources
 
@@ -877,6 +967,9 @@ Most environment variables use the `CHUNKHOUND_` prefix with `__` (double unders
 | `CHUNKHOUND_INDEXING__WORKSPACE_GITIGNORE_OVERLAY` | Apply CH root .gitignore as global overlay across repos (default: false) |
 | `CHUNKHOUND_INDEXING__WORKSPACE_GITIGNORE_NONREPO` | Use CH root .gitignore only for non-repo paths (default: true) |
 | `CHUNKHOUND_INDEXING__REALTIME_BACKEND` | Filesystem monitoring backend: `watchman`, `watchdog`, or `polling` |
+| `CHUNKHOUND_DECISION_LOG__ENABLED` | Write the local [decision log](#decision-log) (`true`/`1`/`yes`; default: false) |
+| `CHUNKHOUND_DECISION_LOG__PATH` | Decision log file (default: `.chunkhound/decisions.jsonl` in the project root) |
+| `CHUNKHOUND_DECISION_LOG__MAX_SIZE_MB` | Rotate the decision log above this size (MB, default: 50) |
 | `CHUNKHOUND_DB_EXECUTE_TIMEOUT` | Legacy alias for `CHUNKHOUND_DATABASE__EXECUTE_TIMEOUT_SECONDS` |
 | `CHUNKHOUND_YAML_ENGINE` | YAML parser engine (`rapid` or `tree`) |
 | `CHUNKHOUND_CONFIG_FILE` | Path to config file (alternative to `--config`) |

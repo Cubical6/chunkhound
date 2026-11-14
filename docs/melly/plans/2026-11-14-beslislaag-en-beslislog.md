@@ -190,7 +190,7 @@ Hooguit ~15 regels:
 - **Notes:** lees van `gap_detection.py` alleen r. 733-855; het bestand is groot. Verander niets aan de selectielogica zelf.
 
 ## Phase 6: documentatie (Claude, niet pi-bolt)
-- [ ] Done
+- [x] Done
 - **Depends on:** Phase 1-5
 - **Goal:** gebruikers vinden de drie multi-hop-velden en het beslislog in de docs, en het schema staat vast.
 - **Files:** `site/src/pages/docs/configuration.md`
@@ -231,6 +231,7 @@ Hooguit ~15 regels:
 | 2026-11-14 | 3 | `01a1d76b-3313-7440-a3c6-7399088a8556` | zie `git log` | Eén geparametriseerde contracttest over 11 scenario's (alle zeven stopredenen en beide single-hop-redenen). `rounds` bevat ook de ronde waarop de policy stopt; `n_rounds` telt alleen de rondes die de stopcontrole doorkwamen, dus bij `score_drop` en `min_relevance` is `len(rounds) == n_rounds + 1`. Bij een rerank-fout is er geen ronde-item. |
 | 2026-11-14 | 4 | `01a1d771-8827-7440-a3c6-739b655ea686` | zie `git log` | Zes contractgevallen; 268 gerichte tests en 14 smoke-tests groen. De sessie werd één keer onderbroken en in dezelfde sessie hervat. Met het log uit vraagt de run geen tellers op. `llm_usage` is leeg als de provider geen tellers geeft of het opvragen faalt. De hergebruikte nep-zoekservice vervangt `SearchService`; de test schrijft daarom op die grens een proefrecord in een eigen trace en controleert dat het de run als `parent_trace_id` heeft (v1, v2, v3 en de terugval naar v1). Overerving via `asyncio.gather` is gedekt door de test van het log zelf uit fase 2. Bij "geen codecontext gevonden" is `success` `true` en zijn `num_clusters` en `synthesis_mode` `null`. |
 | 2026-11-14 | 5 | `01a1d96c-1257-70ae-9edb-743d87c3fd7f` | zie `git log` | Eén geparametriseerde contracttest over zes gevallen; 317 gerichte tests en 14 smoke-tests groen. Het vraagfilter schrijft ook een record als er hooguit één vraag is en de LLM niet wordt aangeroepen (`fallback: false`). `selected` bij `gap_selection` verwijst naar de aflopend gesorteerde scores, niet naar de invoervolgorde. `elbow_index` staat er ook als de elbow wel gevonden maar niet gebruikt is. Eén correctieronde: import naar moduleniveau, twee losse opmaakwijzigingen teruggedraaid. |
+| 2026-11-14 | 6 | n.v.t. (Claude) | zie `git log` | De drie multi-hop-velden stonden al in de tabel, maar met de oude omschrijving; die is aangepast aan het werkelijke gedrag. Nieuwe sectie "Decision Log" met opties, privacy, rotatie en het recordformaat per event, plus een tabel van stopredenen met de bijbehorende instelling. Drie env-variabelen toegevoegd aan de lijst. Veldnamen en standaardwaarden zijn tegen de code gecontroleerd. |
 
 ---
 
