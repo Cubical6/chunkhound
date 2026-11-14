@@ -1,0 +1,18 @@
+schema { query: RootQuery mutation: RootMutation }
+extend schema { subscription: Events }
+type RootQuery {
+  team(filter: TeamFilter, state: State): Team
+}
+type RootMutation { addInvoice: Invoice }
+type Events { invoices: Invoice }
+type Team { id: ID! name: String! state: State! extra: String }
+type Invoice { id: ID! total: Float! team: Team teams: [Team!]! state: State parent: Invoice }
+type TeamConnection { total: Int! nodes: [Team!]! }
+input TeamFilter { name: String! state: State nested: NestedInput }
+input NestedInput { hidden: String! }
+enum State { OPEN CLOSED }
+interface Identified { id: ID! }
+union Result = Team | Invoice
+scalar Date
+type Query { id: ID! title: String }
+type _ { id: ID! }

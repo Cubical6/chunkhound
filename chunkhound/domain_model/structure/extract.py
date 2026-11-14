@@ -20,6 +20,7 @@ from chunkhound.domain_model.structure.files import (
     select_files,
 )
 from chunkhound.domain_model.structure.readers.eloquent import EloquentReader
+from chunkhound.domain_model.structure.readers.graphql import GraphQLReader
 from chunkhound.domain_model.structure.readers.laravel_migrations import (
     LaravelMigrationsReader,
 )
@@ -99,6 +100,7 @@ READERS: list[Reader] = [
     EloquentReader(),
     LaravelRoutesReader(),
     MagentoAnchorsReader(),
+    GraphQLReader(),
 ]
 
 

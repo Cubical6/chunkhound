@@ -1,0 +1,5 @@
+CREATE TABLE Team (
+  id INTEGER PRIMARY KEY,
+  name VARCHAR(80) NOT NULL,
+  state ENUM('OPEN', 'PENDING')
+);
