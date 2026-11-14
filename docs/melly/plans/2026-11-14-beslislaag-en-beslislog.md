@@ -113,7 +113,7 @@ Hooguit ~15 regels:
 - **Notes:** de standaardwaarden in `research_config.py` (5 / 0.15 / 0.3) zijn nu gelijk aan de constanten; houd dat zo. Wijzig de tijds- en resultaatlimiet niet, die lopen al via `get_effective_*`. Test de policy niet los van de zoekstrategie: de bestaande fixtures zijn het contract.
 
 ## Phase 2: beslislog-module en config
-- [ ] Done
+- [x] Done
 - **Depends on:** none (mag parallel aan fase 1, in een eigen worktree)
 - **Model:** `openai-codex/gpt-6.1-sol` / `medium`
 - **Goal:** een procesbrede, opt-in JSONL-schrijver met config, rotatie en trace-id's. Nog geen aanroepen vanuit zoeken of onderzoek.
@@ -152,7 +152,7 @@ Hooguit ~15 regels:
   - Met het log uit wordt er niets geschreven.
   - Het record bevat geen chunk- of bestandsinhoud.
 - **Verify:** `uv run pytest tests/test_multi_hop_semantic_search.py tests/test_multi_hop_metrics.py tests/unit/test_decision_log.py -q --tb=short | tail -n 40`
-- **Notes:** voeg de log-asserties toe als één geparametriseerde test over de bestaande fixtures, niet als kopie van elke test. De zoekopdracht opent geen eigen `trace()` als er al een trace actief is; dan erft het record het trace-id van de onderzoeksrun als `parent_trace_id`.
+- **Notes:** voeg de log-asserties toe als één geparametriseerde test over de bestaande fixtures, niet als kopie van elke test. Elke zoekopdracht opent een eigen `decision_log.trace()`. Binnen een onderzoeksrun krijgt het zoekrecord daardoor een eigen `trace_id` en het trace-id van de run als `parent_trace_id`; daarbuiten is `parent_trace_id` `null`.
 
 ## Phase 4: onderzoeksrun instrumenteren
 - [ ] Done
@@ -227,6 +227,7 @@ Hooguit ~15 regels:
 | Date | Phase | sessionId | Commit | Notes |
 |---|---|---|---|---|
 | 2026-11-14 | 1 | `01a1d761-73a2-7440-a3c6-7394680a32cf` | zie `git log` | 31 gerichte tests en 14 smoke-tests groen. De standaardwaarden staan in `research_config.py` om een circulaire import te vermijden. Eén correctieronde: ongebruikte re-exports verwijderd, docstring bijgewerkt. |
+| 2026-11-14 | 2 | `01a1d768-0556-7440-a3c6-73978dae849d` | zie `git log` | 9 contracttests voor het log; config- en smoke-tests groen. De CLI zet het log alleen op voor de commando's die ook analytics krijgen (o.a. `search`, `research`, `map`, `autodoc`). Trace-notitie van fase 3 aangescherpt. |
 
 ---
 
