@@ -1,0 +1,1 @@
+<?php // Own module registration.

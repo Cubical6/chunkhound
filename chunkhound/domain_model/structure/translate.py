@@ -193,6 +193,8 @@ def translate(
         identifying = primary or (
             min(uniques, key=lambda c: len(c.columns)) if uniques else None
         )
+        if any(reason == "entity_table_missing" for reason, _ in table.uncertain):
+            identifying = None
         keys = identifying.columns if identifying else ()
         ordered_names = (*keys, *(n for n in columns[key] if n not in keys))
         prefix = (
@@ -246,7 +248,7 @@ def translate(
                     bindings=(
                         CodeBinding(
                             repository=repository,
-                            target=f"{table.name}.{name}",
+                            target=column.target or f"{table.name}.{name}",
                             citation=citation(column.defined_at),
                         ),
                     ),
