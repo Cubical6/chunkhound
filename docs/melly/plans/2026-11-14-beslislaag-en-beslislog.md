@@ -216,12 +216,20 @@ Hooguit ~15 regels:
 ---
 
 ## Final verification (Claude, na alle fases)
-- [ ] Smoke: `uv run pytest tests/test_smoke.py -v -n auto`
-- [ ] Volledige suite: `uv run pytest tests/ -v` (als achtergrondtaak)
-- [ ] Lint en types: `uv run ruff check chunkhound` en `uv run mypy chunkhound`
-- [ ] `tests/test_multi_hop_metrics.py`: recall@k en MRR gelijk aan `main`
-- [ ] Volledige diff nagelopen tegen het Goal; geen gedragswijziging bij standaardinstellingen
-- [ ] `.pi-handoff/` verwijderd; niets daaruit gecommit
+- [x] Smoke: `uv run pytest tests/test_smoke.py -v -n auto` (14 geslaagd)
+- [x] Volledige suite: `uv run pytest tests/ -v` (als achtergrondtaak); zie de notitie hieronder
+- [x] Lint en types: `uv run ruff check chunkhound` en `uv run mypy chunkhound`; geen nieuwe fouten ten opzichte van `main` (ruff per gewijzigd bestand gelijk of lager, mypy 991 fouten op beide)
+- [x] `tests/test_multi_hop_metrics.py`: recall@k en MRR gelijk aan `main` (de test controleert exacte waarden)
+- [x] Volledige diff nagelopen tegen het Goal; geen gedragswijziging bij standaardinstellingen
+- [x] `.pi-handoff/` verwijderd; niets daaruit gecommit
+
+**Notitie bij de volledige suite (2026-11-14).** De eerste run in de worktree gaf 5886 geslaagd, 114 mislukt en 158 errors. Alle 272 kwamen uit de testomgeving van de worktree, niet uit de wijzigingen:
+
+- `/tmp` (tmpfs, 16 GB) liep vol tijdens de run: `No space left on device`.
+- De venv van de worktree bevatte de oude `chunkhound_native` 5.2.1 uit de wheel. Tests die `chunkhound` als subproces buiten de repo starten, laadden die versie en misten `AnalyticsRecorder`.
+- `site/node_modules` ontbrak, waardoor `npm run build` voor de site-tests faalde.
+
+Na herstel (native module en `chunkhound.libs` uit de venv van de hoofdcheckout gekopieerd, `site/node_modules` gekopieerd, `--basetemp` op schijf) zijn de 65 betrokken testbestanden opnieuw gedraaid: 416 geslaagd, 9 overgeslagen, 1 mislukt. Die ene is `tests/contracts/test_native_self_relative_rpath.py`; die verwacht de Rust-buildmap `target/duckdb-download`, en die bestaat in deze worktree niet. Draai de volledige suite nog één keer in een checkout met een Rust-build voordat de branch naar een PR gaat.
 
 ## Progress log
 | Date | Phase | sessionId | Commit | Notes |
