@@ -335,13 +335,15 @@ def test_discover_nested_windows_junction_scopes_detects_external_target(
             return physical_root
         return original_resolve(self, strict=strict)
 
-    monkeypatch.setattr(watchman_scope_module.sys, "platform", "win32")
-    monkeypatch.setattr(watchman_scope_module.os, "scandir", _FakeScandir)
-    monkeypatch.setattr(watchman_scope_module.Path, "resolve", fake_resolve)
+    with monkeypatch.context() as patch:
+        patch.setattr(watchman_scope_module.sys, "platform", "win32")
+        patch.setattr(watchman_scope_module.os, "scandir", _FakeScandir)
+        patch.setattr(watchman_scope_module.Path, "resolve", fake_resolve)
+        scopes = watchman_scope_module.discover_nested_windows_junction_scopes(
+            target_dir
+        )
 
-    assert watchman_scope_module.discover_nested_windows_junction_scopes(
-        target_dir
-    ) == (
+    assert scopes == (
         WatchmanSubscriptionScope(
             requested_path=logical_junction,
             watch_root=physical_root,

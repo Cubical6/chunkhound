@@ -241,6 +241,8 @@ warn_unreachable = true
 strict_equality = true
 
 [tool.pytest.ini_options]
+# Keep temp dirs only for failed tests; /tmp can be a small tmpfs.
+tmp_path_retention_policy = "failed"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
