@@ -27,7 +27,8 @@ Unknown top-level paths log a WARNING (``schema_error``) and skip the rule
 rather than being silently dropped. Silent drops would let a typo like
 ``embeding.provider`` land as a no-op with no operator signal — the whole
 point of a rule loop is to be able to see what did and didn't take effect.
-The same check runs on the second segment (e.g., ``embedding.provder``),
+The same check runs at every BaseModel segment (e.g., ``embedding.provder``
+or ``domain.technical_tables.ad``),
 because sub-models ignore unknown fields (pydantic's default; some also
 set ``extra="ignore"`` explicitly for local-config forward compatibility)
 and would otherwise silently absorb the typo. This applies to ``remove``
@@ -39,9 +40,11 @@ value={provder: ...}``) are recursively checked against the target
 sub-model's fields — an unknown nested key surfaces as ``schema_error``
 before mutation, preventing typos from being persisted to the global JSON.
 
-The depth-2 assumption above (Config → sub-model → leaf) is enforced by
-a shape-invariant tripwire in ``test_rules.py`` — if a sub-config gains
-a nested ``BaseModel`` field the test fails, listing what to re-verify.
+Path and payload walkers follow nested BaseModel fields at any depth,
+unwrapping Optional sub-configs. Non-model fields stop schema traversal:
+dict-typed leaves may carry arbitrary keys. A shape-invariant tripwire in
+``test_rules.py`` checks reachability and typo rejection throughout the real
+Config tree.
 """
 
 import copy
@@ -182,9 +185,7 @@ def _existing(half_merged: Config, path: str) -> bool:
     return True
 
 
-def _version_gate_ok(
-    rule: dict[str, Any], current_version: str
-) -> tuple[bool, bool]:
+def _version_gate_ok(rule: dict[str, Any], current_version: str) -> tuple[bool, bool]:
     """Return ``(satisfied, unparseable)`` for the rule's ``min_chunkhound_version``.
 
     Unparseable is treated as not-satisfied so the rule is still skipped,
@@ -223,6 +224,25 @@ def _unwrap_optional_basemodel(annotation: Any) -> type[BaseModel] | None:
         if isinstance(candidate, type) and issubclass(candidate, BaseModel):
             return candidate
     return None
+
+
+def _resolve_path_model(
+    segments: list[str],
+) -> tuple[type[BaseModel] | None, str | None]:
+    """Resolve a rule target's model, returning any unknown schema path.
+
+    Stop at non-model leaves, preserving arbitrary dict-key paths and
+    deferring scalar value/shape validation to the enclosing sub-model.
+    """
+    model: type[BaseModel] | None = Config
+    for segment in segments:
+        if model is None:
+            break
+        field = model.model_fields.get(segment)
+        if field is None:
+            return None, ".".join(segments)
+        model = _unwrap_optional_basemodel(field.annotation)
+    return model, None
 
 
 def _check_payload_keys(
@@ -389,10 +409,10 @@ def apply_rule(
         )
         return
 
-    # Reject depth-2 typos up front; sub-models set ``extra="ignore"`` and
-    # would silently absorb them (see module docstring for full rationale).
-    sub_model = ENCLOSING_SUB_MODEL[top_segment]
-    if len(segments) >= 2 and segments[1] not in sub_model.model_fields:
+    # Reject typos at every BaseModel boundary before mutation, including
+    # remove rules (which would otherwise misleadingly log a no-op).
+    target_model, unknown = _resolve_path_model(segments)
+    if unknown is not None:
         log_if_not_mcp(
             "WARNING",
             "Remote-config {} schema_error: unknown path {!r}",
@@ -401,19 +421,13 @@ def apply_rule(
         )
         return
 
-    # Reject unknown keys inside a parent-level merge/set payload for the
-    # same reason (extra="ignore" would drop them silently, then persist
-    # the raw payload dict to global JSON via deep_merge). Only runs when
-    # the rule addresses the sub-model itself (``id=<top>``) — deeper
-    # paths target a scalar/leaf whose value-shape is validated by
-    # ``_validate_sub_model``; running the payload check against
-    # ``sub_model`` there would misread a dict value for a scalar leaf
-    # as an unknown top-level field, and would reject legitimate rules
-    # targeting a future dict-typed leaf (e.g. ``dict[str, str]``).
-    if op in {"merge", "set"} and len(segments) == 1:
+    # Check payload keys against the actual target model, at any depth.
+    # Non-model leaves defer to sub-model validation: dict-typed fields
+    # may legitimately contain arbitrary keys.
+    if op in {"merge", "set"} and target_model is not None:
         value = rule.get("value")
         if isinstance(value, dict):
-            unknown = _check_payload_keys(sub_model, value, segments)
+            unknown = _check_payload_keys(target_model, value, segments)
             if unknown is not None:
                 log_if_not_mcp(
                     "WARNING",
@@ -463,9 +477,7 @@ def apply_rule(
         return
 
     if remove_no_op:
-        log_if_not_mcp(
-            "INFO", "Remote-config {} no-op: op=remove (path absent)", ref
-        )
+        log_if_not_mcp("INFO", "Remote-config {} no-op: op=remove (path absent)", ref)
         return
 
     suffix = " (collapsed→set)" if collapsed_merge_to_set else ""
