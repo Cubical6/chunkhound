@@ -172,6 +172,7 @@ def create_parser() -> argparse.ArgumentParser:
     from .parsers.calibrate_parser import add_calibrate_subparser
     from .parsers.code_mapper_parser import add_map_subparser
     from .parsers.daemon_parser import add_daemon_subparser
+    from .parsers.domain_parser import add_domain_subparser
     from .parsers.fetchurl_parser import add_fetchurl_subparser
     from .parsers.mcp_parser import add_mcp_subparser
     from .parsers.research_parser import add_research_subparser
@@ -195,6 +196,7 @@ def create_parser() -> argparse.ArgumentParser:
     add_calibrate_subparser(subparsers)
     # Internal commands (hidden from help)
     add_daemon_subparser(subparsers)
+    add_domain_subparser(subparsers)
 
     return parser
 
@@ -352,6 +354,10 @@ async def async_main() -> None:
             from .commands.code_mapper import code_mapper_command
 
             await code_mapper_command(args, config)
+        elif args.command == "domain":
+            from .commands.domain import domain_command
+
+            await domain_command(args, config)
         elif args.command == "autodoc":
             from .commands.autodoc import autodoc_command
 

@@ -106,6 +106,22 @@ from chunkhound.providers.database.duckdb.schema_constants import (
 )
 
 
+_DOMAIN_INPUT_DDL = """
+CREATE TABLE IF NOT EXISTS domain_input (
+    seq             BIGINT    PRIMARY KEY,
+    batch_id        VARCHAR   NOT NULL,
+    op              VARCHAR   NOT NULL,
+    element_id      VARCHAR   NOT NULL,
+    payload         VARCHAR,
+    payload_version INTEGER   NOT NULL,
+    author_name     VARCHAR   NOT NULL,
+    author_email    VARCHAR,
+    entry_point     VARCHAR   NOT NULL,
+    recorded_at     TIMESTAMP NOT NULL
+)
+"""
+
+
 class DuckDBTransactionConflictError(RuntimeError):
     """A guarded mutation collided with an already-open DuckDB transaction."""
 
@@ -344,6 +360,70 @@ class DuckDBProvider(SerialDatabaseProvider):
         """The Rust pipeline (chunkhound_native.IndexingPipeline) implements
         a DuckDB backend."""
         return True
+
+    @property
+    def supports_domain_input(self) -> bool:
+        """DuckDB supports checkpointed human-input batches."""
+        return True
+
+    def _executor_append_domain_input(
+        self, conn: Any, state: dict[str, Any], rows: list[dict[str, Any]]
+    ) -> list[int]:
+        """Create storage lazily and commit the entire batch before checkpointing."""
+        if not rows:
+            return []
+        if state.get("transaction_active", False):
+            raise DuckDBTransactionConflictError(
+                "append_domain_input cannot run while another transaction is active"
+            )
+
+        conn.execute(_DOMAIN_INPUT_DDL)
+        self._executor_begin_transaction(conn, state)
+        try:
+            last_seq = conn.execute(
+                "SELECT COALESCE(max(seq), 0) FROM domain_input"
+            ).fetchone()[0]
+            seqs = list(range(last_seq + 1, last_seq + len(rows) + 1))
+            columns = (
+                "batch_id",
+                "op",
+                "element_id",
+                "payload",
+                "payload_version",
+                "author_name",
+                "author_email",
+                "entry_point",
+                "recorded_at",
+            )
+            params: list[Any] = []
+            for seq, row in zip(seqs, rows):
+                params.append(seq)
+                params.extend(
+                    row.get(col) if col in ("payload", "author_email") else row[col]
+                    for col in columns
+                )
+            placeholders = ", ".join(["(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"] * len(rows))
+            conn.execute(
+                f"INSERT INTO domain_input (seq, {', '.join(columns)}) "
+                f"VALUES {placeholders}",
+                params,
+            )
+            self._executor_commit_transaction(conn, state, force_checkpoint=True)
+        except Exception:
+            if state.get("transaction_active", False):
+                self._executor_rollback_transaction(conn, state)
+            raise
+        return seqs
+
+    def _executor_load_domain_input(
+        self, conn: Any, state: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Read the append log in replay order without materializing its table."""
+        if not self._executor_table_exists(conn, state, "domain_input"):
+            return []
+        cursor = conn.execute("SELECT * FROM domain_input ORDER BY seq")
+        columns = [desc[0] for desc in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
     @property
     def supports_embedding_sql_queries(self) -> bool:
@@ -1221,7 +1301,7 @@ class DuckDBProvider(SerialDatabaseProvider):
         """Step 3: rebuild the compacted DB from ChunkHound-owned canonical tables.
 
         Compaction intentionally preserves only the canonical ChunkHound schema:
-        schema_version, files, chunks, and embeddings_*. Unknown tables are
+        schema_version, files, chunks, embeddings_*, and domain_*. Unknown tables are
         dropped by design so the compacted file is a clean ChunkHound-owned DB,
         not a generic DuckDB passthrough.
 
@@ -1320,8 +1400,20 @@ class DuckDBProvider(SerialDatabaseProvider):
                         f"INSERT INTO {qtname} ({elist}) SELECT {elist} FROM src.{qtname}"
                     )
 
+            domain_tables = tgt_conn.execute(
+                "SELECT table_name, sql FROM duckdb_tables() "
+                "WHERE database_name = 'src' AND schema_name = 'main' "
+                "AND table_name LIKE 'domain\\_%' ESCAPE '\\' "
+                "ORDER BY table_name"
+            ).fetchall()
+            for tname, ddl in domain_tables:
+                tgt_conn.execute(ddl)
+                qtname = self._quote_duckdb_identifier(tname)
+                tgt_conn.execute(f"INSERT INTO {qtname} SELECT * FROM src.{qtname}")
+
             known = set(CANONICAL_TABLE_NAMES)
             known.update(t[0] for t in emb_tables)
+            known.update(t[0] for t in domain_tables)
             all_src = tgt_conn.execute(
                 "SELECT table_name FROM information_schema.tables "
                 "WHERE table_catalog='src' AND table_type='BASE TABLE'"

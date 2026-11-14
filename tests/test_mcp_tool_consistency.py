@@ -33,6 +33,8 @@ def test_tool_registry_populated():
 
     # Check expected tools are present
     expected_tools = [
+        "domain_write",
+        "domain_read",
         "search",
         "daemon_status",
         "code_research",
