@@ -6,7 +6,7 @@ from typing import Literal
 
 from chunkhound.domain_model.identity import key_segment
 from chunkhound.domain_model.model import Citation, DomainModel
-from chunkhound.domain_model.structure.contract import Anchor, Hint
+from chunkhound.domain_model.structure.contract import Anchor, Finding, Hint
 from chunkhound.domain_model.structure.schema import Schema
 
 
@@ -85,6 +85,7 @@ def finalize_anchors(
                 a.source,
                 a.handler.symbol if a.handler else "",
                 citation_key(a.citations[0]),
+                a.model_dump_json(),
             )
         )
         first = registrations[0]
@@ -115,6 +116,9 @@ def finalize_anchors(
             first.model_copy(
                 update={
                     "id": aid,
+                    "source": "graphql"
+                    if any(a.source == "graphql" for a in registrations)
+                    else first.source,
                     "citations": tuple(sorted(citations, key=citation_key)),
                     "hints": tuple(
                         sorted(set(linked), key=lambda h: h.model_dump_json())
@@ -123,3 +127,24 @@ def finalize_anchors(
             )
         )
     return tuple(result)
+
+
+def unresolved_handler_findings(
+    findings: Iterable[Finding], anchors: Iterable[Anchor]
+) -> Iterable[Finding]:
+    """Keep named missing handlers; suppress anonymous gaps filled by a reader."""
+    resolved = {
+        a.id
+        for a in anchors
+        if a.handler is not None and a.handler.citation is not None
+    }
+    return (
+        finding
+        for finding in findings
+        if not (
+            finding.kind == "unresolved"
+            and finding.reason == "handler_not_found"
+            and finding.detail is None
+            and finding.subject in resolved
+        )
+    )
