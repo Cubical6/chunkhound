@@ -135,7 +135,7 @@ Hooguit ~15 regels:
 - **Notes:** gebruik `tmp_path` in tests, nooit de echte `.chunkhound/`. De module mag geen import van `chunkhound_native` hebben. Geen achtergrondthread en geen buffer: de records zijn klein en er is er één per opdracht.
 
 ## Phase 3: zoekpad instrumenteren
-- [ ] Done
+- [x] Done
 - **Depends on:** Phase 1, Phase 2
 - **Model:** `openai-codex/gpt-6.1-sol` / `medium`
 - **Goal:** elke semantische zoekopdracht schrijft één `multi_hop_search`- of `single_hop_search`-record volgens Schema v1.
@@ -228,6 +228,7 @@ Hooguit ~15 regels:
 |---|---|---|---|---|
 | 2026-11-14 | 1 | `01a1d761-73a2-7440-a3c6-7394680a32cf` | zie `git log` | 31 gerichte tests en 14 smoke-tests groen. De standaardwaarden staan in `research_config.py` om een circulaire import te vermijden. Eén correctieronde: ongebruikte re-exports verwijderd, docstring bijgewerkt. |
 | 2026-11-14 | 2 | `01a1d768-0556-7440-a3c6-73978dae849d` | zie `git log` | 9 contracttests voor het log; config- en smoke-tests groen. De CLI zet het log alleen op voor de commando's die ook analytics krijgen (o.a. `search`, `research`, `map`, `autodoc`). Trace-notitie van fase 3 aangescherpt. |
+| 2026-11-14 | 3 | `01a1d76b-3313-7440-a3c6-7399088a8556` | zie `git log` | Eén geparametriseerde contracttest over 11 scenario's (alle zeven stopredenen en beide single-hop-redenen). `rounds` bevat ook de ronde waarop de policy stopt; `n_rounds` telt alleen de rondes die de stopcontrole doorkwamen, dus bij `score_drop` en `min_relevance` is `len(rounds) == n_rounds + 1`. Bij een rerank-fout is er geen ronde-item. |
 
 ---
 
