@@ -8,6 +8,10 @@ import pytest
 from chunkhound.core import decision_log
 from chunkhound.core.config.decision_log_config import DecisionLogConfig
 from chunkhound.services.research.factory import ResearchServiceFactory
+from chunkhound.services.research.shared.gap_detection import GapDetectionService
+from chunkhound.services.research.shared.gap_models import UnifiedGap
+from chunkhound.services.research.shared.models import ResearchContext
+from chunkhound.services.research.v1.question_generator import QuestionGenerator
 from tests.unit.research.test_source_provenance import _research_service
 
 
@@ -158,3 +162,129 @@ async def test_research_failure_is_logged_and_propagated(
         "synthesis_mode",
     ):
         assert run[key] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response,scores",
+    [
+        ("3, 1, 99", [0.1, 0.9, 0.8, 0.2]),
+        ("invalid output", [0.5, 0.5, 0.5]),
+        ("failure", [0.0] * 5),
+        ("2", []),
+        ("2", [0.7]),
+        ("2", [0.9, 0.8, 0.7, 0.6, 0.5]),
+    ],
+)
+async def test_decisions_share_run_trace_and_preserve_selections(
+    tmp_path, capturing_llm_manager, monkeypatch, response, scores
+):
+    manager, provider = capturing_llm_manager
+    provider._responses = {
+        "extract atomic facts": "[]",
+        "": (
+            "The API delegates storage to the store implementation [1]. "
+            "The store persists the request and returns a concrete result [2]. "
+            "Both modules participate in the request path [1][2]."
+        ),
+    }
+    service = factory_service(tmp_path, manager, "single", "v1")
+    generator = QuestionGenerator(manager)
+    selector = GapDetectionService(
+        llm_manager=manager,
+        embedding_manager=service._embedding_manager,
+        db_services=service._db_services,
+        config=service._config.model_copy(update={"min_gaps": 1, "max_gaps": 4}),
+    )
+    questions = ["How is storage called?", "Where is validation?", "Who owns the API?"]
+    gaps = [
+        UnifiedGap(query=f"Gap {i}", sources=[], vote_count=1, score=score)
+        for i, score in enumerate(scores)
+    ]
+    selections = []
+    original_search = service._db_services.search_service.search_semantic
+
+    async def failed_filter(*args, **kwargs):
+        raise RuntimeError("utility provider unavailable")
+
+    async def search_with_decisions(**kwargs):
+        # The existing fake replaces the search boundary. Execute the real
+        # selectors here so deep_research owns the trace, not the test.
+        with monkeypatch.context() as patch:
+            if response == "failure":
+                patch.setattr(provider, "complete", failed_filter)
+            else:
+                patch.setattr(provider, "_responses", {"": response})
+            kept = await generator.filter_relevant_followups(
+                questions,
+                "Explain the API",
+                "Explain storage",
+                ResearchContext(root_query="Explain the API", ancestors=[]),
+            )
+        selected = selector._select_gaps_by_elbow(gaps)
+        selections.append((kept, selected))
+        return await original_search(**kwargs)
+
+    monkeypatch.setattr(
+        service._db_services.search_service, "search_semantic", search_with_decisions
+    )
+    without_log = await service.deep_research("Explain the API")
+    assert not (tmp_path / ".chunkhound").exists()
+    disabled_selections = selections[:]
+    selections.clear()
+    enable_log(tmp_path)
+    with_log = await service.deep_research("Explain the API")
+    assert with_log == without_log
+    assert selections == disabled_selections
+    assert selections
+
+    logged = records(tmp_path)
+    (run,) = [r for r in logged if r["event"] == "research_run"]
+    followups = [r for r in logged if r["event"] == "followup_filter"]
+    gap_records = [r for r in logged if r["event"] == "gap_selection"]
+    assert len(followups) == len(gap_records) == len(selections)
+    common = {
+        "schema_version",
+        "ts",
+        "event",
+        "trace_id",
+        "parent_trace_id",
+        "chunkhound_version",
+    }
+    for followup, gap_record, (kept, selected) in zip(
+        followups, gap_records, selections, strict=True
+    ):
+        for record in (followup, gap_record):
+            assert record["schema_version"] == 1
+            assert record["ts"]
+            assert record["chunkhound_version"]
+            assert record["trace_id"] == run["trace_id"]
+            assert record["parent_trace_id"] == run["parent_trace_id"]
+        assert set(followup) == common | {
+            "n_candidates",
+            "n_kept",
+            "candidates",
+            "kept",
+            "fallback",
+        }
+        assert followup["n_candidates"] == len(questions)
+        assert followup["n_kept"] == len(kept)
+        assert followup["candidates"] == questions
+        assert [questions[i] for i in followup["kept"]] == kept
+        assert followup["fallback"] is (response in ("invalid output", "failure"))
+        assert set(gap_record) == common | {
+            "n_candidates",
+            "n_selected",
+            "scores",
+            "elbow_index",
+            "selected",
+        }
+        assert gap_record["n_candidates"] == len(gaps)
+        assert gap_record["n_selected"] == len(selected)
+        assert gap_record["scores"] == sorted(scores, reverse=True)
+        # Gap indices address the descending score list, not the input order.
+        sorted_gaps = sorted(gaps, key=lambda gap: gap.score, reverse=True)
+        assert [sorted_gaps[i] for i in gap_record["selected"]] == selected
+        assert gap_record["elbow_index"] is None or isinstance(
+            gap_record["elbow_index"], int
+        )

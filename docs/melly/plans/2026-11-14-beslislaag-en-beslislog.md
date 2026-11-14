@@ -59,8 +59,8 @@ Gemeenschappelijke velden: `schema_version`, `ts` (ISO 8601 UTC), `event`, `trac
   - `stop_reason`, `n_rounds`, `n_candidates`, `n_returned`, `elapsed_s`
 - **`single_hop_search`:** `query`, `page_size`, `has_path_filter`, `provider`, `model`, `strategy_reason` (`forced` of `no_reranker`), `n_returned`, `elapsed_s`.
 - **`research_run`:** `query`, `algorithm`, `has_path_filter`, `is_follow_up`, `depth_reached`, `nodes_explored`, `chunks_analyzed`, `num_clusters`, `synthesis_mode` (`single_pass` of `map_reduce`), `answer_chars`, `llm_usage` (verschil van `LLMManager.get_usage_stats()` voor en na de run), `success`, `error_type`, `elapsed_s`.
-- **`followup_filter`:** `n_candidates`, `n_kept`, `candidates` (vraagteksten), `kept` (indexen).
-- **`gap_selection`:** `n_candidates`, `n_selected`, `scores` (aflopend), `elbow_index` (of `null`), `selected` (indexen).
+- **`followup_filter`:** `n_candidates`, `n_kept`, `candidates` (vraagteksten), `kept` (indexen in `candidates`), `fallback`.
+- **`gap_selection`:** `n_candidates`, `n_selected`, `scores` (aflopend), `elbow_index` (of `null`), `selected` (indexen in `scores`).
 
 `top_scores` is steeds de top-N volgens `multi_hop_min_candidates`.
 
@@ -174,7 +174,7 @@ Hooguit ~15 regels:
 - **Notes:** hergebruik de nep-providers uit de bestaande tests in `tests/unit/research/`; bouw geen nieuwe. Als `get_usage_stats()` voor een provider geen tellers geeft, laat `llm_usage` dan leeg en meld dat in het rapport. Parallelle strategieën (v3) draaien in `asyncio.gather`; contextvars gaan mee naar de taken, controleer dat met de test.
 
 ## Phase 5: LLM-beslissingen in onderzoek loggen
-- [ ] Done
+- [x] Done
 - **Depends on:** Phase 2
 - **Model:** `openai-codex/gpt-6.1-sol` / `medium`
 - **Goal:** het filteren van vervolgvragen en het selecteren van gaps schrijven elk een record, als data voor het latere vervangen van deze utility-LLM-keuzes.
@@ -230,6 +230,7 @@ Hooguit ~15 regels:
 | 2026-11-14 | 2 | `01a1d768-0556-7440-a3c6-73978dae849d` | zie `git log` | 9 contracttests voor het log; config- en smoke-tests groen. De CLI zet het log alleen op voor de commando's die ook analytics krijgen (o.a. `search`, `research`, `map`, `autodoc`). Trace-notitie van fase 3 aangescherpt. |
 | 2026-11-14 | 3 | `01a1d76b-3313-7440-a3c6-7399088a8556` | zie `git log` | Eén geparametriseerde contracttest over 11 scenario's (alle zeven stopredenen en beide single-hop-redenen). `rounds` bevat ook de ronde waarop de policy stopt; `n_rounds` telt alleen de rondes die de stopcontrole doorkwamen, dus bij `score_drop` en `min_relevance` is `len(rounds) == n_rounds + 1`. Bij een rerank-fout is er geen ronde-item. |
 | 2026-11-14 | 4 | `01a1d771-8827-7440-a3c6-739b655ea686` | zie `git log` | Zes contractgevallen; 268 gerichte tests en 14 smoke-tests groen. De sessie werd één keer onderbroken en in dezelfde sessie hervat. Met het log uit vraagt de run geen tellers op. `llm_usage` is leeg als de provider geen tellers geeft of het opvragen faalt. De hergebruikte nep-zoekservice vervangt `SearchService`; de test schrijft daarom op die grens een proefrecord in een eigen trace en controleert dat het de run als `parent_trace_id` heeft (v1, v2, v3 en de terugval naar v1). Overerving via `asyncio.gather` is gedekt door de test van het log zelf uit fase 2. Bij "geen codecontext gevonden" is `success` `true` en zijn `num_clusters` en `synthesis_mode` `null`. |
+| 2026-11-14 | 5 | `01a1d96c-1257-70ae-9edb-743d87c3fd7f` | zie `git log` | Eén geparametriseerde contracttest over zes gevallen; 317 gerichte tests en 14 smoke-tests groen. Het vraagfilter schrijft ook een record als er hooguit één vraag is en de LLM niet wordt aangeroepen (`fallback: false`). `selected` bij `gap_selection` verwijst naar de aflopend gesorteerde scores, niet naar de invoervolgorde. `elbow_index` staat er ook als de elbow wel gevonden maar niet gebruikt is. Eén correctieronde: import naar moduleniveau, twee losse opmaakwijzigingen teruggedraaid. |
 
 ---
 
