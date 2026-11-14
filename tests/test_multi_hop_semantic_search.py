@@ -5,6 +5,7 @@ from typing import cast
 
 import pytest
 
+from chunkhound.core.config.research_config import ResearchConfig
 from chunkhound.core.types.common import Language
 from chunkhound.interfaces.database_provider import DatabaseProvider
 from chunkhound.interfaces.embedding_provider import EmbeddingProvider
@@ -21,6 +22,72 @@ from tests.fixtures.multi_hop_synthetic import (
     build_multi_hop_scenario,
     build_score_drop_termination_scenario,
 )
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+@pytest.mark.parametrize("degradation, expected_total", [(0.15, 6), (0.5, 8)])
+async def test_multi_hop_score_degradation_config_controls_expansion(
+    degradation: float, expected_total: int
+) -> None:
+    scenario = build_score_drop_termination_scenario()
+    search_service = _build_search_service(
+        scenario.db,
+        scenario.provider,
+        config=ResearchConfig(multi_hop_score_degradation=degradation),
+    )
+
+    results, pagination = await search_service.search_semantic(
+        "score drop termination", page_size=10
+    )
+
+    assert pagination["total"] == expected_total
+    assert (7 in {result["chunk_id"] for result in results}) == (expected_total == 8)
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+@pytest.mark.parametrize("floor, expected_total", [(0.3, 6), (0.1, 8)])
+async def test_multi_hop_min_relevance_config_controls_expansion(
+    floor: float, expected_total: int
+) -> None:
+    scenario = build_min_score_termination_scenario()
+    search_service = _build_search_service(
+        scenario.db,
+        scenario.provider,
+        config=ResearchConfig(multi_hop_min_relevance=floor),
+    )
+
+    results, pagination = await search_service.search_semantic(
+        "minimum score termination", page_size=10
+    )
+
+    assert pagination["total"] == expected_total
+    assert (7 in {result["chunk_id"] for result in results}) == (expected_total == 8)
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+@pytest.mark.parametrize("min_candidates, expected_total", [(1, 6), (4, 6), (5, 5)])
+async def test_multi_hop_min_candidates_env_controls_expansion(
+    monkeypatch: pytest.MonkeyPatch, min_candidates: int, expected_total: int
+) -> None:
+    monkeypatch.setenv(
+        "CHUNKHOUND_RESEARCH_MULTI_HOP_MIN_CANDIDATES", str(min_candidates)
+    )
+    config = ResearchConfig(**ResearchConfig.load_from_env())
+    scenario = build_insufficient_candidates_scenario()
+    search_service = _build_search_service(
+        scenario.db, scenario.provider, config=config
+    )
+
+    results, pagination = await search_service.search_semantic(
+        "insufficient candidates", page_size=10
+    )
+
+    assert config.multi_hop_min_candidates == min_candidates
+    assert pagination["total"] == expected_total
+    assert (6 in {result["chunk_id"] for result in results}) == (expected_total == 6)
 
 
 class _StubResearchConfig:

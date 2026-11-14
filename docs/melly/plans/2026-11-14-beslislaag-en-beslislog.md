@@ -91,7 +91,7 @@ Hooguit ~15 regels:
 ---
 
 ## Phase 1: stoppolicy en config-koppeling
-- [ ] Done
+- [x] Done
 - **Depends on:** none
 - **Model:** `openai-codex/gpt-6.1-sol` / `medium`
 - **Goal:** de stopregels van multi-hop staan in een pure policy en de drie bestaande config-velden sturen ze aan. Gedrag bij standaardwaarden is ongewijzigd.
@@ -226,6 +226,7 @@ Hooguit ~15 regels:
 ## Progress log
 | Date | Phase | sessionId | Commit | Notes |
 |---|---|---|---|---|
+| 2026-11-14 | 1 | `01a1d761-73a2-7440-a3c6-7394680a32cf` | zie `git log` | 31 gerichte tests en 14 smoke-tests groen. De standaardwaarden staan in `research_config.py` om een circulaire import te vermijden. Eén correctieronde: ongebruikte re-exports verwijderd, docstring bijgewerkt. |
 
 ---
 

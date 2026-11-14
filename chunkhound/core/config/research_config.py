@@ -13,6 +13,11 @@ from typing import Any, Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Shared defaults for configuration and the multi-hop search policy.
+MIN_EXPANSION_CANDIDATES = 5
+SCORE_DROP_THRESHOLD = 0.15
+MIN_RELEVANCE_FLOOR = 0.3
+
 # Default values (kept in sync with chunkhound.services.research.shared.models)
 # These are duplicated here to avoid circular imports between config and services.
 # If you change these values, update the corresponding constants in models.py.
@@ -138,24 +143,33 @@ class ResearchConfig(BaseSettings):
     )
 
     multi_hop_min_candidates: int = Field(
-        default=5,
+        default=MIN_EXPANSION_CANDIDATES,
         ge=1,
         le=20,
-        description="Minimum candidates above threshold to continue expansion",
+        description=(
+            "Number of positive-score candidates required and expanded, tracked "
+            "chunks, and top-score relevance window"
+        ),
     )
 
     multi_hop_score_degradation: float = Field(
-        default=0.15,
+        default=SCORE_DROP_THRESHOLD,
         ge=0.05,
         le=0.5,
-        description="Maximum score drop in top-5 before terminating expansion",
+        description=(
+            "Stop expansion when any tracked chunk's score drops by at least "
+            "this amount"
+        ),
     )
 
     multi_hop_min_relevance: float = Field(
-        default=0.3,
+        default=MIN_RELEVANCE_FLOOR,
         ge=0.1,
         le=0.8,
-        description="Quality floor for expansion candidates",
+        description=(
+            "Stop expansion when the minimum top-N score falls below this floor "
+            "(N = multi_hop_min_candidates)"
+        ),
     )
 
     # Phase 1.5: Depth Exploration Parameters
