@@ -24,6 +24,9 @@ from chunkhound.domain_model.structure.readers.laravel_migrations import (
     LaravelMigrationsReader,
 )
 from chunkhound.domain_model.structure.readers.laravel_routes import LaravelRoutesReader
+from chunkhound.domain_model.structure.readers.magento_anchors import (
+    MagentoAnchorsReader,
+)
 from chunkhound.domain_model.structure.readers.magento_schema import (
     MagentoSchemaReader,
     third_party_findings,
@@ -95,6 +98,7 @@ READERS: list[Reader] = [
     TypeORMReader(),
     EloquentReader(),
     LaravelRoutesReader(),
+    MagentoAnchorsReader(),
 ]
 
 

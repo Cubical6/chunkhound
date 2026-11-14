@@ -1,0 +1,8 @@
+<routes>
+    <route url="/V1/notes" method="post">
+        <service class="Acme\Notes\Api\NoteRepositoryInterface" method="save"/>
+    </route>
+    <route url="/V1/notes/:noteId" method="GET">
+        <service class="Vendor\Notes\Api\NoteReaderInterface" method="get"/>
+    </route>
+</routes>

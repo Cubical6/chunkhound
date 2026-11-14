@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
+from tree_sitter_language_pack import get_parser
+
 from chunkhound.domain_model.structure.files import select_files
+from chunkhound.domain_model.structure.readers import _php
+from chunkhound.domain_model.structure.readers._psr4 import PHPType, file_scopes
 from chunkhound.domain_model.structure.readers._xml import Element, parse_xml
 
 if TYPE_CHECKING:
@@ -86,3 +90,101 @@ def find_modules(ctx: ReadContext, reader: str) -> tuple[Module, ...]:
             continue
         modules.append(Module(root, is_vendor(root), package_detail(ctx, root)))
     return tuple(modules)
+
+
+def module_name(ctx: ReadContext, module: Module, reader: str) -> str | None:
+    return next(
+        (
+            child.attributes.get("name")
+            for root in read_xml(ctx, f"{module.path}/etc/module.xml", reader)
+            for child in root.children
+            if child.name == "module"
+        ),
+        None,
+    )
+
+
+class ModuleResolver:
+    """Resolve PHP declarations using module names or literal Composer mappings."""
+
+    def __init__(
+        self, ctx: ReadContext, modules: tuple[Module, ...], reader: str
+    ) -> None:
+        self.ctx = ctx
+        self.files: dict[str, list[PHPType]] = {}
+        self.mappings: list[tuple[str, str, str]] = []
+        for module in modules:
+            name = module_name(ctx, module, reader)
+            mappings: list[tuple[str, str]] = []
+            path = f"{module.path}/composer.json"
+            if (ctx.project_root / path).is_file():
+                source = ctx.read(path)
+                try:
+                    data = json.loads("\n".join(source.lines)) if source else {}
+                except ValueError:
+                    data = {}
+                autoload = data.get("autoload", {}) if isinstance(data, dict) else {}
+                psr4 = autoload.get("psr-4", {}) if isinstance(autoload, dict) else {}
+                if isinstance(psr4, dict):
+                    for prefix, directories in psr4.items():
+                        for directory in (
+                            directories
+                            if isinstance(directories, list)
+                            else [directories]
+                        ):
+                            if not isinstance(directory, str):
+                                continue
+                            base = PurePosixPath(module.path) / directory
+                            if base.is_absolute() or ".." in base.parts:
+                                continue
+                            mappings.append((prefix, base.as_posix()))
+            if not mappings and name:
+                mappings.append((name.replace("_", "\\") + "\\", module.path))
+            repo = ctx.repository_of(path).key
+            self.mappings.extend((repo, prefix, base) for prefix, base in mappings)
+        self.mappings.sort(key=lambda mapping: -len(mapping[1]))
+
+    def load(self, path: str) -> list[PHPType]:
+        if path not in self.files:
+            source = self.ctx.read(path)
+            self.files[path] = []
+            if source:
+                root = (
+                    get_parser("php").parse("\n".join(source.lines).encode()).root_node
+                )
+                self.files[path] = [
+                    PHPType(
+                        _php.text(scope.node.child_by_field_name("name")),
+                        path,
+                        scope.node,
+                        scope.namespace,
+                        scope.imports,
+                    )
+                    for scope in file_scopes(path, root)
+                    if scope.node.type
+                    in {
+                        "class_declaration",
+                        "interface_declaration",
+                        "trait_declaration",
+                    }
+                ]
+        return self.files[path]
+
+    def resolve(self, name: str, origin_path: str) -> PHPType | None:
+        qualified = name.lstrip("\\")
+        repository = self.ctx.repository_of(origin_path).key
+        for repo, prefix, base in self.mappings:
+            if repo != repository or not qualified.startswith(prefix):
+                continue
+            path = str(
+                PurePosixPath(base)
+                / (qualified[len(prefix) :].replace("\\", "/") + ".php")
+            )
+            if not (self.ctx.project_root / path).is_file():
+                continue
+            if self.ctx.repository_of(path).key != repository:
+                continue
+            for item in self.load(path):
+                if item.qualified_name == qualified:
+                    return item
+        return None

@@ -1,0 +1,7 @@
+<config>
+    <router id="standard">
+        <route id="acme" frontName="acme">
+            <module name="Acme_Notes"/>
+        </route>
+    </router>
+</config>

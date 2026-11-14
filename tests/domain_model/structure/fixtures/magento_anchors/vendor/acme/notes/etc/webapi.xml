@@ -1,0 +1,5 @@
+<routes>
+    <route url="/V1/vendor-notes" method="GET">
+        <service class="Vendor\Notes\Api\NoteReaderInterface" method="get"/>
+    </route>
+</routes>

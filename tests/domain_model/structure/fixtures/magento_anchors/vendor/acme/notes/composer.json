@@ -1,0 +1,4 @@
+{
+    "name": "acme/vendor-notes",
+    "autoload": {"psr-4": {"Vendor\\Notes\\": "src/"}}
+}
