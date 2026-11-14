@@ -37,6 +37,7 @@ from chunkhound.domain_model.structure.readers.magento_schema import (
     third_party_findings,
 )
 from chunkhound.domain_model.structure.readers.nestjs import NestJSReader
+from chunkhound.domain_model.structure.readers.nextjs import NextJSReader
 from chunkhound.domain_model.structure.readers.prisma import PrismaReader
 from chunkhound.domain_model.structure.readers.sql import SQLReader
 from chunkhound.domain_model.structure.readers.typeorm import TypeORMReader
@@ -107,6 +108,7 @@ READERS: list[Reader] = [
     MagentoAnchorsReader(),
     GraphQLReader(),
     NestJSReader(),
+    NextJSReader(),
 ]
 
 

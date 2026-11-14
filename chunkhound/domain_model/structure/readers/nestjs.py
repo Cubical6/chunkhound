@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import posixpath
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Literal
@@ -91,18 +90,7 @@ def read_decorators(node: Node) -> list[_ts.Decorator]:
 
 
 def declarations(root: Node, kind: str) -> list[Node]:
-    result = _ts.declarations(root, kind)
-    if kind == "class_declaration":
-        result.extend(_ts.declarations(root, "abstract_class_declaration"))
-    elif kind == "variable_declarator":
-        for declaration_kind in ("lexical_declaration", "variable_declaration"):
-            for declaration in _ts.declarations(root, declaration_kind):
-                result.extend(
-                    child
-                    for child in declaration.named_children
-                    if child.type == "variable_declarator"
-                )
-    return sorted(result, key=lambda node: node.start_byte)
+    return _ts.module_declarations(root, kind)
 
 
 def annotation(node: Node) -> str | None:
@@ -354,22 +342,6 @@ class Registrations:
                     f"{root}.{field}",
                 )
 
-    def module(self, source: Source, module: Node) -> Source | None:
-        name = _ts.literal(module)
-        if not isinstance(name, str) or not name.startswith("."):
-            return None
-        base = posixpath.normpath(posixpath.join(posixpath.dirname(source.path), name))
-        if base.endswith(".js"):
-            base = base[:-3]
-        for candidate in (base, base + ".ts", base + "/index.ts"):
-            target = self.sources.get(candidate)
-            if target and (
-                self.ctx.repository_of(target.path).key
-                == self.ctx.repository_of(source.path).key
-            ):
-                return target
-        return None
-
     def resolve(
         self,
         source: Source,
@@ -377,63 +349,14 @@ class Registrations:
         kind: str,
         seen: set[tuple[str, str, str]] | None = None,
     ) -> tuple[Source, Node] | None:
-        if seen is None:
-            seen = set()
-        key = (source.path, symbol, kind)
-        if key in seen:
-            return None
-        seen.add(key)
-        for node in declarations(source.root, kind):
-            name = node.child_by_field_name("name")
-            if name is not None and _ts.text(name) == symbol:
-                return source, node
-            if (
-                symbol == "default"
-                and node.parent is not None
-                and any(c.type == "default" for c in node.parent.children)
-            ):
-                return source, node
-        imported = _ts.relative_import(
-            source.root, symbol, source.path, set(self.sources)
+        return _ts.resolve_symbol(
+            source,
+            symbol,
+            kind,
+            self.sources,
+            lambda path: self.ctx.repository_of(path).key,
+            seen,
         )
-        if imported:
-            path, imported_name = imported
-            target = self.sources[path]
-            if (
-                self.ctx.repository_of(path).key
-                == self.ctx.repository_of(source.path).key
-            ):
-                found = self.resolve(target, imported_name, kind, seen)
-                if found:
-                    return found
-        for statement in source.root.named_children:
-            if statement.type != "export_statement":
-                continue
-            module = statement.child_by_field_name("source")
-            export_target = (
-                self.module(source, module) if module is not None else source
-            )
-            if export_target is None:
-                continue
-            for clause in statement.named_children:
-                if clause.type != "export_clause":
-                    continue
-                for spec in clause.named_children:
-                    name = spec.child_by_field_name("name")
-                    alias = spec.child_by_field_name("alias")
-                    if name is not None and _ts.text(alias or name) == symbol:
-                        found = self.resolve(export_target, _ts.text(name), kind, seen)
-                        if found:
-                            return found
-            if (
-                module is not None
-                and symbol != "default"
-                and any(child.type == "*" for child in statement.children)
-            ):
-                found = self.resolve(export_target, symbol, kind, seen)
-                if found:
-                    return found
-        return None
 
     def dto(self, source: Source, symbol: str) -> tuple[Source, Node] | None:
         found = self.resolve(source, symbol, "class_declaration")
