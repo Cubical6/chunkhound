@@ -1,0 +1,2 @@
+CREATE TABLE team_user (id INT PRIMARY KEY, email VARCHAR(120));
+CREATE TABLE teams (id INT PRIMARY KEY, email VARCHAR(120));

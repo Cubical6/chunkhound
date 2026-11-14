@@ -58,33 +58,42 @@ def _imports(node: Node) -> dict[str, str]:
     return result
 
 
-def _types(path: str, root: Node) -> list[PHPType]:
+def file_scopes(path: str, root: Node) -> list[PHPType]:
+    """Name-resolution contexts for file-level code as well as class declarations."""
     result: list[PHPType] = []
-
-    def scope(nodes: list[Node], namespace: str = "") -> None:
-        imports: dict[str, str] = {}
-        for node in nodes:
-            if node.type == "namespace_definition":
-                namespace = _php.text(node.child_by_field_name("name"))
-                imports = {}
-                body = node.child_by_field_name("body")
-                if body is not None:
-                    scope(body.named_children, namespace)
-            elif node.type == "namespace_use_declaration":
-                imports.update(_imports(node))
-            elif node.type in {"class_declaration", "enum_declaration"}:
-                result.append(
-                    PHPType(
-                        _php.text(node.child_by_field_name("name")),
-                        path,
-                        node,
-                        namespace,
-                        imports,
+    namespace = ""
+    imports: dict[str, str] = {}
+    for node in root.named_children:
+        if node.type == "namespace_definition":
+            namespace = _php.text(node.child_by_field_name("name"))
+            imports = {}
+            body = node.child_by_field_name("body")
+            if body is not None:
+                for scope in file_scopes(path, body):
+                    result.append(
+                        PHPType("", path, scope.node, namespace, scope.imports)
                     )
-                )
-
-    scope(root.named_children)
+                continue
+        elif node.type == "namespace_use_declaration":
+            imports.update(_imports(node))
+        else:
+            result.append(PHPType("", path, node, namespace, imports))
     return result
+
+
+def _types(path: str, root: Node) -> list[PHPType]:
+    return [
+        PHPType(
+            _php.text(scope.node.child_by_field_name("name")),
+            path,
+            scope.node,
+            scope.namespace,
+            scope.imports,
+        )
+        for scope in file_scopes(path, root)
+        if scope.node.type
+        in {"class_declaration", "enum_declaration", "trait_declaration"}
+    ]
 
 
 class PSR4Resolver:
