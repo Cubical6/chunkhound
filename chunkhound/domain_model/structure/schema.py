@@ -23,6 +23,8 @@ class Column(_SchemaModel):
     mandatory: bool | None
     origin: tuple[Span, ...]
     defined_at: Span
+    # Readers may use a logical storage target instead of a physical column.
+    target: str | None = None
 
 
 class Constraint(_SchemaModel):

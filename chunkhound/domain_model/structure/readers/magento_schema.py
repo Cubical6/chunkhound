@@ -15,6 +15,10 @@ from chunkhound.domain_model.structure.readers._magento import (
     read_xml,
 )
 from chunkhound.domain_model.structure.readers._xml import Element
+from chunkhound.domain_model.structure.readers.magento_eav import (
+    apply_attribute,
+    collect_attributes,
+)
 from chunkhound.domain_model.structure.schema import (
     Column,
     Constraint,
@@ -177,9 +181,21 @@ class MagentoSchemaReader:
                 if child.name == "table"
             ]
             (vendor if module.third_party else own).extend(tables)
-        if not own:
-            return
+        attributes, unresolved = collect_attributes(ctx, modules)
+        for reason, detail, origin in unresolved:
+            ctx.findings.append(
+                Finding(
+                    kind="unresolved",
+                    subject=None,
+                    reason=reason,
+                    detail=detail,
+                    citations=(_citation(ctx, origin),),
+                )
+            )
         wanted: dict[str, set[str]] = {}
+        for attribute in attributes:
+            repo = ctx.repository_of(attribute.origin.path).key
+            wanted.setdefault(repo, set()).add(attribute.table)
         for table in own:
             repo = ctx.repository_of(table.span.path).key
             names = wanted.setdefault(repo, set())
@@ -197,6 +213,9 @@ class MagentoSchemaReader:
                 _apply(schemas[repo], table)
         for table in own:
             _apply(schemas[ctx.repository_of(table.span.path).key], table)
+        for attribute in attributes:
+            repo = ctx.repository_of(attribute.origin.path).key
+            apply_attribute(schemas[repo], attribute)
         for repo, schema in schemas.items():
             for name, merged in list(schema.tables.items()):
                 kept = []
@@ -242,6 +261,15 @@ def third_party_findings(ctx: ReadContext, model: DomainModel) -> list[Finding]:
         for table in root.children
         if table.name == "table"
     }
+    extended.update(
+        (schema.repository, table.name)
+        for schema in schemas
+        for table in schema.tables.values()
+        if any(
+            column.target and column.target.startswith("eav:")
+            for column in table.columns
+        )
+    )
     vendor_paths = {
         span.path
         for schema in schemas
