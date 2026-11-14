@@ -19,6 +19,7 @@ from chunkhound.domain_model.structure.files import (
     select_files,
 )
 from chunkhound.domain_model.structure.readers.sql import SQLReader
+from chunkhound.domain_model.structure.readers.typeorm import TypeORMReader
 from chunkhound.domain_model.structure.schema import Schema
 from chunkhound.domain_model.structure.translate import translate
 from chunkhound.services.extraction.sources import SourceVersion
@@ -75,7 +76,10 @@ class Reader(Protocol):
     def read(self, ctx: ReadContext) -> None: ...
 
 
-READERS: list[Reader] = [SQLReader()]
+READERS: list[Reader] = [
+    SQLReader(),
+    TypeORMReader(),
+]
 
 
 def _build(ctx: ReadContext) -> StructureExtraction:
