@@ -27,6 +27,7 @@ from chunkhound.domain_model.structure.schema import (
     Schema,
     Span,
     Table,
+    TableClaims,
 )
 from chunkhound.domain_model.structure.technical import technical_matches
 
@@ -90,11 +91,38 @@ def translate(
     fact_ids: dict[tuple[str, str], str] = {}
     columns: dict[tuple[str, str], dict[str, Column]] = {}
     seen_facts: set[str] = set()
-    for schema in schemas:
+    rank = {
+        "sql": 0,
+        "laravel": 1,
+        "laravel_migrations": 1,
+        "magento": 2,
+        "magento_schema": 2,
+        "prisma": 4,
+        "typeorm": 5,
+        "eloquent": 6,
+    }
+    lower: list[tuple[str, TableClaims]] = []
+    for schema in sorted(schemas, key=lambda s: rank.get(s.reader, 7)):
+        lower.extend((schema.repository, claim) for claim in schema.claims)
         for table_name, reason, span in schema.orphans:
             finding("uncertain", None, reason, table_name, (span,))
         for table in schema.tables.values():
             key = (schema.repository, table.name)
+            if key in tables:
+                lower.append(
+                    (
+                        schema.repository,
+                        TableClaims(
+                            table=table.name,
+                            span=table.defined_at,
+                            columns=table.columns,
+                            constraints=table.constraints,
+                        ),
+                    )
+                )
+                for reason, span in table.uncertain:
+                    finding("uncertain", fact_ids[key], reason, None, (span,))
+                continue
             try:
                 fid = identity.fact_type_id(schema.repository, table.name)
             except identity.EmptyKeyError:
@@ -146,6 +174,84 @@ def translate(
             if all(name in columns[key] for name in c.columns)
         )
 
+    extra_constraints: dict[tuple[str, str], list[Constraint]] = {}
+    model_spans: dict[tuple[str, str], list[tuple[str, Span]]] = {}
+    for repository, claim in lower:
+        key = (repository, claim.table)
+        if key not in tables:
+            finding(
+                "unresolved",
+                None,
+                "model_table_unknown",
+                claim.model_class or claim.table,
+                (claim.span,),
+            )
+            continue
+        table = tables[key]
+        fid = fact_ids[key]
+        if claim.model_class:
+            model_spans.setdefault(key, []).append((claim.model_class, claim.span))
+            if len(model_spans[key]) == 1:
+                tables[key] = table.model_copy(
+                    update={"model_class": claim.model_class}
+                )
+        primary = next((c for c in table.constraints if c.kind == "primary"), None)
+        for column in claim.columns:
+            previous_column = columns[key].get(column.name)
+            if previous_column is None:
+                finding(
+                    "uncertain",
+                    fid,
+                    "column_only_in_lower_source",
+                    column.name,
+                    column.origin,
+                )
+                continue
+            mandatory = (
+                True
+                if primary and column.name in primary.columns
+                else previous_column.mandatory
+            )
+            if column.mandatory is None:
+                continue
+            if mandatory != column.mandatory:
+                claims.append(
+                    DivergentClaim(
+                        subject=identity.role_id(fid, column.name),
+                        property="mandatory",
+                        value=column.mandatory,
+                        source=column.defined_at.reader,
+                        citation=citation(column.defined_at),
+                    )
+                )
+            else:
+                columns[key][column.name] = previous_column.model_copy(
+                    update={
+                        "origin": tuple(
+                            dict.fromkeys((*previous_column.origin, *column.origin))
+                        ),
+                    }
+                )
+        for constraint in claim.constraints:
+            missing = [name for name in constraint.columns if name not in columns[key]]
+            if missing:
+                for name in missing:
+                    if not any(c.name == name for c in claim.columns):
+                        finding(
+                            "uncertain",
+                            fid,
+                            "column_only_in_lower_source",
+                            name,
+                            constraint.spans,
+                        )
+                continue
+            # A lower primary key is only a uniqueness claim, not an identifier.
+            extra_constraints.setdefault(key, []).append(
+                constraint.model_copy(update={"kind": "unique"})
+                if constraint.kind == "primary"
+                else constraint
+            )
+
     concept_ids: dict[tuple[str, str], str] = {}
     seen_concepts: set[str] = set()
     for key, table in tables.items():
@@ -176,7 +282,14 @@ def translate(
         seen_concepts.add(cid)
         concepts.append(
             Concept(
-                **common(cid, key[0], table.origin or (table.defined_at,)),
+                **common(
+                    cid,
+                    key[0],
+                    (
+                        *(table.origin or (table.defined_at,)),
+                        *(s for _, s in model_spans.get(key, [])),
+                    ),
+                ),
                 term=term,
                 plural=None,
                 definition=None,
@@ -203,7 +316,14 @@ def translate(
         ]
         facts.append(
             FactType(
-                **common(fid, repository, table.origin or (table.defined_at,)),
+                **common(
+                    fid,
+                    repository,
+                    (
+                        *(table.origin or (table.defined_at,)),
+                        *(s for _, s in model_spans.get(key, [])),
+                    ),
+                ),
                 name=table.name,
                 templates=tuple(templates),
                 roles=tuple(identity.role_id(fid, n) for n in ordered_names),
@@ -214,6 +334,12 @@ def translate(
                         target=table.name,
                         citation=citation((table.origin or (table.defined_at,))[-1]),
                     ),
+                )
+                + tuple(
+                    CodeBinding(
+                        repository=repository, target=name, citation=citation(span)
+                    )
+                    for name, span in model_spans.get(key, [])
                 ),
             )
         )
@@ -254,7 +380,7 @@ def translate(
             )
         for reason, span in table.uncertain:
             finding("uncertain", fid, reason, None, (span,))
-        for constraint in constraints:
+        for constraint in (*constraints, *extra_constraints.get(key, [])):
             kind: Literal["uniqueness", "subset", "value", "other"]
             rule_name = None
             target_fid = None
@@ -355,7 +481,9 @@ def translate(
                         citation=citation(constraint.spans[0]),
                     )
                 )
-            elif kind == "value" and previous.allowed_values != rule.allowed_values:
+            elif kind == "value" and set(previous.allowed_values) != set(
+                rule.allowed_values
+            ):
                 claims.append(
                     DivergentClaim(
                         subject=identifier,

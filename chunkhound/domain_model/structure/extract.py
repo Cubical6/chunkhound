@@ -18,6 +18,7 @@ from chunkhound.domain_model.structure.files import (
     repository_paths,
     select_files,
 )
+from chunkhound.domain_model.structure.readers.eloquent import EloquentReader
 from chunkhound.domain_model.structure.readers.laravel_migrations import (
     LaravelMigrationsReader,
 )
@@ -90,6 +91,7 @@ READERS: list[Reader] = [
     MagentoSchemaReader(),
     LaravelMigrationsReader(),
     TypeORMReader(),
+    EloquentReader(),
 ]
 
 
