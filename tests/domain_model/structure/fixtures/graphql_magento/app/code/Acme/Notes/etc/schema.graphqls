@@ -1,0 +1,5 @@
+type Mutation {
+  addNote(text: String!): Note
+    @resolver(class: "Acme\\Notes\\Model\\Resolver\\AddNote")
+}
+type Note { id: ID! text: String! }

@@ -37,6 +37,7 @@ def hint(
 
 def operation_hint(method: str | None, citation: Citation) -> tuple[Hint, ...]:
     operation = {
+        "query": "read",
         "HEAD": "read",
         "GET": "read",
         "POST": "add",

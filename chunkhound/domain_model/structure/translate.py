@@ -32,6 +32,15 @@ from chunkhound.domain_model.structure.schema import (
 from chunkhound.domain_model.structure.technical import technical_matches
 
 
+def concept_term(name: str, model_class: str | None = None) -> str:
+    """Derive the concept term mechanically, shared by storage and API sources."""
+    if not model_class:
+        return name
+    term = model_class.replace("\\", ".").split(".")[-1]
+    term = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", term)
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", term).replace("_", " ").lower()
+
+
 def _check_tokens(statement: str | None) -> tuple[str, ...]:
     """Compare trivial SQL formatting without changing literals or identifiers."""
     # Open decision: DivergentClaim has no "statement" property (see plan Progress log).
@@ -136,6 +145,7 @@ def translate(
         "prisma": 4,
         "typeorm": 5,
         "eloquent": 6,
+        "graphql": 7,
     }
     lower: list[tuple[str, str, TableClaims]] = []
     table_readers: dict[tuple[str, str], str] = {}
@@ -335,13 +345,7 @@ def translate(
         }
         if primary is None or not set(primary.columns) - foreign:
             continue
-        term = table.name
-        if table.model_class:
-            term = table.model_class.replace("\\", ".").split(".")[-1]
-            term = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", term)
-            term = (
-                re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", term).replace("_", " ").lower()
-            )
+        term = concept_term(table.name, table.model_class)
         try:
             cid = identity.concept_id(key[0], term)
         except identity.EmptyKeyError:

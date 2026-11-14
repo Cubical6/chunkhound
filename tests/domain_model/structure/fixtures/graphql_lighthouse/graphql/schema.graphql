@@ -1,0 +1,33 @@
+type Query {
+  teams: [Team!]! @all
+  team: Team @find(model: "Team")
+  firstTeam: Team @first
+  pagedTeams: TeamPaginator @paginate
+  database: DatabaseConnection @find
+  custom: Team @field(resolver: "Custom@handle")
+  invoked: Team @field(resolver: "Custom")
+  defaultTeam: Team
+  search(input: TeamInput @rules(apply: ["filled"]), state: State, title: String! @rules(apply: ["required"]), limit: Int): [Team!] @all
+}
+type Mutation {
+  createTeam(input: TeamInput!): Team @create
+  updateTeam(input: TeamInput!): Team @update(model: "App\\Models\\Team")
+  upsertTeam(input: TeamInput!): Team @upsert
+  deleteTeam(id: ID!): Team @delete
+  defaultTeam(input: TeamInput): Team
+  hello: Team @field(resolver: "DefaultTeam@__invoke")
+}
+type Subscription { changes: Team @field(resolver: "App\\GraphQL\\Queries\\Custom") }
+type Team { id: ID! name: String! state: State }
+type TeamPaginator { data: [Team!]! }
+type TeamMember { member_key: ID! name: String! members: [TeamMember!]! owner: TeamMember labels: [String!]! }
+type CompositeMember { id: ID! }
+type Membership { id: ID! member: TeamMember! composite: CompositeMember }
+input TeamInput {
+  name: String! @rules(apply: ["required", "min:2"])
+  state: State
+  address: AddressInput
+}
+input AddressInput { city: String! deeper: DeepInput }
+input DeepInput { secret: String! }
+enum State { OPEN CLOSED }
