@@ -2,8 +2,9 @@
 
 import ast
 import posixpath
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol, TypeVar
 
 from tree_sitter import Node
 from tree_sitter_language_pack import get_parser
@@ -20,9 +21,13 @@ def text(node: Node) -> str:
     return node.text.decode("utf-8") if node.text else ""
 
 
-def parse(source: str, path: str) -> Node:
-    language: Literal["tsx", "typescript"] = (
-        "tsx" if path.endswith(".tsx") else "typescript"
+def parse(source: str, path: str, *, javascript: bool = False) -> Node:
+    language: Literal["javascript", "tsx", "typescript"] = (
+        "javascript"
+        if javascript
+        else "tsx"
+        if path.endswith((".tsx", ".jsx"))
+        else "typescript"
     )
     return get_parser(language).parse(source.encode("utf-8")).root_node
 
@@ -214,11 +219,134 @@ def relative_import(
             base,
             base + ".ts",
             base + ".tsx",
+            base + ".js",
+            base + ".jsx",
             base + "/index.ts",
             base + "/index.tsx",
+            base + "/index.js",
+            base + "/index.jsx",
         ):
             if candidate in paths:
                 return candidate, imported
+    return None
+
+
+class ModuleSource(Protocol):
+    path: str
+    root: Node
+
+
+SourceT = TypeVar("SourceT", bound=ModuleSource)
+
+
+def module_declarations(root: Node, kind: str) -> list[Node]:
+    result = declarations(root, kind)
+    if kind == "class_declaration":
+        result.extend(declarations(root, "abstract_class_declaration"))
+    elif kind == "variable_declarator":
+        for declaration_kind in ("lexical_declaration", "variable_declaration"):
+            for declaration in declarations(root, declaration_kind):
+                result.extend(
+                    child
+                    for child in declaration.named_children
+                    if child.type == "variable_declarator"
+                )
+    return sorted(result, key=lambda node: node.start_byte)
+
+
+def resolve_symbol(
+    source: SourceT,
+    symbol: str,
+    kind: str,
+    sources: Mapping[str, SourceT],
+    repository: Callable[[str], str],
+    seen: set[tuple[str, str, str]] | None = None,
+) -> tuple[SourceT, Node] | None:
+    """Follow local declarations, relative imports and re-exports, cycle safely."""
+    if seen is None:
+        seen = set()
+    key = (source.path, symbol, kind)
+    if key in seen:
+        return None
+    seen.add(key)
+    for node in module_declarations(source.root, kind):
+        name = node.child_by_field_name("name")
+        if name is not None and text(name) == symbol:
+            return source, node
+        if (
+            symbol == "default"
+            and node.parent is not None
+            and any(c.type == "default" for c in node.parent.children)
+        ):
+            return source, node
+
+    def follow(target: SourceT, name: str) -> tuple[SourceT, Node] | None:
+        if repository(target.path) != repository(source.path):
+            return None
+        return resolve_symbol(target, name, kind, sources, repository, seen)
+
+    imported = relative_import(source.root, symbol, source.path, set(sources))
+    if imported:
+        found = follow(sources[imported[0]], imported[1])
+        if found:
+            return found
+    for statement in source.root.named_children:
+        if statement.type != "export_statement":
+            continue
+        module = statement.child_by_field_name("source")
+        if symbol == "default":
+            value = statement.child_by_field_name("value")
+            if (
+                value is not None
+                and value.type == "identifier"
+                and any(c.type == "default" for c in statement.children)
+            ):
+                found = follow(source, text(value))
+                if found:
+                    return found
+        target = source
+        if module is not None:
+            module_name = literal(module)
+            if not isinstance(module_name, str) or not module_name.startswith("."):
+                continue
+            base = posixpath.normpath(
+                posixpath.join(posixpath.dirname(source.path), module_name)
+            )
+            if base.endswith(".js"):
+                base = base[:-3]
+            candidates = (
+                base,
+                base + ".ts",
+                base + ".tsx",
+                base + ".js",
+                base + ".jsx",
+                base + "/index.ts",
+                base + "/index.tsx",
+                base + "/index.js",
+                base + "/index.jsx",
+            )
+            resolved = next((sources[p] for p in candidates if p in sources), None)
+            if resolved is None:
+                continue
+            target = resolved
+        for clause in statement.named_children:
+            if clause.type != "export_clause":
+                continue
+            for spec in clause.named_children:
+                name_node = spec.child_by_field_name("name")
+                alias = spec.child_by_field_name("alias")
+                if name_node is not None and text(alias or name_node) == symbol:
+                    found = follow(target, text(name_node))
+                    if found:
+                        return found
+        if (
+            module is not None
+            and symbol != "default"
+            and any(c.type == "*" for c in statement.children)
+        ):
+            found = follow(target, symbol)
+            if found:
+                return found
     return None
 
 
