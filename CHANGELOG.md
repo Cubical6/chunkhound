@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **MCP search strategy setting** — `mcp.search_strategy` (`CHUNKHOUND_MCP__SEARCH_STRATEGY`) selects `auto`, `single_hop` or `multi_hop` for semantic queries of the MCP `search` tool on both transports. With `single_hop`, a configured reranker is used by `code_research` only and plain searches make no rerank requests. The default `auto` keeps the existing behavior.
+
 ## [6.1.0] - 2026-10-20
 
 ### Added
