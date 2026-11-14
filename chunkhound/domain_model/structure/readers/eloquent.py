@@ -121,26 +121,29 @@ class EloquentReader:
             if not chain:
                 return None
             props = properties(chain)
-            explicit = (
-                _php.literal_text(props["$table"][1]) if "$table" in props else None
-            )
             name = snake_case(item.name)
             repo = ctx.repository_of(item.path).key
             available = {
                 name for s in ctx.schemas if s.repository == repo for name in s.tables
             }
+            if "$table" in props:
+                explicit = _php.literal_text(props["$table"][1])
+                return explicit if explicit in available else None
             return next(
-                (
-                    n
-                    for n in (explicit, name, _php.regular_plural(name))
-                    if n in available
-                ),
+                (n for n in (name, _php.regular_plural(name)) if n in available),
                 None,
             )
 
         for item in types:
             chain = lineage(item)
-            if not chain:
+            if not chain or any(
+                c.type == "abstract_modifier" for c in item.node.named_children
+            ):
+                continue
+            props = properties(chain)
+            if "$table" in props and _php.literal_text(props["$table"][1]) is None:
+                owner, value = props["$table"]
+                unresolved(owner, value, "non_literal_argument", "$table")
                 continue
             table = table_for(item)
             if table is None:
@@ -151,10 +154,6 @@ class EloquentReader:
                 schemas[repository] = Schema(self.name, repository)
                 ctx.schemas.append(schemas[repository])
             constraints: list[Constraint] = []
-            props = properties(chain)
-            if "$table" in props and _php.literal_text(props["$table"][1]) is None:
-                owner, value = props["$table"]
-                unresolved(owner, value, "non_literal_argument", "$table")
             methods: dict[str, tuple[PHPType, Node]] = {}
             for owner in chain:
                 body = owner.node.child_by_field_name("body")
@@ -182,13 +181,25 @@ class EloquentReader:
                     if target is None or target_table is None:
                         unresolved(owner, call, "model_table_unknown", name)
                         continue
-                    column = (
-                        _php.literal_text(args[1])
-                        if len(args) > 1
-                        else snake_case(target.name) + "_id"
+                    target_props = properties(lineage(target))
+                    target_key = (
+                        _php.literal_text(target_props["$primaryKey"][1])
+                        if "$primaryKey" in target_props
+                        else "id"
                     )
-                    owner_key = _php.literal_text(args[2]) if len(args) > 2 else None
-                    if column is None or (len(args) > 2 and owner_key is None):
+                    owner_key = (
+                        _php.literal_text(args[2]) if len(args) > 2 else target_key
+                    )
+                    method_name = _php.text(method.child_by_field_name("name"))
+                    default_column = (
+                        snake_case(method_name) + "_" + target_key
+                        if target_key
+                        else None
+                    )
+                    column = (
+                        _php.literal_text(args[1]) if len(args) > 1 else default_column
+                    )
+                    if column is None or owner_key is None:
                         unresolved(owner, call, "non_literal_argument", "belongsTo")
                         continue
                     constraints.append(
@@ -229,8 +240,12 @@ class EloquentReader:
                         enum = resolver.resolve(name, owner)
                         if enum is not None and enum.node.type != "enum_declaration":
                             continue
+                    if enum is None or not any(
+                        c.type == "primitive_type" for c in enum.node.named_children
+                    ):
+                        continue
                     column = _php.literal_text(column_node)
-                    if column is None or enum is None:
+                    if column is None:
                         unresolved(owner, element, "non_literal_argument", key)
                         continue
                     values: list[str] = []

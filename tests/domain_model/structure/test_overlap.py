@@ -12,6 +12,38 @@ from chunkhound.domain_model.structure.contract import (
 from chunkhound.domain_model.structure.extract import build_structure
 
 
+def test_eav_supplements_higher_storage_without_losing_its_keys(
+    extract_fixture: Callable[[str], StructureExtraction],
+) -> None:
+    result = extract_fixture("overlap_eav")
+    (fact,) = result.model.fact_types
+    assert fact.name == "catalog_product_entity" and fact.identifies is not None
+    roles = {r.name: r for r in result.model.roles}
+    assert set(roles) == {"entity_id", "sku", "external_code", "color"}
+    assert fact.roles[0] == roles["entity_id"].id
+    assert "catalog_product_entity(<entity_id>) has color <color>" in fact.templates
+    for name in ("external_code", "color"):
+        role = roles[name]
+        assert role.bindings[0].target == "eav:catalog_product." + name
+        assert role.citations[0].path.endswith("AddAttributes.php")
+    unique = next(
+        r
+        for r in result.model.validation_rules
+        if r.rule_kind == "uniqueness" and r.roles == (roles["external_code"].id,)
+    )
+    assert unique.citations[0].path.endswith("AddAttributes.php")
+    value = next(r for r in result.model.validation_rules if r.rule_kind == "value")
+    assert value.roles == (roles["color"].id,) and value.allowed_values == (
+        "red",
+        "blue",
+    )
+    assert value.citations[0].path.endswith("Model/Source/Color.php")
+    assert not any(
+        f.reason in {"entity_table_missing", "column_only_in_lower_source"}
+        for f in result.findings
+    )
+
+
 def test_storage_claims_agree_add_and_diverge(
     extract_fixture: Callable[[str], StructureExtraction],
 ) -> None:
@@ -67,6 +99,69 @@ return new class {
     assert claim.subject == required.id
     assert claim.property == "mandatory" and claim.value is False
     assert claim.source == "laravel_migrations"
+
+
+def test_laravel_dump_primary_keys_and_claim_provenance(tmp_path: Path) -> None:
+    (tmp_path / "schema.sql").write_text(
+        "CREATE TABLE teams (id INT PRIMARY KEY);\n"
+        "CREATE TABLE groups (id INT PRIMARY KEY);\n"
+        "CREATE TABLE items (id INT PRIMARY KEY, required TEXT NOT NULL, "
+        "status ENUM('active','pending'), team_id INT, "
+        "FOREIGN KEY(team_id) REFERENCES teams(id));\n"
+    )
+    dump = tmp_path / "database/schema/mysql-schema.sql"
+    dump.parent.mkdir(parents=True)
+    dump.write_text(
+        "CREATE TABLE items (id INT PRIMARY KEY, required TEXT, "
+        "status ENUM('active'), team_id INT, "
+        "FOREIGN KEY(team_id) REFERENCES groups(id));\n"
+    )
+    repo = RepositoryRef(key="root", path=".", commit="1" * 40, dirty=False)
+    result = build_structure(tmp_path, (repo,))
+    identifier = next(r for r in result.model.roles if r.id == "role:root/items/id")
+    assert identifier.mandatory is True and len(identifier.citations) == 2
+    assert len(result.divergent_claims) == 3
+    assert {c.property for c in result.divergent_claims} == {
+        "mandatory",
+        "allowed_values",
+        "superset",
+    }
+    assert all(c.source == "laravel_migrations" for c in result.divergent_claims)
+    assert all(
+        c.citation.path == "database/schema/mysql-schema.sql"
+        for c in result.divergent_claims
+    )
+    assert not any(c.subject == identifier.id for c in result.divergent_claims)
+
+
+@pytest.mark.parametrize(
+    "lower_check,equal",
+    [
+        ("((amount > 0 and amount < 10))", True),
+        ("amount   >  0 AND\n amount < 10", True),
+        ("amount >= 0 AND amount < 10", False),
+    ],
+)
+def test_lower_checks_only_cite_equivalent_existing_rule(
+    tmp_path: Path, lower_check: str, equal: bool
+) -> None:
+    (tmp_path / "schema.sql").write_text(
+        "CREATE TABLE items (id INT PRIMARY KEY, amount INT, "
+        "CONSTRAINT bounds CHECK (amount > 0 AND amount < 10));\n"
+    )
+    dump = tmp_path / "database/schema/mysql-schema.sql"
+    dump.parent.mkdir(parents=True)
+    dump.write_text(
+        "CREATE TABLE items (id INT PRIMARY KEY, amount INT, "
+        f"CONSTRAINT lower_bounds CHECK ({lower_check}));\n"
+    )
+    repo = RepositoryRef(key="root", path=".", commit="1" * 40, dirty=False)
+    result = build_structure(tmp_path, (repo,))
+    checks = [r for r in result.model.validation_rules if r.rule_kind == "other"]
+    assert len(checks) == 1
+    assert checks[0].name == "bounds"
+    assert len(checks[0].citations) == (2 if equal else 1)
+    assert not result.findings and not result.divergent_claims
 
 
 SOURCES = [
