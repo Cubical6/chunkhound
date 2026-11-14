@@ -27,6 +27,7 @@ from chunkhound.domain_model.structure.readers.magento_schema import (
 )
 from chunkhound.domain_model.structure.readers.prisma import PrismaReader
 from chunkhound.domain_model.structure.readers.sql import SQLReader
+from chunkhound.domain_model.structure.readers.typeorm import TypeORMReader
 from chunkhound.domain_model.structure.schema import Schema
 from chunkhound.domain_model.structure.translate import translate
 from chunkhound.services.extraction.sources import SourceVersion
@@ -88,6 +89,7 @@ READERS: list[Reader] = [
     PrismaReader(),
     MagentoSchemaReader(),
     LaravelMigrationsReader(),
+    TypeORMReader(),
 ]
 
 
