@@ -6,6 +6,7 @@ from typing import Protocol
 
 from chunkhound.core.config.config import Config
 from chunkhound.domain_model.identity import repository_key
+from chunkhound.domain_model.loader import COLLECTIONS
 from chunkhound.domain_model.model import Citation
 from chunkhound.domain_model.structure.anchors import (
     citation_key,
@@ -62,6 +63,7 @@ class ReadContext:
     findings: list[Finding] = field(default_factory=list)
     anchors: list[Anchor] = field(default_factory=list)
     read_paths: set[str] = field(default_factory=set)
+    last_read_path: str | None = None
     schemas: list[Schema] = field(default_factory=list)
 
     _repository_prefixes: tuple[tuple[PurePosixPath, RepositoryRef], ...] = field(
@@ -84,6 +86,7 @@ class ReadContext:
         raise ValueError(f"No declared repository for source: {path}")
 
     def read(self, path: str) -> SourceVersion | None:
+        self.last_read_path = path
         self.read_paths.add(path)
         return read_file(
             self.project_root, path, self.repository_of(path), self.findings
@@ -117,13 +120,14 @@ def _build(ctx: ReadContext) -> StructureExtraction:
         ctx.paths = select_files(ctx.project_root, reader.patterns)
         if not ctx.paths:
             continue
+        ctx.last_read_path = None
         try:
             reader.read(ctx)
         except Exception:
             # No guessed output or exception text (which may contain absolute paths).
-            # Attribute the failed reader to its first selected source.
+            # Prefer the actual source being read over the selection fallback.
             if ctx.paths:
-                path = ctx.paths[0]
+                path = ctx.last_read_path or ctx.paths[0]
                 repo = ctx.repository_of(path)
                 ctx.findings.append(
                     Finding(
@@ -148,6 +152,17 @@ def _build(ctx: ReadContext) -> StructureExtraction:
     ctx.findings.extend(findings)
     ctx.findings.extend(third_party_findings(ctx, model))
     anchors = finalize_anchors(ctx.anchors, ctx.schemas, model)
+    subjects = {
+        element.id
+        for collection in COLLECTIONS
+        for element in getattr(model, collection)
+    } | {anchor.id for anchor in anchors}
+    findings_with_valid_subjects = [
+        finding
+        if finding.subject is None or finding.subject in subjects
+        else finding.model_copy(update={"subject": None})
+        for finding in ctx.findings
+    ]
     return StructureExtraction(
         schema_version=1,
         repositories=ctx.repositories,
@@ -155,7 +170,7 @@ def _build(ctx: ReadContext) -> StructureExtraction:
         anchors=anchors,
         findings=tuple(
             sorted(
-                set(unresolved_handler_findings(ctx.findings, anchors)),
+                set(unresolved_handler_findings(findings_with_valid_subjects, anchors)),
                 key=lambda finding: (
                     finding.kind,
                     finding.subject or "",
@@ -198,17 +213,18 @@ def extract_structure(
                 dirty=False,
             )
         )
+    missing_commits: set[str] = set()
     for index, repo in enumerate(repositories):
         try:
             result = run_git(
                 ["rev-parse", "--verify", "HEAD"], project_root / repo.path
             )
-        except GitCommandError as exc:
-            raise StructureExtractionError(
-                "repository_without_commit", repo.path
-            ) from exc
+        except GitCommandError:
+            missing_commits.add(repo.key)
+            continue
         if result.returncode or len(result.stdout.strip()) != 40:
-            raise StructureExtractionError("repository_without_commit", repo.path)
+            missing_commits.add(repo.key)
+            continue
         repositories[index] = repo.model_copy(update={"commit": result.stdout.strip()})
     ctx = ReadContext(project_root, tuple(repositories), config)
     extraction = _build(ctx)
@@ -219,6 +235,8 @@ def extract_structure(
             if ctx.repository_of(path).key == repo.key
         )
         if paths:
+            if repo.key in missing_commits:
+                raise StructureExtractionError("repository_without_commit", repo.path)
             try:
                 status = run_git(
                     [
@@ -235,4 +253,12 @@ def extract_structure(
                 # If status is unavailable, we cannot establish a clean source state.
                 dirty = True
             repositories[index] = repo.model_copy(update={"dirty": dirty})
-    return extraction.model_copy(update={"repositories": tuple(repositories)})
+    # Keep empty Git repositories for the existing discovery contract, but do not
+    # expose an unused workspace fallback with a fabricated commit.
+    return extraction.model_copy(
+        update={
+            "repositories": tuple(
+                repo for repo in repositories if repo.key not in missing_commits
+            )
+        }
+    )

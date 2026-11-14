@@ -61,9 +61,11 @@ def _name(node: Node) -> str:
 
 
 def _walk(node: Node) -> Iterator[Node]:
-    yield node
-    for child in node.named_children:
-        yield from _walk(child)
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        yield current
+        stack.extend(reversed(current.named_children))
 
 
 def _parse(source: bytes) -> Node:
@@ -608,7 +610,7 @@ class _GraphQL:
                 columns.append(
                     Column(
                         name=field_name,
-                        datatype=type_text,
+                        datatype=type_text.replace("!", ""),
                         mandatory=type_text.rstrip().endswith("!"),
                         origin=(span,),
                         defined_at=span,

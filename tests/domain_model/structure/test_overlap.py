@@ -70,6 +70,28 @@ def test_storage_claims_agree_add_and_diverge(
     assert role.datatype == "varchar(30)"
 
 
+def test_lower_model_name_links_graphql_to_storage(tmp_path: Path) -> None:
+    (tmp_path / "schema.sql").write_text(
+        "CREATE TABLE team_members (id int PRIMARY KEY, name varchar(10) NOT NULL);"
+    )
+    (tmp_path / "schema.prisma").write_text(
+        'model TeamMember {\n id Int @id\n name String\n @@map("team_members")\n}\n'
+    )
+    (tmp_path / "schema.graphql").write_text("type TeamMember { id: ID! name: String }")
+    repo = RepositoryRef(key="root", path=".", commit="1" * 40, dirty=False)
+    result = build_structure(tmp_path, (repo,))
+    (fact,) = result.model.fact_types
+    (concept,) = result.model.concepts
+    assert fact.name == "team_members" and fact.identifies == concept.id
+    assert concept.term == "team member"
+    assert any(binding.target == "TeamMember" for binding in fact.bindings)
+    identifier = next(role for role in result.model.roles if role.name == "id")
+    assert "schema.graphql" in {c.path for c in identifier.citations}
+    (claim,) = result.divergent_claims
+    assert claim.source == "graphql" and claim.subject.endswith("/name")
+    assert claim.property == "mandatory" and claim.value is False
+
+
 def test_lower_mandatory_claim_preserves_storage_authority(tmp_path: Path) -> None:
     (tmp_path / "schema.sql").write_text(
         "CREATE TABLE items (id BIGINT PRIMARY KEY, "
@@ -207,22 +229,28 @@ return new class {
 ]
 
 
-def test_lower_source_does_not_fill_unknown_storage_mandatory(tmp_path: Path) -> None:
+@pytest.mark.parametrize("optional", [False, True])
+def test_lower_source_fills_unknown_storage_mandatory(
+    tmp_path: Path, optional: bool
+) -> None:
     for path, content in SOURCES[2].items():
         target = tmp_path / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content.replace("magento_only", "shared"))
     (tmp_path / "schema.prisma").write_text(
-        'model Item {\n id Int @id\n shared String\n @@map("items")\n}\n'
+        "model Item {\n id Int @id\n shared String"
+        + ("?" if optional else "")
+        + '\n @@map("items")\n}\n'
     )
     repo = RepositoryRef(key="root", path=".", commit="1" * 40, dirty=False)
     result = build_structure(tmp_path, (repo,))
     shared = next(r for r in result.model.roles if r.name == "shared")
-    assert shared.mandatory is None
-    (claim,) = result.divergent_claims
-    assert claim.subject == shared.id
-    assert claim.property == "mandatory" and claim.value is True
-    assert claim.source == "prisma"
+    assert shared.mandatory is (not optional)
+    assert [c.path for c in shared.citations] == [
+        "app/code/Acme/Notes/etc/db_schema.xml",
+        "schema.prisma",
+    ]
+    assert not result.divergent_claims
 
 
 @pytest.mark.parametrize(
