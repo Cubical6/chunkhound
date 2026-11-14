@@ -44,6 +44,14 @@ class MCPConfig(BaseModel):
         default="stdio", description="Transport type for MCP server"
     )
 
+    search_strategy: Literal["auto", "single_hop", "multi_hop"] = Field(
+        default="auto",
+        description=(
+            "MCP semantic search strategy: auto uses multi-hop when the embedding "
+            "provider supports reranking; single_hop and multi_hop force that strategy"
+        ),
+    )
+
     # HTTP transport settings
     host: str = Field(
         default="127.0.0.1", description="Host to bind the HTTP transport to"
@@ -131,6 +139,8 @@ class MCPConfig(BaseModel):
 
         if transport := os.getenv("CHUNKHOUND_MCP__TRANSPORT"):
             config["transport"] = transport
+        if search_strategy := os.getenv("CHUNKHOUND_MCP__SEARCH_STRATEGY"):
+            config["search_strategy"] = search_strategy
         if host := os.getenv("CHUNKHOUND_MCP__HOST"):
             config["host"] = host
         if port_str := os.getenv("CHUNKHOUND_MCP__PORT"):

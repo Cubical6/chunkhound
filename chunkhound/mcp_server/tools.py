@@ -702,12 +702,14 @@ async def search_impl(
     commit_hash: str | None = None,
     last_n_commits: int | None = None,
     vector_source: str = "diff",
+    config: Config | None = None,
 ) -> SearchResponse:
     """Unified search dispatching to regex or semantic based on type.
 
     Args:
         services: Database services bundle
         embedding_manager: Embedding manager (required for semantic type)
+        config: Application configuration controlling MCP semantic search strategy
         type: Search mode — "regex" for exact pattern matching, "semantic" for meaning-based similarity
         query: For regex: a regex pattern like "def authenticate" or "class.*Handler". For semantic: a natural language concept like "retry logic" or "database connection pooling"
         path: Optional relative subdirectory to restrict search scope, e.g. "src/auth" or "lib/payments" (no leading slash)
@@ -765,6 +767,8 @@ async def search_impl(
         except ValueError:
             raise ValueError("No default embedding provider configured.")
 
+        strategy = config.mcp.search_strategy if config is not None else "auto"
+
         # Perform semantic search
         results, pagination = await services.search_service.search_semantic(
             query=query,
@@ -773,6 +777,7 @@ async def search_impl(
             provider=provider_name,
             model=model_name,
             path_filter=path,
+            force_strategy=None if strategy == "auto" else strategy,
         )
     else:  # regex
         # Perform regex search; pass query so results are scored by cosine similarity
