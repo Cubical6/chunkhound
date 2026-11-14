@@ -7,7 +7,11 @@ from typing import Protocol
 from chunkhound.core.config.config import Config
 from chunkhound.domain_model.identity import repository_key
 from chunkhound.domain_model.model import Citation
-from chunkhound.domain_model.structure.anchors import citation_key, finalize_anchors
+from chunkhound.domain_model.structure.anchors import (
+    citation_key,
+    finalize_anchors,
+    unresolved_handler_findings,
+)
 from chunkhound.domain_model.structure.contract import (
     Anchor,
     Finding,
@@ -32,6 +36,7 @@ from chunkhound.domain_model.structure.readers.magento_schema import (
     MagentoSchemaReader,
     third_party_findings,
 )
+from chunkhound.domain_model.structure.readers.nestjs import NestJSReader
 from chunkhound.domain_model.structure.readers.prisma import PrismaReader
 from chunkhound.domain_model.structure.readers.sql import SQLReader
 from chunkhound.domain_model.structure.readers.typeorm import TypeORMReader
@@ -101,6 +106,7 @@ READERS: list[Reader] = [
     LaravelRoutesReader(),
     MagentoAnchorsReader(),
     GraphQLReader(),
+    NestJSReader(),
 ]
 
 
@@ -139,14 +145,15 @@ def _build(ctx: ReadContext) -> StructureExtraction:
     )
     ctx.findings.extend(findings)
     ctx.findings.extend(third_party_findings(ctx, model))
+    anchors = finalize_anchors(ctx.anchors, ctx.schemas, model)
     return StructureExtraction(
         schema_version=1,
         repositories=ctx.repositories,
         model=model,
-        anchors=finalize_anchors(ctx.anchors, ctx.schemas, model),
+        anchors=anchors,
         findings=tuple(
             sorted(
-                set(ctx.findings),
+                set(unresolved_handler_findings(ctx.findings, anchors)),
                 key=lambda finding: (
                     finding.kind,
                     finding.subject or "",
