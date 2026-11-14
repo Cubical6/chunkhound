@@ -49,12 +49,23 @@ class Table(_SchemaModel):
     origin: tuple[Span, ...] = ()
 
 
+class TableClaims(_SchemaModel):
+    """Lower-source assertions, never a request to create storage elements."""
+
+    table: str
+    span: Span
+    model_class: str | None = None
+    columns: tuple[Column, ...] = ()
+    constraints: tuple[Constraint, ...] = ()
+
+
 @dataclass
 class Schema:
     reader: str
     repository: str
     tables: dict[str, Table] = field(default_factory=dict)
     orphans: list[tuple[str, str, Span]] = field(default_factory=list)
+    claims: list[TableClaims] = field(default_factory=list)
 
     def mark_uncertain(
         self, name: str, span: Span, reason: str = "unparsed_statement"
