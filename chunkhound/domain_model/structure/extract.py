@@ -7,6 +7,7 @@ from typing import Protocol
 from chunkhound.core.config.config import Config
 from chunkhound.domain_model.identity import repository_key
 from chunkhound.domain_model.model import Citation
+from chunkhound.domain_model.structure.anchors import citation_key, finalize_anchors
 from chunkhound.domain_model.structure.contract import (
     Anchor,
     Finding,
@@ -22,6 +23,7 @@ from chunkhound.domain_model.structure.readers.eloquent import EloquentReader
 from chunkhound.domain_model.structure.readers.laravel_migrations import (
     LaravelMigrationsReader,
 )
+from chunkhound.domain_model.structure.readers.laravel_routes import LaravelRoutesReader
 from chunkhound.domain_model.structure.readers.magento_schema import (
     MagentoSchemaReader,
     third_party_findings,
@@ -92,6 +94,7 @@ READERS: list[Reader] = [
     LaravelMigrationsReader(),
     TypeORMReader(),
     EloquentReader(),
+    LaravelRoutesReader(),
 ]
 
 
@@ -134,8 +137,20 @@ def _build(ctx: ReadContext) -> StructureExtraction:
         schema_version=1,
         repositories=ctx.repositories,
         model=model,
-        anchors=tuple(ctx.anchors),
-        findings=tuple(ctx.findings),
+        anchors=finalize_anchors(ctx.anchors, ctx.schemas, model),
+        findings=tuple(
+            sorted(
+                set(ctx.findings),
+                key=lambda finding: (
+                    finding.kind,
+                    finding.subject or "",
+                    finding.reason,
+                    finding.detail or "",
+                    tuple(citation_key(c) for c in finding.citations),
+                    finding.model_dump_json(),
+                ),
+            )
+        ),
         divergent_claims=tuple(claims),
     )
 

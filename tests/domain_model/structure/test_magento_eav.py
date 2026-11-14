@@ -104,9 +104,9 @@ def test_literal_custom_entity_has_unknown_table(tmp_path: Path) -> None:
         )
     )
     result = _build(tmp_path)
-    assert [(f.reason, f.detail) for f in result.findings if f.kind == "unresolved"] == [
-        ("model_table_unknown", "my_custom_entity")
-    ]
+    assert [
+        (f.reason, f.detail) for f in result.findings if f.kind == "unresolved"
+    ] == [("model_table_unknown", "my_custom_entity")]
 
 
 def test_missing_entity_table_is_uncertain_without_key_roles(tmp_path: Path) -> None:
