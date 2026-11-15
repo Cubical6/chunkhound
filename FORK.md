@@ -9,7 +9,13 @@ describe upstream, this file wins.
 
 - `origin` is the fork. `upstream` is `chunkhound/chunkhound` and is read-only.
 - `main` on the fork is upstream's `main` plus the fork's changes. Never rebase
-  or force-push it.
+  or force-push it, and never push to it directly: every change, also a sync
+  or a one-line docs fix, goes through a pull request.
+- GitHub enforces this with the ruleset `main: PR only`: a pull request is
+  required (no approval needed), the `tests (…)` jobs of `CI` must pass, and
+  force pushes and deletion are blocked. An admin can bypass the checks only
+  when merging a pull request, for example a sync whose failures also occur on
+  upstream. Do not change or disable the ruleset without the user's approval.
 - Work on a branch cut from `origin/main` (`feat/…`, `fix/…`, `docs/…`,
   `ci/…`) and open the pull request against `main` of the fork.
 - Pass `-R Cubical6/chunkhound` to every `gh` command that creates or changes
@@ -134,16 +140,34 @@ Upstream's release process does not apply here. In the fork:
   them disabled.
 
 The version comes from the last upstream tag plus the commits since, for
-example `6.1.1.dev187+g221d109fe`. Any tag that contains a digit changes that
-calculation, so the fork's tags have no digits.
+example `6.1.1.dev187+g221d109fe`. Only upstream-style `v<digit>…` tags count:
+`pyproject.toml` (`[tool.hatch.version] raw-options`) excludes `fork-*` tags,
+and `fork-release.yml` fails if a `fork-v…` tag would change the version.
 
 | Channel | Made by | Contents |
 |---|---|---|
-| `fork-latest` | `fork-release.yml`, on every push to `main` | The newest build of `main`. |
-| `fork-stable` | `fork-promote.yml`, started by hand | A copy of a `fork-latest` build that was checked. |
+| `fork-latest` | `fork-release.yml`, on every push to `main` | The newest build of `main`, a prerelease that moves with every merge. |
+| `fork-v<version>` (stable) | `fork-promote.yml`, started by hand and approved in the `fork-stable` environment | A copy of a checked `fork-latest` build. Each promotion adds a new release; the newest is the repository's Latest release. |
+
+Stable tags look like `fork-v6.1.1.dev198`: the public version of the build,
+without the `+g…` part. The ruleset `fork release tags immutable` blocks moving
+or deleting `fork-v*` tags, so every stable release stays available. To find
+the current stable release:
+
+```bash
+gh release view -R Cubical6/chunkhound --json tagName,name --jq '.tagName, .name'
+```
 
 Each release's notes list the `CHANGELOG.fork.md` entries and the merges that
-are new since the current `fork-stable` (`scripts/fork_release_notes.py`).
+are new since the last stable release (`scripts/fork_release_notes.py`).
+
+### Upstream watch
+
+`fork-upstream-watch.yml` runs every day. When `main` is behind upstream's
+`main`, it keeps one open issue labelled `upstream-sync` up to date with the
+number of commits behind, the upstream releases not merged yet and what came
+in. It closes the issue once the fork has caught up. The issue is a reminder,
+not a decision: sync according to "Syncing upstream" above.
 
 ### `fork-latest`: every merge to `main`
 
@@ -152,7 +176,7 @@ can be installed: the tests from `AGENTS.md` pass and no phase of a larger
 plan is half done. After a merge, check that the `Fork rolling release` run
 succeeded. If it failed, repairing it comes before other work.
 
-### `fork-stable`: when to promote
+### Stable: when to promote
 
 Propose a promotion to the user when all of these hold:
 
@@ -169,8 +193,8 @@ Propose a promotion to the user when all of these hold:
 4. No open fork issue has the label `release-blocker`.
 5. No sync pull request is open and no integration branch is partly merged.
 
-State the version, the commit and what changed since the current
-`fork-stable`. The notes of the `fork-latest` release already list that:
+State the version, the commit and what changed since the last stable
+release. The notes of the `fork-latest` release already list that:
 
 ```bash
 gh release view fork-latest -R Cubical6/chunkhound --json name,body --jq '.name, .body'
@@ -184,7 +208,13 @@ Promote only after the user agrees:
 gh workflow run fork-promote.yml -R Cubical6/chunkhound -f commit=<full sha of fork-latest>
 ```
 
-The workflow refuses when `commit` is not the commit `fork-latest` was built
-from, so a build that arrived in the meantime is never promoted by accident.
-Older builds are not kept. To go back, revert on `main` and promote the build
-that follows.
+The run waits for approval in the `fork-stable` environment: approve it in
+the run's page on GitHub (Review deployments) or with `gh run view <id> -R
+Cubical6/chunkhound --web`. The workflow refuses when `commit` is not the
+commit `fork-latest` was built from, and when a release for that version
+already exists, so a build that arrived in the meantime is never promoted by
+accident and a stable release is never overwritten.
+
+Older `fork-latest` builds are not kept, but every stable release is. To go
+back, point users at an earlier `fork-v…` release, revert on `main`, and
+promote the build that follows.

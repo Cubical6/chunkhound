@@ -48,7 +48,7 @@ At most ~15 lines:
 ---
 
 ## Phase 1: Version derivation ignores fork tags
-- [ ] Done
+- [x] Done
 - **Depends on:** none
 - **Model:** `openai-codex/gpt-6.1-sol` / `medium`
 - **Goal:** Tags named `fork-*` (for example `fork-v6.1.1.dev198`) never influence the derived version, locally or in CI, so stable releases can get versioned tags.
@@ -64,7 +64,7 @@ At most ~15 lines:
 - **Notes:** Upstream `v*` tags are fetched on the runner only (`git fetch --no-tags ... refs/tags/v*`); keep that. Do not change anything else in `pyproject.toml`.
 
 ## Phase 2: Immutable versioned stable releases
-- [ ] Done
+- [x] Done
 - **Depends on:** Phase 1
 - **Model:** `openai-codex/gpt-6.1-sol` / `medium`
 - **Goal:** Promotion creates a new, immutable release `fork-v<public version>` (e.g. `fork-v6.1.1.dev198`) from the checked `fork-latest` build, behind the `fork-stable` environment, and marks it as the repository's Latest release. Rolling `fork-latest` is unchanged.
@@ -84,7 +84,7 @@ At most ~15 lines:
 - **Notes:** Assets and integrity checks of the promote job stay as they are. `GITHUB_TOKEN` creating a tag via the API is allowed by the tag ruleset (it only blocks update/delete).
 
 ## Phase 3: Scheduled upstream watch
-- [ ] Done
+- [x] Done
 - **Depends on:** none
 - **Model:** `openai-codex/gpt-6.1-terra` / `medium`
 - **Goal:** A daily workflow tells the maintainer, through one fork issue, how far `main` is behind upstream and which upstream releases are not merged yet; it closes that issue when the fork has caught up.
@@ -101,7 +101,7 @@ At most ~15 lines:
 - **Notes:** Do not open sync PRs automatically: merges can conflict and need a human (see `FORK.md`, Syncing upstream).
 
 ## Phase 4: Docs (Claude)
-- [ ] Done
+- [x] Done
 - **Depends on:** Phases 1-3
 - **Goal:** `FORK.md` describes the new rules: no direct pushes, the rulesets, the `fork-stable` environment approval, `fork-v*` stable releases, the upstream-watch issue. Add a `CHANGELOG.fork.md` entry under `## Changed` for the new stable release naming.
 - **Files:** `FORK.md`, `CHANGELOG.fork.md`
@@ -119,6 +119,10 @@ At most ~15 lines:
 | Date | Phase | sessionId | Commit | Notes |
 |---|---|---|---|---|
 | 2026-11-15 | GitHub settings | – | – | Rulesets 27308867 (main) and 27308868 (fork-v* tags), environment fork-stable created |
+| 2026-11-15 | 1 | 01a1deaa-0a1f-73b8-ba81-120ea2013aa0 | c070f534 | describe_command via raw-options; CI asserts fork-v tag invariance |
+| 2026-11-15 | 3 | 01a1deab-df15-73b8-ba81-12119f5618f6 | 71c4305e | Review fix: neutralise @-mentions, checkout v6 |
+| 2026-11-15 | 2 | 01a1deae-6d1a-73b8-ba81-1212aa787949 | (this commit) | Review fixes: keep fork #N, draft-then-publish, verify tag commit |
+| 2026-11-15 | 4 | – | (this commit) | FORK.md and CHANGELOG.fork.md by Claude |
 
 ---
 

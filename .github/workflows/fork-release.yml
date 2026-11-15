@@ -342,7 +342,18 @@ jobs:
           set -euo pipefail
           # No digits: setuptools-scm uses git describe --match "*[0-9]*".
           # A digit-bearing rolling tag would corrupt future version derivation.
-          stable_sha="$(gh api "repos/$GH_REPO/git/matching-refs/tags/fork-stable" --jq '.[] | select(.ref == "refs/tags/fork-stable") | .object.sha')"
+          stable_tag=''
+          stable_sha=''
+          if gh api "repos/$GH_REPO/releases/latest" > previous-release.json 2> previous-release.err; then
+            stable_tag="$(jq -r '.tag_name | select(startswith("fork-v"))' previous-release.json)"
+          elif ! grep -q 'HTTP 404' previous-release.err; then
+            head -c 2000 previous-release.err >&2
+            exit 1
+          fi
+          if [[ -n "$stable_tag" ]]; then
+            git fetch --no-tags origin "refs/tags/$stable_tag"
+            stable_sha="$(git rev-parse 'FETCH_HEAD^{commit}')"
+          fi
           tag=fork-latest
           existing="$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq '.[] | select(.ref == "refs/tags/fork-latest") | .ref')"
           if [[ -n "$existing" ]]; then
@@ -350,7 +361,7 @@ jobs:
           else
             gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA"
           fi
-          python3 scripts/fork_release_notes.py --channel latest --version "$VERSION" --commit "$GITHUB_SHA" --previous "$stable_sha" > release-notes.txt
+          python3 scripts/fork_release_notes.py --channel latest --version "$VERSION" --commit "$GITHUB_SHA" --previous "$stable_sha" --previous-name "$stable_tag" > release-notes.txt
           release_id="$(gh api --paginate "repos/$GH_REPO/releases" --jq '.[] | select(.tag_name == "fork-latest") | .id')"
           if [[ -z "$release_id" ]]; then
             gh release create "$tag" --verify-tag --prerelease --latest=false \

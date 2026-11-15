@@ -16,7 +16,16 @@ INSTALL = (
 
 
 def clean(text: str) -> str:
-    """Keep line structure, but remove other control characters."""
+    """Keep line structure without control characters or upstream notifications."""
+    text = re.sub(
+        r"(?:(?:https?|git)://)?(?:www\.)?github\.com/chunkhound/chunkhound(?:[^\s<>]*)?",
+        "upstream repository",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\bchunkhound/chunkhound#(\d+)\b", r"upstream PR \1", text, flags=re.IGNORECASE
+    )
     return "".join(
         char
         for char in text.replace("\t", "    ")
@@ -119,10 +128,13 @@ def notes(args: argparse.Namespace) -> str:
     blocks = [header, INSTALL]
     if previous:
         short = args.previous[:7]
+        previous_name = (
+            clean(args.previous_name) if args.previous_name else "fork-stable"
+        )
         heading = (
-            f"Fork changes not yet in fork-stable (since {short})"
+            f"Fork changes not yet in {previous_name} (since {short})"
             if args.channel == "latest"
-            else f"Fork changes since the previous fork-stable ({short})"
+            else f"Fork changes since the previous {previous_name} ({short})"
         )
     else:
         heading = "Fork changes on top of upstream"
@@ -171,6 +183,7 @@ def main() -> None:
     parser.add_argument("--version", required=True)
     parser.add_argument("--commit", required=True)
     parser.add_argument("--previous", default="")
+    parser.add_argument("--previous-name", default="")
     parser.add_argument("--run-url")
     parser.add_argument("--repo-dir", default=".")
     parser.add_argument("--max-chars", type=int, default=100000)
