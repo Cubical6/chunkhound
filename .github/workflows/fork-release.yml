@@ -261,6 +261,9 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           pattern: fork-*
@@ -327,6 +330,7 @@ jobs:
           set -euo pipefail
           # No digits: setuptools-scm uses git describe --match "*[0-9]*".
           # A digit-bearing rolling tag would corrupt future version derivation.
+          stable_sha="$(gh api "repos/$GH_REPO/git/matching-refs/tags/fork-stable" --jq '.[] | select(.ref == "refs/tags/fork-stable") | .object.sha')"
           tag=fork-latest
           existing="$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq '.[] | select(.ref == "refs/tags/fork-latest") | .ref')"
           if [[ -n "$existing" ]]; then
@@ -334,8 +338,7 @@ jobs:
           else
             gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA"
           fi
-          printf 'Version: %s\nCommit: %s\n\nDownload the archive for your platform, verify its hash against manifest.json, and extract it. On Linux: uv pip install -c constraints.txt ./*.whl\nIntel macOS: the archive supplies wheels only; manage dependencies separately (locked pins are not Intel-compatible).\n' \
-            "$VERSION" "$GITHUB_SHA" > release-notes.txt
+          python3 scripts/fork_release_notes.py --channel latest --version "$VERSION" --commit "$GITHUB_SHA" --previous "$stable_sha" > release-notes.txt
           release_id="$(gh api --paginate "repos/$GH_REPO/releases" --jq '.[] | select(.tag_name == "fork-latest") | .id')"
           if [[ -z "$release_id" ]]; then
             gh release create "$tag" --verify-tag --prerelease --latest=false \
