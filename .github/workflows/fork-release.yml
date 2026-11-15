@@ -43,6 +43,9 @@ jobs:
           set -euo pipefail
           uv run --no-project --python 3.12 --with hatch-vcs python - <<'PY'
           import os
+          import subprocess
+          import tomllib
+          from pathlib import Path
           from setuptools_scm import get_version
           from packaging.version import Version
 
@@ -61,8 +64,17 @@ jobs:
               assert Version(cargo) == Version(public_version), (cargo, public_version)
               return cargo
 
-          version = get_version()
+          config = tomllib.loads(Path('pyproject.toml').read_text())
+          options = config['tool']['hatch']['version']['raw-options']
+          version = get_version(**options)
           assert not version.startswith('0.'), f'Missing upstream tags: {version}'
+          tag = f'fork-v{version}'
+          subprocess.run(['git', 'tag', tag, 'HEAD'], check=True)
+          try:
+              tagged_version = get_version(**options)
+              assert tagged_version == version, (version, tagged_version)
+          finally:
+              subprocess.run(['git', 'tag', '-d', tag], check=True)
           cargo = cargo_version(version)
           print(f'version={version}\ncargo_version={cargo}')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
