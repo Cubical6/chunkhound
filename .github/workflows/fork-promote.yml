@@ -1,0 +1,128 @@
+name: Fork stable promotion
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full SHA that fork-latest was built from
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  promote:
+    if: github.repository != 'chunkhound/chunkhound'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    # Separate group so a promotion never cancels a pending publish.
+    # Concurrent publishing is safe: asset, manifest-commit and tag checks reject
+    # half-updated fork-latest assets (publish uploads the manifest last).
+    concurrency:
+      group: fork-release-promote
+      cancel-in-progress: false
+    env:
+      # GITHUB_TOKEN events do not trigger upstream release.yml's PyPI publisher.
+      # Never replace this with a PAT or GitHub App token.
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      EXPECTED_COMMIT: ${{ inputs.commit }}
+    steps:
+      - name: Validate expected commit
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'commit must be a full 40-character lowercase hexadecimal SHA' >&2
+            exit 1
+          fi
+      - uses: astral-sh/setup-uv@v3
+      - name: Download all rolling release assets
+        run: |
+          set -euo pipefail
+          mkdir release-assets
+          gh release download fork-latest -R "$GH_REPO" --dir release-assets
+      - name: Verify assets and source commit
+        run: |
+          set -euo pipefail
+          cd release-assets
+          uv run --no-project --python 3.12 python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit(message)
+
+          manifest = json.loads(Path('manifest.json').read_text())
+          require(manifest['schema'] == 1, 'Unsupported manifest schema')
+          expected = os.environ['EXPECTED_COMMIT']
+          actual = manifest['commit']
+          require(actual == expected,
+                  f'fork-latest moved since the caller checked: expected {expected}, manifest commit {actual}')
+          archives = manifest['archives']
+          names = [archive['name'] for archive in archives]
+          require(set(names) == {'chunkhound-fork-linux-x86_64.tar', 'chunkhound-fork-macos-x86_64.tar'}
+                  and len(names) == 2, 'Unexpected manifest archives')
+          wanted = set(names) | {'SHA256SUMS', 'manifest.json'}
+          found = {path.name for path in Path('.').iterdir()}
+          require(found == wanted,
+                  f'Asset set mismatch: missing {sorted(wanted - found)}, unexpected {sorted(found - wanted)}')
+          for archive in archives:
+              path = Path(archive['name'])
+              require(path.is_file(), f'Missing archive: {path}')
+              require(path.stat().st_size == archive['size'], f'Size mismatch: {path}')
+              require(hashlib.sha256(path.read_bytes()).hexdigest() == archive['sha256'],
+                      f'SHA256 mismatch: {path}')
+          PY
+          sha256sum -c SHA256SUMS
+          actual="$(gh api "repos/$GH_REPO/git/ref/tags/fork-latest" --jq '.object.sha')"
+          if [[ "$actual" != "$EXPECTED_COMMIT" ]]; then
+            echo "fork-latest moved since the caller checked: expected $EXPECTED_COMMIT, tag points at $actual" >&2
+            exit 1
+          fi
+          status="$(gh api "repos/$GH_REPO/compare/$EXPECTED_COMMIT...main" --jq '.status')"
+          if [[ "$status" != ahead && "$status" != identical ]]; then
+            echo "Commit $EXPECTED_COMMIT is not contained in main (compare status: $status)" >&2
+            exit 1
+          fi
+      - name: Move stable tag and publish (manifest last)
+        run: |
+          set -euo pipefail
+          # No digits: setuptools-scm matches "*[0-9]*" for version derivation.
+          tag=fork-stable
+          existing="$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq '.[] | select(.ref == "refs/tags/fork-stable") | .ref')"
+          if [[ -n "$existing" ]]; then
+            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$tag" -f sha="$EXPECTED_COMMIT" -F force=true
+          else
+            gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$EXPECTED_COMMIT"
+          fi
+          version="$(jq -r '.version' release-assets/manifest.json)"
+          run_url="$(jq -r '.run_url' release-assets/manifest.json)"
+          printf 'Version: %s\nCommit: %s\nPromoted from: %s\n\nDownload the archive for your platform, verify its hash against manifest.json, and extract it. On Linux: uv pip install -c constraints.txt ./*.whl\nIntel macOS: the archive supplies wheels only; manage dependencies separately (locked pins are not Intel-compatible).\n' \
+            "$version" "$EXPECTED_COMMIT" "$run_url" > release-notes.txt
+          release_id="$(gh api --paginate "repos/$GH_REPO/releases" --jq '.[] | select(.tag_name == "fork-stable") | .id')"
+          if [[ -z "$release_id" ]]; then
+            gh release create "$tag" -R "$GH_REPO" --verify-tag --prerelease=false --latest \
+              --title "Fork stable $version" --notes-file release-notes.txt
+            release_id="$(gh api --paginate "repos/$GH_REPO/releases" --jq '.[] | select(.tag_name == "fork-stable") | .id')"
+          else
+            gh release edit "$tag" -R "$GH_REPO" --prerelease=false --latest \
+              --title "Fork stable $version" --notes-file release-notes.txt
+          fi
+          wanted="$(jq -c '[.archives[].name] + ["SHA256SUMS", "manifest.json"]' release-assets/manifest.json)"
+          stale_ids="$(gh api --paginate "repos/$GH_REPO/releases/$release_id/assets" |
+            jq -r --argjson wanted "$wanted" '.[] | select(.name as $name | $wanted | index($name) | not) | .id')"
+          for id in $stale_ids; do
+            gh api --method DELETE "repos/$GH_REPO/releases/assets/$id"
+          done
+          gh release upload "$tag" -R "$GH_REPO" release-assets/*.tar release-assets/SHA256SUMS --clobber
+          gh release upload "$tag" -R "$GH_REPO" release-assets/manifest.json --clobber
