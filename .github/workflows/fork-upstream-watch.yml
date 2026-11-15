@@ -1,0 +1,53 @@
+name: Fork upstream watch
+
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  watch:
+    if: github.repository != 'chunkhound/chunkhound'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: fork-upstream-watch
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Fetch main branches and upstream tags
+        run: |
+          git fetch origin +refs/heads/main:refs/remotes/origin/main
+          git fetch --no-tags https://github.com/chunkhound/chunkhound.git +refs/heads/main:refs/remotes/upstream/main '+refs/tags/v*:refs/tags/v*'
+      - name: Update upstream sync issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python3 scripts/fork_upstream_watch.py > watch.json
+          behind=$(jq -r '.behind' watch.json)
+          title=$(jq -r '.title' watch.json)
+          jq -r '.body' watch.json > issue-body.md
+          label_exists=$(gh label list --repo "$GH_REPO" --limit 1000 --json name --jq 'any(.[]; .name == "upstream-sync")')
+          issue=''
+          if [[ "$label_exists" == true ]]; then
+            issue=$(gh issue list --repo "$GH_REPO" --state open --label upstream-sync --limit 1000 --json number --jq '.[0].number // empty')
+          elif (( behind > 0 )); then
+            gh label create upstream-sync --repo "$GH_REPO" --description 'Upstream changes awaiting sync'
+          fi
+          if (( behind > 0 )); then
+            if [[ -n "$issue" ]]; then
+              gh issue edit "$issue" --repo "$GH_REPO" --title "$title" --body-file issue-body.md
+            else
+              gh issue create --repo "$GH_REPO" --label upstream-sync --title "$title" --body-file issue-body.md
+            fi
+          elif [[ -n "$issue" ]]; then
+            gh issue close "$issue" --repo "$GH_REPO" --comment 'The fork has caught up with upstream main.'
+          fi

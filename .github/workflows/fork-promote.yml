@@ -19,6 +19,7 @@ jobs:
   promote:
     if: github.repository != 'chunkhound/chunkhound'
     runs-on: ubuntu-latest
+    environment: fork-stable
     timeout-minutes: 15
     permissions:
       contents: write
@@ -97,36 +98,53 @@ jobs:
             echo "Commit $EXPECTED_COMMIT is not contained in main (compare status: $status)" >&2
             exit 1
           fi
-      - name: Move stable tag and publish (manifest last)
+      - name: Create immutable stable release (manifest last)
         run: |
           set -euo pipefail
-          # No digits: setuptools-scm matches "*[0-9]*" for version derivation.
-          tag=fork-stable
-          existing="$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq '.[] | select(.ref == "refs/tags/fork-stable") | .ref')"
-          stable_sha="$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq '.[] | select(.ref == "refs/tags/fork-stable") | .object.sha')"
-          if [[ -n "$existing" ]]; then
-            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$tag" -f sha="$EXPECTED_COMMIT" -F force=true
-          else
-            gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$EXPECTED_COMMIT"
+          version="$(jq -er '.version | strings | select(length > 0)' release-assets/manifest.json)"
+          public_version="${version%%+*}"
+          tag="fork-v$public_version"
+          git check-ref-format "refs/tags/$tag"
+          existing="$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" |
+            jq -r --arg ref "refs/tags/$tag" '.[] | select(.ref == $ref) | .ref')"
+          releases="$(gh api --paginate "repos/$GH_REPO/releases")"
+          published_id="$(jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag and .draft == false) | .id' <<< "$releases")"
+          if [[ -n "$existing" || -n "$published_id" ]]; then
+            echo "Stable tag or published release $tag already exists; immutable releases cannot be replaced" >&2
+            exit 1
           fi
-          version="$(jq -r '.version' release-assets/manifest.json)"
-          run_url="$(jq -r '.run_url' release-assets/manifest.json)"
-          python3 scripts/fork_release_notes.py --channel stable --version "$version" --commit "$EXPECTED_COMMIT" \
-            --previous "$stable_sha" --run-url "$run_url" > release-notes.txt
-          release_id="$(gh api --paginate "repos/$GH_REPO/releases" --jq '.[] | select(.tag_name == "fork-stable") | .id')"
-          if [[ -z "$release_id" ]]; then
-            gh release create "$tag" -R "$GH_REPO" --verify-tag --prerelease=false --latest \
-              --title "Fork stable $version" --notes-file release-notes.txt
-            release_id="$(gh api --paginate "repos/$GH_REPO/releases" --jq '.[] | select(.tag_name == "fork-stable") | .id')"
-          else
-            gh release edit "$tag" -R "$GH_REPO" --prerelease=false --latest \
-              --title "Fork stable $version" --notes-file release-notes.txt
-          fi
-          wanted="$(jq -c '[.archives[].name] + ["SHA256SUMS", "manifest.json"]' release-assets/manifest.json)"
-          stale_ids="$(gh api --paginate "repos/$GH_REPO/releases/$release_id/assets" |
-            jq -r --argjson wanted "$wanted" '.[] | select(.name as $name | $wanted | index($name) | not) | .id')"
-          for id in $stale_ids; do
-            gh api --method DELETE "repos/$GH_REPO/releases/assets/$id"
+          draft_ids="$(jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag and .draft == true) | .id' <<< "$releases")"
+          for id in $draft_ids; do
+            gh api --method DELETE "repos/$GH_REPO/releases/$id"
           done
-          gh release upload "$tag" -R "$GH_REPO" release-assets/*.tar release-assets/SHA256SUMS --clobber
-          gh release upload "$tag" -R "$GH_REPO" release-assets/manifest.json --clobber
+          stable_tag=''
+          stable_sha=''
+          if gh api "repos/$GH_REPO/releases/latest" > previous-release.json 2> previous-release.err; then
+            stable_tag="$(jq -r '.tag_name | select(startswith("fork-v"))' previous-release.json)"
+          elif ! grep -q 'HTTP 404' previous-release.err; then
+            head -c 2000 previous-release.err >&2
+            exit 1
+          fi
+          if [[ -n "$stable_tag" ]]; then
+            git fetch --no-tags origin "refs/tags/$stable_tag"
+            stable_sha="$(git rev-parse 'FETCH_HEAD^{commit}')"
+          fi
+          run_url="$(jq -r '.run_url' release-assets/manifest.json)"
+          uv run --no-project --python 3.12 python scripts/fork_release_notes.py --channel stable --version "$version" --commit "$EXPECTED_COMMIT" \
+            --previous "$stable_sha" --previous-name "$stable_tag" --run-url "$run_url" > release-notes.txt
+          # Drafts have no tag and can be replaced safely after a failed upload.
+          gh release create "$tag" -R "$GH_REPO" --draft --target "$EXPECTED_COMMIT" \
+            --title "Fork stable $public_version" --notes-file release-notes.txt
+          gh release upload "$tag" -R "$GH_REPO" release-assets/*.tar release-assets/SHA256SUMS
+          gh release upload "$tag" -R "$GH_REPO" release-assets/manifest.json
+          gh release edit "$tag" -R "$GH_REPO" --draft=false --prerelease=false --latest
+          object="$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq '.object')"
+          while [[ "$(jq -r '.type' <<< "$object")" == tag ]]; do
+            sha="$(jq -r '.sha' <<< "$object")"
+            object="$(gh api "repos/$GH_REPO/git/tags/$sha" --jq '.object')"
+          done
+          actual="$(jq -r '.sha' <<< "$object")"
+          if [[ "$(jq -r '.type' <<< "$object")" != commit || "$actual" != "$EXPECTED_COMMIT" ]]; then
+            echo "ERROR: Published stable tag $tag does not point at expected commit $EXPECTED_COMMIT (resolved object: $object)" >&2
+            exit 1
+          fi

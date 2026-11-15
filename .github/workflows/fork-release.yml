@@ -43,6 +43,9 @@ jobs:
           set -euo pipefail
           uv run --no-project --python 3.12 --with hatch-vcs python - <<'PY'
           import os
+          import subprocess
+          import tomllib
+          from pathlib import Path
           from setuptools_scm import get_version
           from packaging.version import Version
 
@@ -61,8 +64,17 @@ jobs:
               assert Version(cargo) == Version(public_version), (cargo, public_version)
               return cargo
 
-          version = get_version()
+          config = tomllib.loads(Path('pyproject.toml').read_text())
+          options = config['tool']['hatch']['version']['raw-options']
+          version = get_version(**options)
           assert not version.startswith('0.'), f'Missing upstream tags: {version}'
+          tag = f'fork-v{version}'
+          subprocess.run(['git', 'tag', tag, 'HEAD'], check=True)
+          try:
+              tagged_version = get_version(**options)
+              assert tagged_version == version, (version, tagged_version)
+          finally:
+              subprocess.run(['git', 'tag', '-d', tag], check=True)
           cargo = cargo_version(version)
           print(f'version={version}\ncargo_version={cargo}')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
@@ -330,7 +342,18 @@ jobs:
           set -euo pipefail
           # No digits: setuptools-scm uses git describe --match "*[0-9]*".
           # A digit-bearing rolling tag would corrupt future version derivation.
-          stable_sha="$(gh api "repos/$GH_REPO/git/matching-refs/tags/fork-stable" --jq '.[] | select(.ref == "refs/tags/fork-stable") | .object.sha')"
+          stable_tag=''
+          stable_sha=''
+          if gh api "repos/$GH_REPO/releases/latest" > previous-release.json 2> previous-release.err; then
+            stable_tag="$(jq -r '.tag_name | select(startswith("fork-v"))' previous-release.json)"
+          elif ! grep -q 'HTTP 404' previous-release.err; then
+            head -c 2000 previous-release.err >&2
+            exit 1
+          fi
+          if [[ -n "$stable_tag" ]]; then
+            git fetch --no-tags origin "refs/tags/$stable_tag"
+            stable_sha="$(git rev-parse 'FETCH_HEAD^{commit}')"
+          fi
           tag=fork-latest
           existing="$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq '.[] | select(.ref == "refs/tags/fork-latest") | .ref')"
           if [[ -n "$existing" ]]; then
@@ -338,7 +361,7 @@ jobs:
           else
             gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA"
           fi
-          python3 scripts/fork_release_notes.py --channel latest --version "$VERSION" --commit "$GITHUB_SHA" --previous "$stable_sha" > release-notes.txt
+          python3 scripts/fork_release_notes.py --channel latest --version "$VERSION" --commit "$GITHUB_SHA" --previous "$stable_sha" --previous-name "$stable_tag" > release-notes.txt
           release_id="$(gh api --paginate "repos/$GH_REPO/releases" --jq '.[] | select(.tag_name == "fork-latest") | .id')"
           if [[ -z "$release_id" ]]; then
             gh release create "$tag" --verify-tag --prerelease --latest=false \

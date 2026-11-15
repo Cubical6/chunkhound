@@ -7,12 +7,12 @@ wrote it.
 - One entry for each change a user of the fork notices. Add it in the same
   pull request, at the top of its heading.
 - Each entry is one line that starts with a bold title: `- **Title** — text`.
-  The release notes compare titles to show what is new since `fork-stable`.
+  The release notes compare titles to show what is new since the last stable release.
 - Remove an entry when upstream ships the same change.
 
 ## Added
 
-- **Fork release channels** — Every push to `main` publishes the wheels as the rolling `fork-latest` release. `fork-promote.yml` copies a checked `fork-latest` build to the rolling `fork-stable` release without rebuilding. Both releases list the fork changes they add.
+- **Fork release channels** — Every push to `main` publishes the wheels as the rolling `fork-latest` release. `fork-promote.yml` copies a checked `fork-latest` build, after approval, to a new and unchangeable stable release `fork-v<version>` (for example `fork-v6.1.1.dev198`) without rebuilding; the newest one is the repository's Latest release. All releases list the fork changes they add.
 - **Upstream overlap check** — `scripts/fork_upstream_check.sh` lists open upstream pull requests that touch given paths and searches upstream issues and pull requests by topic.
 - **pi-cli LLM provider** — `provider: "pi-cli"` runs the local pi CLI as a bare model, without tools, MCP, extensions, context files or a session. It is selectable for every LLM role through config, environment and the `--llm-*-provider` flags, needs no API key and has no default model: set one in `provider/id` form.
 - **`chunkhound map --c4-only`** — Runs the full C4 analysis without planning or topic research, so it needs no database or embeddings. Existing topic files are kept.
