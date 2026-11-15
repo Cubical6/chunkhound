@@ -65,9 +65,26 @@ Every line the fork changes in an upstream file can conflict at a later sync.
 
 - Put fork-only code, tooling and docs in files that do not exist upstream.
 - Do not reformat, rename or move upstream code.
-- Add `CHANGELOG.md` entries under the unreleased section only. This file is
-  the expected place for sync conflicts.
+- Do not edit `CHANGELOG.md`. It stays as upstream wrote it; the fork's
+  changes go in `CHANGELOG.fork.md` (below).
 - Never edit version strings.
+
+## Fork changelog
+
+`CHANGELOG.fork.md` lists what the fork changes on top of upstream. The release
+notes of both fork releases are built from it, so a change without an entry is
+invisible at release.
+
+- Every pull request with a change a user of the fork notices (a `feat`, a
+  `fix`, a changed default, a removed option) adds one entry, in that pull
+  request. Tests, refactors and internal docs need none.
+- An entry is one line under `## Added`, `## Changed`, `## Fixed` or
+  `## Removed`, at the top of its heading, and starts with a bold title:
+  `- **Title** — what changed, in terms of what the user sees`.
+- Do not rename the title of an existing entry: the release notes use titles
+  to tell new entries from old ones.
+- During a sync, remove an entry when upstream now ships the same change. The
+  release notes then list it as no longer fork-specific.
 
 ## Syncing upstream
 
@@ -89,7 +106,8 @@ git merge upstream/main
 
 1. Resolve conflicts. Upstream's version wins for code the fork did not change
    on purpose. Where upstream fixed the same thing as a fork patch, take
-   upstream's implementation and drop the fork's.
+   upstream's implementation, drop the fork's and remove its entry from
+   `CHANGELOG.fork.md`.
 2. Read what came in (`git log --oneline --first-parent origin/main..upstream/main`
    before the merge). For each open fork issue and fork branch, check whether
    upstream now covers it; close the issue or drop the branch if it does.
@@ -124,6 +142,9 @@ calculation, so the fork's tags have no digits.
 | `fork-latest` | `fork-release.yml`, on every push to `main` | The newest build of `main`. |
 | `fork-stable` | `fork-promote.yml`, started by hand | A copy of a `fork-latest` build that was checked. |
 
+Each release's notes list the `CHANGELOG.fork.md` entries and the merges that
+are new since the current `fork-stable` (`scripts/fork_release_notes.py`).
+
 ### `fork-latest`: every merge to `main`
 
 There is nothing to start. Because every merge is published, merge only what
@@ -149,12 +170,13 @@ Propose a promotion to the user when all of these hold:
 5. No sync pull request is open and no integration branch is partly merged.
 
 State the version, the commit and what changed since the current
-`fork-stable`:
+`fork-stable`. The notes of the `fork-latest` release already list that:
 
 ```bash
-git fetch origin '+refs/tags/fork-*:refs/tags/fork-*'
-git log --oneline --first-parent fork-stable..fork-latest
+gh release view fork-latest -R Cubical6/chunkhound --json name,body --jq '.name, .body'
 ```
+
+If a merged change is missing there, add its `CHANGELOG.fork.md` entry first.
 
 Promote only after the user agrees:
 
