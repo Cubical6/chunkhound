@@ -19,6 +19,7 @@ def history(tmp_path):
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         ).stdout.strip()
 
     git("init")
@@ -27,7 +28,8 @@ def history(tmp_path):
     changelog = tmp_path / "CHANGELOG.fork.md"
     changelog.write_text(
         "## Added\n- **Kept** — original wording\n"
-        "## Fixed\n- **Retired** — now shipped upstream\n"
+        "## Fixed\n- **Retired** — now shipped upstream\n",
+        encoding="utf-8",
     )
     git("add", ".")
     git("commit", "-m", "Previous release")
@@ -35,7 +37,8 @@ def history(tmp_path):
     changelog.write_text(
         "## Added\n- **New feature** — available now\n"
         "  More detail for users.\n- **Kept** — revised wording\n"
-        "## Fixed\n- **New fix** — correct results\n"
+        "## Fixed\n- **New fix** — correct results\n",
+        encoding="utf-8",
     )
     git("add", ".")
     git("commit", "-m", "Merge pull request #38 from Cubical6/release-improvements")
@@ -44,7 +47,7 @@ def history(tmp_path):
 
 def render(history, channel="stable", *options):
     repo, _, commit = history
-    return subprocess.run(
+    result = subprocess.run(
         [
             sys.executable,
             str(SCRIPT),
@@ -58,10 +61,12 @@ def render(history, channel="stable", *options):
             commit,
             *options,
         ],
-        check=True,
         capture_output=True,
         text=True,
-    ).stdout
+        encoding="utf-8",
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout
 
 
 @pytest.mark.parametrize("channel", ["latest", "stable"])
@@ -127,12 +132,28 @@ def test_release_notes_warn_when_previous_commit_cannot_be_compared(history):
     assert "- **Kept** — revised wording" in output
 
 
+def test_release_notes_read_crlf_changelog(history):
+    repo, _, _ = history
+    (repo / "CHANGELOG.fork.md").write_bytes(
+        "## Added\r\n- **Café** — available\r\n  More detail.\r\n".encode()
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "add", "."], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", "Add entry"],
+        check=True, capture_output=True,
+    )
+    assert "- **Café** — available\n  More detail." in render((repo, "", "HEAD"))
+
+
 def test_release_notes_do_not_notify_upstream(history):
     repo, _, _ = history
     changelog = repo / "CHANGELOG.fork.md"
     changelog.write_text(
         "## Fixed\n- **Safe references** — chunkhound/chunkhound#456 "
-        "https://github.com/chunkhound/chunkhound/pull/789\n"
+        "https://github.com/chunkhound/chunkhound/pull/789\n",
+        encoding="utf-8",
     )
     subprocess.run(
         ["git", "-C", str(repo), "add", "."], check=True, capture_output=True

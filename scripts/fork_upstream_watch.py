@@ -4,11 +4,13 @@
 import json
 import re
 import subprocess
+import sys
 
 
 def git(*args: str) -> str:
     return subprocess.run(
-        ["git", *args], check=True, capture_output=True, text=True
+        ["git", *args], check=True, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
     ).stdout.strip()
 
 
@@ -30,6 +32,7 @@ def safe_text(text: str) -> str:
 
 
 def main() -> None:
+    sys.stdout.reconfigure(encoding="utf-8")
     behind = int(git("rev-list", "--count", "origin/main..upstream/main"))
     tags = git(
         "tag",

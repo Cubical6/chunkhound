@@ -4,6 +4,7 @@
 import argparse
 import re
 import subprocess
+import sys
 import unicodedata
 from dataclasses import dataclass
 
@@ -178,6 +179,7 @@ def notes(args: argparse.Namespace) -> str:
 
 
 def main() -> None:
+    sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--channel", required=True, choices=("latest", "stable"))
     parser.add_argument("--version", required=True)

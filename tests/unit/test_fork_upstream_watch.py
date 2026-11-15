@@ -15,17 +15,19 @@ pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git require
 def test_watch_renders_unmerged_releases_and_safe_issue_text(tmp_path: Path) -> None:
     def git(*args: str) -> str:
         return subprocess.run(
-            ["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True
+            ["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True,
+            encoding="utf-8",
         ).stdout.strip()
 
     def report() -> dict:
         result = subprocess.run(
             [sys.executable, str(SCRIPT)],
             cwd=tmp_path,
-            check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
+        assert result.returncode == 0, result.stderr
         return json.loads(result.stdout)
 
     git("init", "-q")
@@ -41,10 +43,12 @@ def test_watch_renders_unmerged_releases_and_safe_issue_text(tmp_path: Path) -> 
         "Fix #123 and https://github.com/chunkhound/chunkhound/pull/456",
     )
     git("tag", "v1.1.0")
-    git(
-        "commit", "--allow-empty", "-qm",
-        "See chunkhound/chunkhound#789; thanks @alice and @org/team",
+    message = tmp_path / "message.txt"
+    message.write_text(
+        "See chunkhound/chunkhound#789; thanks @alice and @org/team — café\n",
+        encoding="utf-8",
     )
+    git("commit", "--allow-empty", "-qF", str(message))
     git("update-ref", "refs/remotes/upstream/main", "HEAD")
 
     issue = report()
@@ -54,6 +58,7 @@ def test_watch_renders_unmerged_releases_and_safe_issue_text(tmp_path: Path) -> 
     assert "v1.0.0" not in issue["body"]
     assert "Fix upstream PR 123" in issue["body"]
     assert "See upstream PR 789" in issue["body"]
+    assert "— café" in issue["body"]
     assert "@\u200balice" in issue["body"]
     assert "@\u200borg/team" in issue["body"]
     assert "github.com/chunkhound/chunkhound" not in issue["body"].lower()
