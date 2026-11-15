@@ -1,5 +1,6 @@
 """Stable public IDs, including the container portion of the R3/R4 contract."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -256,15 +257,30 @@ def test_rename_detection_without_git(tmp_path: Path) -> None:
     assert detect_renames(tmp_path, "unknown-sha") is None
 
 
-def test_rename_detection_from_committed_git_history(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ("orders old.py", "order book.py"),
+        pytest.param(
+            "orders\told.py",
+            "order\nbook.py",
+            marks=pytest.mark.skipif(
+                os.name == "nt",
+                reason="Windows forbids tabs and newlines in file names",
+            ),
+            id="control-characters",
+        ),
+    ],
+)
+def test_rename_detection_from_committed_git_history(
+    tmp_path: Path, old: str, new: str
+) -> None:
     def git(*args: str) -> str:
         result = run_git(args, cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         return result.stdout.strip()
 
     git("init", "--initial-branch=main")
-    old = "orders\told.py"
-    new = "order\nbook.py"
     (tmp_path / old).write_text("def orders():\n    return 42\n", encoding="utf-8")
     git("add", ".")
     git(

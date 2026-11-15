@@ -89,7 +89,9 @@ def _corpus(root: Path, *, files: int, total_bytes: int | None = None) -> list[s
             sections.extend([paragraph, ""] * 6)
         name = f"docs/doc{number:02d}.md"
         (root / "docs").mkdir(exist_ok=True)
-        (root / name).write_text("\n".join(sections) + "\n", encoding="utf-8")
+        (root / name).write_text(
+            "\n".join(sections) + "\n", encoding="utf-8", newline="\n"
+        )
         names.append(name)
     if total_bytes is not None:
         current = sum((root / name).stat().st_size for name in names)
@@ -98,7 +100,7 @@ def _corpus(root: Path, *, files: int, total_bytes: int | None = None) -> list[s
         last = root / names[-1]
         lines = [paragraph[: min(len(paragraph), 199)]] * (filler // 200)
         tail = "x" * (filler - 200 * len(lines))
-        with last.open("a", encoding="utf-8") as stream:
+        with last.open("a", encoding="utf-8", newline="\n") as stream:
             stream.write("".join(line + "\n" for line in lines))
             stream.write(tail)
         assert sum((root / name).stat().st_size for name in names) == total_bytes
