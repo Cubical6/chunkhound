@@ -35,6 +35,9 @@ jobs:
       GH_REPO: ${{ github.repository }}
       EXPECTED_COMMIT: ${{ inputs.commit }}
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - name: Validate expected commit
         run: |
           set -euo pipefail
@@ -100,6 +103,7 @@ jobs:
           # No digits: setuptools-scm matches "*[0-9]*" for version derivation.
           tag=fork-stable
           existing="$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq '.[] | select(.ref == "refs/tags/fork-stable") | .ref')"
+          stable_sha="$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq '.[] | select(.ref == "refs/tags/fork-stable") | .object.sha')"
           if [[ -n "$existing" ]]; then
             gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$tag" -f sha="$EXPECTED_COMMIT" -F force=true
           else
@@ -107,8 +111,8 @@ jobs:
           fi
           version="$(jq -r '.version' release-assets/manifest.json)"
           run_url="$(jq -r '.run_url' release-assets/manifest.json)"
-          printf 'Version: %s\nCommit: %s\nPromoted from: %s\n\nDownload the archive for your platform, verify its hash against manifest.json, and extract it. On Linux: uv pip install -c constraints.txt ./*.whl\nIntel macOS: the archive supplies wheels only; manage dependencies separately (locked pins are not Intel-compatible).\n' \
-            "$version" "$EXPECTED_COMMIT" "$run_url" > release-notes.txt
+          python3 scripts/fork_release_notes.py --channel stable --version "$version" --commit "$EXPECTED_COMMIT" \
+            --previous "$stable_sha" --run-url "$run_url" > release-notes.txt
           release_id="$(gh api --paginate "repos/$GH_REPO/releases" --jq '.[] | select(.tag_name == "fork-stable") | .id')"
           if [[ -z "$release_id" ]]; then
             gh release create "$tag" -R "$GH_REPO" --verify-tag --prerelease=false --latest \
