@@ -4,6 +4,7 @@
 This checkout is the `Cubical6/chunkhound` fork of `chunkhound/chunkhound`.
 Read `FORK.md` before any git, GitHub or release action, and before designing a fix or feature.
 `FORK.md` overrides VERSION_MANAGEMENT below and `RELEASING.md`: in the fork, NEVER run `scripts/update_version.py`, NEVER create or push tags, NEVER write to upstream.
+ALWAYS add an entry to `CHANGELOG.fork.md` for a user-visible change; NEVER edit `CHANGELOG.md`.
 
 ## PROJECT_IDENTITY
 ChunkHound: Semantic and regex search tool for codebases with MCP integration
