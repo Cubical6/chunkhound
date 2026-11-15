@@ -557,8 +557,10 @@ def _checked_remote_url(
     directory: Path, commit: str, run_head: str | None, cited: set[str]
 ) -> str:
     """The URL of `origin` if every link condition holds; `run_head` is only for `.`."""
-    toplevel = _git(["rev-parse", "--show-toplevel"], directory).rstrip("\n")
-    if Path(toplevel).resolve() != directory.resolve():
+    toplevel = Path(
+        _git(["rev-parse", "--show-toplevel"], directory).rstrip("\n")
+    ).resolve()
+    if toplevel != directory.resolve():
         raise _NoSourceLinksError(f"the root of this repository is {toplevel}")
     if run_head is not None and _get_head_sha(directory) != run_head:
         raise _NoSourceLinksError("HEAD changed during the run")

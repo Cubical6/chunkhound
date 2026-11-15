@@ -298,13 +298,13 @@ async def test_absolute_evidence_paths_are_normalized(mapping):
     )
     assert len(entries) == 2
     for path in entries:
-        payload = json.loads(path.read_text())
+        payload = json.loads(path.read_text(encoding="utf-8"))
         # DecisionStore wraps the DevCache envelope in its answer field.
         envelope = payload["answer"]["answer"]
         result = envelope["result"]
         files = result["metadata"]["sources"]["files"]
         result["metadata"]["sources"]["files"] = [str(mapping.repo / f) for f in files]
-        path.write_text(json.dumps(payload))
+        path.write_text(json.dumps(payload), encoding="utf-8")
     previous = calls(mapping)
     await mapping.run()
     assert calls(mapping) == previous

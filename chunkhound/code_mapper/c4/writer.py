@@ -36,6 +36,7 @@ def _write_json_atomic(path: Path, value: dict[str, Any]) -> None:
         with NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
+            newline="\n",
             dir=path.parent,
             prefix=f".{path.name}.",
             suffix=".tmp",
