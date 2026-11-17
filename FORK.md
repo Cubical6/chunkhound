@@ -12,10 +12,29 @@ describe upstream, this file wins.
   or force-push it, and never push to it directly: every change, also a sync
   or a one-line docs fix, goes through a pull request.
 - GitHub enforces this with the ruleset `main: PR only`: a pull request is
-  required (no approval needed), the `tests (…)` jobs of `CI` must pass, and
-  force pushes and deletion are blocked. An admin can bypass the checks only
-  when merging a pull request, for example a sync whose failures also occur on
-  upstream. Do not change or disable the ruleset without the user's approval.
+  required (no approval needed), and force pushes and deletion are blocked.
+  It requires no status checks: the fork runs its tests locally (see "Tests"
+  below). Do not change or disable the ruleset without the user's approval.
+
+## Tests
+
+GitHub Actions `CI` (`ci.yml`) is disabled in the fork: its runs took 20–35
+minutes and failed on runner problems unrelated to the code (macOS Chrome
+start, Windows Watchman). `Minimal` and `Deprecate` are disabled too. Only the
+fork's own workflows stay on: `Fork rolling release`, `Fork stable
+promotion` and `Fork upstream watch`. Do not delete `ci.yml` or the other
+upstream workflows: they are upstream files, and deleting them conflicts at
+the next sync. Do not enable a workflow again without the user's approval.
+
+Tests run locally instead, with the commands from `AGENTS.md`:
+
+- Before every commit: the smoke suite.
+- Before merging a pull request: the full suite, and `make rust-test` when
+  Rust code or the native extension changed.
+- Put the results in the pull request under a "Tests" heading: the commit,
+  the counts, and every failure. A failure that only occurs under `-n auto`
+  counts as passed only when the test passes when rerun on its own; name it
+  in the pull request.
 - Work on a branch cut from `origin/main` (`feat/…`, `fix/…`, `docs/…`,
   `ci/…`) and open the pull request against `main` of the fork.
 - Pass `-R Cubical6/chunkhound` to every `gh` command that creates or changes
@@ -117,7 +136,9 @@ git merge upstream/main
 2. Read what came in (`git log --oneline --first-parent origin/main..upstream/main`
    before the merge). For each open fork issue and fork branch, check whether
    upstream now covers it; close the issue or drop the branch if it does.
-3. Run the smoke suite and the full suite from `AGENTS.md`.
+3. Run the smoke suite and the full suite locally (see "Tests"). When a test
+   fails, run it on upstream's `main` too: a failure that also occurs there
+   belongs in a fork issue, not in the sync.
 4. Open a pull request against the fork's `main` and merge it with a merge
    commit: `gh pr merge <N> -R Cubical6/chunkhound --merge`. Never squash or
    rebase a sync: that discards the link to upstream's history, and the next
@@ -183,10 +204,10 @@ Propose a promotion to the user when all of these hold:
 1. There is a reason: an upstream release was synced into `main`, a fix for a
    fork issue labelled `bug` was merged, or a feature the user asked for is
    complete.
-2. The `Fork rolling release` run for that commit succeeded, and `CI` on that
-   commit has no failing job that passes on upstream at the upstream commit
-   last merged. Upstream's `main` is sometimes red itself; compare, do not
-   ignore.
+2. The `Fork rolling release` run for that commit succeeded, and the local
+   full suite on that commit has no failure that passes on upstream at the
+   upstream commit last merged. Upstream's `main` is sometimes red itself;
+   compare, do not ignore.
 3. The `fork-latest` build was installed and used on a real repository:
    `chunkhound --version` shows the expected version, and indexing, search and
    the MCP server work.
