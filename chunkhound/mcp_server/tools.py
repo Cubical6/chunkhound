@@ -760,7 +760,7 @@ async def search_impl(
     )
 
     scope_warning = validate_path_scope(
-        services.provider, path, vector_source, effective_commit_range
+        services, path, vector_source, effective_commit_range
     )
 
     if type == "semantic":
@@ -885,7 +885,7 @@ async def deep_research_impl(
     )
 
     scope_warning = validate_path_scope(
-        services.provider, path, vector_source, effective_commit_range
+        services, path, vector_source, effective_commit_range
     )
 
     if effective_commit_range is not None and vector_source != "db":

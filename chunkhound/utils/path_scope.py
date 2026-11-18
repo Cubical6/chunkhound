@@ -1,14 +1,16 @@
 """Fork-only diagnostics for match-anywhere MCP path filters."""
 
+from __future__ import annotations
+
 from collections.abc import Iterable
 from functools import lru_cache
 from pathlib import Path
-from typing import NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple, cast
 
-from chunkhound.interfaces.database_provider import (
-    DatabaseProvider,
-    ScopeAggregationProvider,
-)
+from chunkhound.interfaces.database_provider import ScopeAggregationProvider
+
+if TYPE_CHECKING:
+    from chunkhound.database_factory import DatabaseServices
 from chunkhound.utils.path_filter import normalize_path_filter, path_matches_filter
 
 
@@ -75,7 +77,7 @@ def scope_warning(raw: str, scope: PathScope) -> str | None:
 
 
 def validate_path_scope(
-    provider: DatabaseProvider,
+    services: DatabaseServices,
     raw: str | None,
     vector_source: str,
     commit_range: str | None = None,
@@ -89,6 +91,7 @@ def validate_path_scope(
     normalized = normalize_path_filter(raw)
     if normalized is None:
         return None
+    provider = services.provider
     scope = check_path_scope(
         normalized,
         cast(ScopeAggregationProvider, provider).get_scope_file_paths(None),
