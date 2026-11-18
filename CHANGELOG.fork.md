@@ -43,6 +43,7 @@ wrote it.
 
 ## Fixed
 
+- **Path filter checks in multi-repo indexes** — MCP `search` and `code_research` return an error listing the top-level directories when `path` matches no indexed file, and add a warning when it matches files in more than one repository. The `path` help now says it matches a path segment anywhere.
 - **C4 output and git paths on Windows** — C4 files (lock, model, evidence, contract) are written with LF line endings on every platform, so the lock file is byte-stable. Git output is read as UTF-8, so a file with a non-ASCII name no longer costs its repository the source links on Windows.
 - **Crashed compaction swap recovery** — A native DuckDB compaction swap that was interrupted is now recovered before the CLI preflight and before a connection opens, so an empty live database is no longer created over it.
 - **Research source list** — `metadata.sources` of a research answer now lists the sources that were actually used in synthesis, not every retrieved candidate.

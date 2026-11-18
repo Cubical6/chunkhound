@@ -40,6 +40,7 @@ from chunkhound.services.research.shared.validation import (
     validate_research_prerequisites,
 )
 from chunkhound.services.vector_cache import VectorCache
+from chunkhound.utils.path_scope import validate_path_scope
 
 # Response size limits (tokens)
 MAX_RESPONSE_TOKENS = 20000
@@ -544,7 +545,8 @@ EXAMPLES:
 - "What happens when a request hits /api/users?" — maps the request lifecycle
 - "Explain error handling patterns" — identifies cross-cutting concerns
 
-SCOPE: Use the path parameter to restrict analysis to a subdirectory for faster, focused results.
+SCOPE: path matches a directory or file path segment anywhere. In a multi-repo
+index, start with the repository directory (e.g. myrepo/tests) to stay in one repo.
 
 GIT HISTORY RESEARCH:
 - commit_range: Optional git revision range (e.g. 'HEAD~10..HEAD', 'v1.0..v2.0'). When provided, research incorporates code changed in that range.
@@ -727,7 +729,9 @@ async def search_impl(
         config: Application configuration controlling MCP semantic search strategy
         type: Search mode — "regex" for exact pattern matching, "semantic" for meaning-based similarity
         query: For regex: a regex pattern like "def authenticate" or "class.*Handler". For semantic: a natural language concept like "retry logic" or "database connection pooling"
-        path: Optional relative subdirectory to restrict search scope, e.g. "src/auth" or "lib/payments" (no leading slash)
+        path: Match a directory or file path segment anywhere. In a multi-repo
+            index, start with the repository directory (e.g. "myrepo/tests") to
+            stay in one repository.
         page_size: Number of results per page (1-100)
         offset: Starting offset for pagination
         commit_range: Optional git revision range (e.g. 'HEAD~10..HEAD', 'v1.0..v2.0'). When provided with type='semantic', searches changed code in that range.
@@ -753,6 +757,10 @@ async def search_impl(
 
     effective_commit_range = await _resolve_commit_range(
         commit_range, commit_hash, last_n_commits, services
+    )
+
+    scope_warning = validate_path_scope(
+        services.provider, path, vector_source, effective_commit_range
     )
 
     if type == "semantic":
@@ -808,6 +816,8 @@ async def search_impl(
     native_results = _convert_paths_to_native(results)
 
     response: dict[str, Any] = {"results": native_results, "pagination": pagination}
+    if scope_warning:
+        response["warnings"] = [scope_warning]
     return cast(SearchResponse, response)
 
 
@@ -852,7 +862,9 @@ async def deep_research_impl(
         llm_manager: LLM manager instance
         query: Natural language question about codebase architecture or behavior, e.g. "how does authentication work end-to-end?" or "explain the request lifecycle"
         progress: Optional Rich Progress instance for terminal UI (None for MCP)
-        path: Optional relative subdirectory to restrict analysis scope, e.g. "src/auth" or "lib/payments" (no leading slash)
+        path: Match a directory or file path segment anywhere. In a multi-repo
+            index, start with the repository directory (e.g. "myrepo/tests") to
+            stay in one repository.
         config: Application configuration (optional, defaults to environment config)
         commit_range: Optional git revision range (e.g. 'HEAD~10..HEAD', 'v1.0..v2.0'). When provided, research incorporates code changed in that range.
         commit_hash: Single commit hash — researches only that commit's diff (equivalent to '<hash>^..<hash>').
@@ -870,6 +882,10 @@ async def deep_research_impl(
 
     effective_commit_range = await _resolve_commit_range(
         commit_range, commit_hash, last_n_commits, services
+    )
+
+    scope_warning = validate_path_scope(
+        services.provider, path, vector_source, effective_commit_range
     )
 
     if effective_commit_range is not None and vector_source != "db":
@@ -897,6 +913,8 @@ async def deep_research_impl(
     )
 
     result = await research_service.deep_research(query, previous_query=previous_query)
+    if scope_warning:
+        result["answer"] = f"{scope_warning}\n\n{result.get('answer', '')}"
     return result
 
 
@@ -1139,6 +1157,8 @@ async def execute_tool(
                     f"({', '.join(ignored)}); searching the indexed corpus instead.\n\n"
                     + md
                 )
+            if result.get("warnings"):
+                md = "\n".join(result["warnings"]) + "\n\n" + md
             return md
 
     # String return types (e.g., websearch) pass through directly as markdown

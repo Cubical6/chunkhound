@@ -76,7 +76,9 @@ def add_search_subparser(subparsers: Any) -> argparse.ArgumentParser:
     search_parser.add_argument(
         "--path-filter",
         type=str,
-        help="Optional path filter (e.g., 'src/', 'tests/')",
+        help=("Match a directory or file path segment anywhere; in a multi-repo "
+              "index, start with the repository directory (e.g., 'myrepo/tests') "
+              "to stay in one repository"),
     )
 
     # Git diff / commit-range arguments
