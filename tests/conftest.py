@@ -181,6 +181,8 @@ def isolated_user_config(tmp_path_factory, monkeypatch, request):
     """Keep user-level config out of tests and their CLI subprocesses.
 
     Tests exercising global discovery can populate this home or override it.
+    Test subprocesses reuse pytest's synced environment so uv skips rebuilding
+    dynamic project metadata against an empty cache in this temporary HOME.
     Live integration tests retain their home-based CLI authentication; API keys
     and integration opt-ins are intentionally left unchanged for every test.
     """
@@ -190,6 +192,7 @@ def isolated_user_config(tmp_path_factory, monkeypatch, request):
     home = tmp_path_factory.mktemp("home")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("UV_NO_SYNC", "1")
 
 
 @pytest.fixture
