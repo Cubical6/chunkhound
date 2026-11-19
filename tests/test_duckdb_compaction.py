@@ -443,6 +443,52 @@ class TestCompactDatabase:
         assert db.get_chunks_by_file_id(old_file["id"]) == old_chunks
         assert db.compact_database() > 0
 
+    def test_failed_commit_keeps_later_file_stores_transactional(
+        self, populated_db: DuckDBProvider, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asyncio
+
+        db = populated_db
+        original_execute = duckdb.DuckDBPyConnection.execute
+        injected = {"failed": False}
+
+        def execute(conn: Any, sql: str, *args: Any, **kwargs: Any) -> Any:
+            if sql == "COMMIT" and not injected["failed"]:
+                injected["failed"] = True
+                original_execute(conn, "ROLLBACK")
+                raise duckdb.TransactionException("simulated failed COMMIT")
+            return original_execute(conn, sql, *args, **kwargs)
+
+        old_file = db.get_file_by_path("test_0.py")
+        assert old_file is not None
+        old_chunks = db.get_chunks_by_file_id(old_file["id"])
+
+        db.begin_transaction()
+        with monkeypatch.context() as fault:
+            fault.setattr(duckdb.DuckDBPyConnection, "execute", execute)
+            with pytest.raises(
+                duckdb.TransactionException, match="simulated failed COMMIT"
+            ):
+                db.commit_transaction()
+        assert injected["failed"]
+
+        def fail_plan(
+            file_id: int, chunks: list[Chunk]
+        ) -> tuple[list[int], list[Chunk]]:
+            raise RuntimeError("plan failed")
+
+        with pytest.raises(RuntimeError, match="plan failed"):
+            asyncio.run(db.store_file_result_async(
+                File(path="test_0.py", mtime=42.0, language=Language.PYTHON,
+                     size_bytes=200, content_hash="new hash"),
+                fail_plan,
+            ))
+        assert (
+            db.get_file_by_path("test_0.py")["content_hash"] == old_file["content_hash"]
+        )
+        assert db.get_chunks_by_file_id(old_file["id"]) == old_chunks
+        assert db.compact_database() > 0
+
     def test_fails_when_transaction_active(self, populated_db: DuckDBProvider) -> None:
         """Compaction raises RuntimeError during active transaction."""
         populated_db._execute_in_db_thread_sync("begin_transaction")

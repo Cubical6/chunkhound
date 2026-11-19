@@ -7,6 +7,7 @@ a copied index) - so the whole file is re-parsed and re-embedded.
 """
 
 import asyncio
+import os
 from pathlib import Path
 
 import pytest
@@ -43,6 +44,31 @@ def test_process_file_stores_and_refreshes_content_hash(tmp_path: Path):
         result = asyncio.run(coordinator.process_file(test_file, skip_embeddings=True))
         assert result["status"] == "success"
         assert _stored_hash(provider, "live.py") == compute_file_hash(test_file)
+    finally:
+        provider.disconnect()
+
+
+def test_process_file_reindexes_a_file_with_a_pre_epoch_mtime(tmp_path: Path):
+    pytest.importorskip("duckdb")
+
+    provider = DuckDBProvider(db_path=tmp_path / "db.duckdb", base_directory=tmp_path)
+    provider.connect()
+    try:
+        coordinator = IndexingCoordinator(provider, tmp_path)
+        test_file = tmp_path / "old_timestamp.py"
+
+        test_file.write_text("def old_marker():\n    return 1\n")
+        result = asyncio.run(coordinator.process_file(test_file, skip_embeddings=True))
+        assert result["status"] == "success"
+
+        test_file.write_text("def new_pre_epoch_marker():\n    return 2\n")
+        os.utime(test_file, (-315619200, -315619200))
+        assert test_file.stat().st_mtime < 0
+        result = asyncio.run(coordinator.process_file(test_file, skip_embeddings=True))
+        assert result["status"] == "success"
+
+        assert provider.search_chunks_regex("new_pre_epoch_marker")
+        assert not provider.search_chunks_regex("old_marker")
     finally:
         provider.disconnect()
 

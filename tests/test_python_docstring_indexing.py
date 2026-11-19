@@ -4,8 +4,6 @@ This module tests the fix for module-level docstrings and ensures
 all types of docstrings (module, function, class) are properly indexed.
 """
 
-import os
-
 import pytest
 from pathlib import Path
 import tempfile
@@ -45,20 +43,6 @@ def test_services(temp_db_dir):
         services.provider.disconnect()
     except Exception:
         pass
-
-
-async def test_reindex_file_with_pre_epoch_mtime(test_services, temp_db_dir):
-    test_file = temp_db_dir / "old_timestamp.py"
-    test_file.write_text("def old_marker():\n    return 1\n")
-    await test_services.indexing_coordinator.process_file(test_file)
-
-    test_file.write_text("def new_pre_epoch_marker():\n    return 2\n")
-    os.utime(test_file, (-315619200, -315619200))
-    assert test_file.stat().st_mtime < 0
-    await test_services.indexing_coordinator.process_file(test_file)
-
-    assert test_services.provider.search_chunks_regex("new_pre_epoch_marker")
-    assert not test_services.provider.search_chunks_regex("old_marker")
 
 
 async def test_module_docstring_indexed(test_services, temp_db_dir):
