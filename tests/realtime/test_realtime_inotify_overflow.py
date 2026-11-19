@@ -54,6 +54,36 @@ def test_kernel_overflow_reaches_the_service() -> None:
         observer.join(timeout=1.0)
 
 
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="inotify is Linux-only"
+)
+def test_watchdog_4_libc_error_name_keeps_inotify_observer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    import watchdog.utils as watchdog_utils
+
+    import chunkhound.services.realtime.startup as startup_module
+
+    # Load watchdog's own imports before simulating 4.x.
+    importlib.import_module("watchdog.observers")
+
+    class UnsupportedLibcError(Exception):
+        pass
+
+    monkeypatch.delattr(watchdog_utils, "UnsupportedLibcError", raising=False)
+    monkeypatch.setattr(
+        watchdog_utils, "UnsupportedLibc", UnsupportedLibcError, raising=False
+    )
+    observer, detection = startup_module._create_watchdog_observer(lambda: None)
+    try:
+        assert observer is not None
+        assert detection in ("active", "unavailable")
+    finally:
+        observer.stop()
+
+
 @pytest.mark.asyncio
 async def test_overflow_requests_a_loss_of_sync_resync(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

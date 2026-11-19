@@ -45,13 +45,19 @@ def create_inotify_observer(
     """
     if not sys.platform.startswith("linux"):
         return None
-    from watchdog.utils import UnsupportedLibcError
+    import watchdog.utils as watchdog_utils
+
+    # watchdog 5.0 renamed UnsupportedLibc to UnsupportedLibcError.
+    unsupported_libc = (
+        getattr(watchdog_utils, "UnsupportedLibcError", None)
+        or getattr(watchdog_utils, "UnsupportedLibc")
+    )
 
     # The same guard watchdog's own observer selection uses on Linux.
     try:
         from watchdog.observers import inotify_c
         from watchdog.observers.inotify import InotifyObserver
-    except (ImportError, UnsupportedLibcError):
+    except (ImportError, unsupported_libc):
         return None
     inotify_fd_cls = getattr(inotify_c, "InotifyFD", None)
     if inotify_fd_cls is None:
