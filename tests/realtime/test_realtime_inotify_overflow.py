@@ -54,6 +54,74 @@ def test_kernel_overflow_reaches_the_service() -> None:
         observer.join(timeout=1.0)
 
 
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="inotify is Linux-only"
+)
+def test_watchdog_4_libc_error_name_keeps_inotify_observer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    import watchdog.utils as watchdog_utils
+    from watchdog.observers.inotify import InotifyObserver
+    from watchdog.version import VERSION_INFO
+
+    import chunkhound.services.realtime.startup as startup_module
+
+    # Load watchdog's own imports before simulating 4.x.
+    importlib.import_module("watchdog.observers")
+
+    class UnsupportedLibcError(Exception):
+        pass
+
+    monkeypatch.delattr(watchdog_utils, "UnsupportedLibcError", raising=False)
+    monkeypatch.setattr(
+        watchdog_utils, "UnsupportedLibc", UnsupportedLibcError, raising=False
+    )
+    observer, detection = startup_module._create_watchdog_observer(lambda: None)
+    try:
+        # inotify, not a polling fallback.
+        assert isinstance(observer, InotifyObserver)
+        assert detection == ("active" if VERSION_INFO >= (7, 1) else "unavailable")
+    finally:
+        observer.stop()
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="inotify is Linux-only"
+)
+def test_watchdog_4_unsupported_libc_means_no_hook(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import watchdog.observers as watchdog_observers
+    import watchdog.utils as watchdog_utils
+
+    from chunkhound.services.realtime.inotify_overflow import (
+        create_inotify_observer,
+    )
+
+    class UnsupportedLibc(Exception):  # noqa: N818 - watchdog 4.x exception name
+        pass
+
+    class _NoLibcFinder:
+        def find_spec(self, name: str, path: Any, target: Any = None) -> None:
+            if name == "watchdog.observers.inotify_c":
+                raise UnsupportedLibc("Unsupported libc version found: musl")
+            return None
+
+    # watchdog 4.x: only UnsupportedLibc, and importing inotify_c raises it.
+    monkeypatch.delattr(watchdog_utils, "UnsupportedLibcError", raising=False)
+    monkeypatch.setattr(
+        watchdog_utils, "UnsupportedLibc", UnsupportedLibc, raising=False
+    )
+    monkeypatch.delattr(watchdog_observers, "inotify_c", raising=False)
+    monkeypatch.delitem(sys.modules, "watchdog.observers.inotify_c", raising=False)
+    monkeypatch.delitem(sys.modules, "watchdog.observers.inotify", raising=False)
+    monkeypatch.setattr(sys, "meta_path", [_NoLibcFinder(), *sys.meta_path])
+
+    assert create_inotify_observer(lambda: None) is None
+
+
 @pytest.mark.asyncio
 async def test_overflow_requests_a_loss_of_sync_resync(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

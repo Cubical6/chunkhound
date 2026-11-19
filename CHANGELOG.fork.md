@@ -43,6 +43,7 @@ wrote it.
 
 ## Fixed
 
+- **Realtime on watchdog 4.x** — On Linux with watchdog 4.0.x, realtime indexing uses inotify again instead of falling back to polling with "cannot import name 'UnsupportedLibcError'". As with watchdog 5.x and 6.x, inotify overflow detection reports `unavailable` there: changes the kernel drops when its event queue overflows are not re-indexed until the file changes again. Detection needs watchdog 7.1 or newer.
 - **C4 output and git paths on Windows** — C4 files (lock, model, evidence, contract) are written with LF line endings on every platform, so the lock file is byte-stable. Git output is read as UTF-8, so a file with a non-ASCII name no longer costs its repository the source links on Windows.
 - **Crashed compaction swap recovery** — A native DuckDB compaction swap that was interrupted is now recovered before the CLI preflight and before a connection opens, so an empty live database is no longer created over it.
 - **Research source list** — `metadata.sources` of a research answer now lists the sources that were actually used in synthesis, not every retrieved candidate.
