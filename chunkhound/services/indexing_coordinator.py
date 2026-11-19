@@ -63,6 +63,7 @@ from chunkhound.utils.file_patterns import (
 )
 from chunkhound.utils.hashing import compute_file_hash
 from chunkhound.utils.logging_guard import log_if_not_mcp
+from chunkhound.utils.mtime import clamp_mtime
 from chunkhound.utils.parent_watch import exit_when_parent_dies
 
 from .base_service import BaseService
@@ -1518,7 +1519,8 @@ class IndexingCoordinator(BaseService):
                                 if stored_mtime is not None
                                 else -1.0
                             )
-                            same_mtime = abs(smt - float(st.st_mtime)) <= mtime_eps
+                            mtime = clamp_mtime(st.st_mtime)
+                            same_mtime = abs(smt - mtime) <= mtime_eps
                             if same_size and same_mtime:
                                 # Fast skip - trust filesystem metadata (mtime+size match)
                                 skipped_unchanged += 1
@@ -1532,7 +1534,7 @@ class IndexingCoordinator(BaseService):
                                     skipped_unchanged += 1
                                     reasons["ok"] += 1
                                     mtime_refresh.append(
-                                        (rel, float(st.st_mtime), db_hash)
+                                        (rel, mtime, db_hash)
                                     )
                                 else:
                                     # Content actually changed (or hash unavailable) - reindex

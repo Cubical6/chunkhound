@@ -44,6 +44,7 @@ from loguru import logger
 from chunkhound.core.utils.path_utils import get_relative_path_safe
 from chunkhound.interfaces.database_provider import DatabaseProvider
 from chunkhound.utils.hashing import compute_file_hash
+from chunkhound.utils.mtime import clamp_mtime
 
 # The same columns and the same mtime expression as the Rust differ's
 # snapshot (src/db/duckdb_backend/read.rs FILE_STATE_SELECT): casting the
@@ -105,7 +106,8 @@ def classify_files(
         except OSError:
             changed.append(path)
             continue
-        if abs(st.st_mtime - float(row["mtime"])) > mtime_epsilon:
+        mtime = clamp_mtime(st.st_mtime)
+        if abs(mtime - float(row["mtime"])) > mtime_epsilon:
             stored_hash = row.get("content_hash")
             try:
                 same_bytes = (
@@ -117,7 +119,7 @@ def classify_files(
                 same_bytes = False
             if same_bytes:
                 skipped_by_hash += 1
-                refresh.append((rel, st.st_mtime, str(stored_hash)))
+                refresh.append((rel, mtime, str(stored_hash)))
             else:
                 changed.append(path)
         elif row.get("size") is not None and int(row["size"]) != st.st_size:
