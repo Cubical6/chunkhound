@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use super::config::PipelineConfig;
-use super::differ::DiffResult;
+use super::differ::{signed_epoch_seconds, DiffResult};
 use super::report::PipelineReport;
 
 use crate::db::{check_disk_usage_limit, create_backend, DbBackend, DbConfig};
@@ -415,8 +415,7 @@ impl IndexingPipeline {
                     let mtime = meta
                         .modified()
                         .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs_f64())
+                        .map(signed_epoch_seconds)
                         .unwrap_or(0.0);
                     Some((p.clone(), (meta.len(), mtime)))
                 })
@@ -1397,8 +1396,7 @@ impl IndexingPipeline {
             let mtime = meta
                 .as_ref()
                 .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs_f64())
+                .map(signed_epoch_seconds)
                 .unwrap_or(0.0);
             (meta.map_or(0, |m| m.len()), mtime)
         })

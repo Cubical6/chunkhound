@@ -7,6 +7,14 @@ use std::time::SystemTime;
 
 use crate::types::DbFileEntry;
 
+/// Convert a filesystem timestamp to signed seconds since the Unix epoch.
+pub(crate) fn signed_epoch_seconds(time: SystemTime) -> f64 {
+    match time.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs_f64(),
+        Err(error) => -error.duration().as_secs_f64(),
+    }
+}
+
 /// Result of diffing the filesystem against the DB.
 #[derive(Debug, Default)]
 pub(crate) struct DiffResult {
@@ -134,8 +142,7 @@ pub(crate) fn compute_diff(
                 let mtime = meta
                     .as_ref()
                     .and_then(|m| m.modified().ok())
-                    .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs_f64())
+                    .map(signed_epoch_seconds)
                     .unwrap_or(0.0);
                 (meta.map_or(0, |m| m.len()), mtime)
             });
@@ -149,11 +156,7 @@ pub(crate) fn compute_diff(
             std::fs::metadata(abs_path)
                 .ok()
                 .and_then(|m| m.modified().ok())
-                .map(|t| {
-                    t.duration_since(SystemTime::UNIX_EPOCH)
-                        .map(|d| d.as_secs_f64())
-                        .unwrap_or(0.0)
-                })
+                .map(signed_epoch_seconds)
         };
 
         // Relative key supplied by the caller (see `rel_keys` doc above).
@@ -342,11 +345,11 @@ pub(crate) fn compute_diff(
 /// or the `std::fs::metadata()` fallback inlined in `compute_diff`).
 #[cfg(test)]
 fn file_mtime(path: &Path) -> Option<f64> {
-    std::fs::metadata(path).ok()?.modified().ok().map(|t| {
-        t.duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_secs_f64())
-            .unwrap_or(0.0)
-    })
+    std::fs::metadata(path)
+        .ok()?
+        .modified()
+        .ok()
+        .map(signed_epoch_seconds)
 }
 
 /// Compute a content hash for `path`, formatted to match Python's
@@ -378,6 +381,14 @@ impl DiffResult {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn test_signed_epoch_seconds() {
+        let offset = std::time::Duration::from_millis(1500);
+        assert_eq!(signed_epoch_seconds(SystemTime::UNIX_EPOCH - offset), -1.5);
+        assert_eq!(signed_epoch_seconds(SystemTime::UNIX_EPOCH), 0.0);
+        assert_eq!(signed_epoch_seconds(SystemTime::UNIX_EPOCH + offset), 1.5);
+    }
 
     /// Build a `rel_keys` map for a single (path, key) pair — the common case
     /// in these tests, where the on-disk path's DB key is just its filename.

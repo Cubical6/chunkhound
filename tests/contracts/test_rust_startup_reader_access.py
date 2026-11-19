@@ -145,6 +145,39 @@ def test_editing_one_file_reindexes_it_and_keeps_every_other_file(
     assert files_table_paths(db_dir) == {"alpha.py", "beta.py", "gamma.py"}
 
 
+def test_same_size_pre1970_edit_is_reindexed(tmp_path, monkeypatch):
+    """The default Rust path must not collapse distinct negative mtimes to zero."""
+    monkeypatch.delenv("CHUNKHOUND_USE_RUST", raising=False)
+    root = tmp_path / "repo"
+    root.mkdir()
+    source = root / "alpha.py"
+    source.write_text("def aaaa_marker():\n    return 1\n")
+    os.utime(source, (-1e8, -1e8))
+    db_dir = tmp_path / "db"
+
+    configure_registry(_config(root, db_dir))
+    coordinator = create_indexing_coordinator()
+    try:
+        initial = asyncio.run(coordinator.process_directory(root, patterns=["**/*.py"]))
+        assert initial["pipeline"] == "rust", initial
+        assert initial["status"] == "success", initial
+
+        source.write_text("def bbbb_marker():\n    return 1\n")
+        os.utime(source, (-2e8, -2e8))
+        updated = asyncio.run(coordinator.process_directory(root, patterns=["**/*.py"]))
+        assert updated["pipeline"] == "rust", updated
+        assert updated["status"] == "success", updated
+    finally:
+        disconnect_registry_db()
+
+    conn = duckdb.connect(str(db_dir / "chunks.db"))
+    try:
+        chunks = conn.execute("SELECT code FROM chunks").fetchall()
+        assert any("bbbb_marker" in text for (text,) in chunks), chunks
+    finally:
+        conn.close()
+
+
 def _execute(db_dir: Path, sql: str, params: list[object]) -> None:
     conn = duckdb.connect(str(db_dir / "chunks.db"))
     try:
