@@ -22,6 +22,7 @@ from chunkhound.providers.database.serial_database_provider import (
     SerialDatabaseProvider,
 )
 from chunkhound.utils.chunk_hashing import generate_chunk_id
+from chunkhound.utils.mtime import clamp_mtime
 
 # Type hinting only
 if TYPE_CHECKING:
@@ -572,7 +573,7 @@ class LanceDBProvider(SerialDatabaseProvider):
             "id": file.id or int(time.time() * 1000000),
             "path": normalized_path,
             "size": file.size_bytes,
-            "modified_time": file.mtime,
+            "modified_time": clamp_mtime(file.mtime),
             "content_hash": getattr(file, "content_hash", None) or "",
             "indexed_time": time.time(),
             "language": str(
@@ -774,7 +775,7 @@ class LanceDBProvider(SerialDatabaseProvider):
             if size_bytes is not None:
                 updated_file["size"] = size_bytes
             if mtime is not None:
-                updated_file["modified_time"] = mtime
+                updated_file["modified_time"] = clamp_mtime(mtime)
             if content_hash is not None:
                 updated_file["content_hash"] = content_hash
             updated_file["indexed_time"] = time.time()
@@ -814,7 +815,8 @@ class LanceDBProvider(SerialDatabaseProvider):
         if not self._files_table:
             return 0
         wanted = {  # type: ignore[unreachable]
-            path: (float(mtime), content_hash) for path, mtime, content_hash in entries
+            path: (clamp_mtime(float(mtime)), content_hash)
+            for path, mtime, content_hash in entries
         }
         in_list = ", ".join(_sql_text(path) for path in wanted)
         rows = (
@@ -883,7 +885,7 @@ class LanceDBProvider(SerialDatabaseProvider):
             "id": file_id,
             "path": path,
             "size": size,
-            "modified_time": mtime,
+            "modified_time": clamp_mtime(mtime),
             "content_hash": content_hash or "",
             "indexed_time": time.time(),
             "language": language or "",

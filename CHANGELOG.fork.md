@@ -43,6 +43,7 @@ wrote it.
 
 ## Fixed
 
+- **Out-of-range modification times on the Python side** — A file dated outside the database's timestamp range is no longer hashed again on every index run, and no longer stops the stored times of other unchanged files from being updated; Python now stores and compares the same clamped time as the Rust pipeline.
 - **Out-of-range modification times no longer abort indexing** — A file dated far before 1970 or far in the future, outside the database's timestamp range, no longer makes the Rust index run fail with "Epoch seconds out of range"; its time is stored clamped to the nearest supported value.
 - **Same-size edits of pre-1970 files on the Rust pipeline** — A file dated before 1970 that is edited without changing its size is re-indexed again; before, search kept returning its old content until a force reindex.
 - **File stores after a failed compaction commit** — When a commit failed during auto-compaction, every later file store ran without a transaction until the daemon restarted, so a store that failed halfway kept the new content hash over stale or missing chunks and the file was never re-indexed. Auto-compaction also stayed off. Both now recover after the failed commit.
