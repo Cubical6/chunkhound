@@ -36,6 +36,7 @@ from chunkhound.services.rust_incremental_precheck import (
     find_rust_incremental_work,
 )
 from tests.contracts.pipeline_harness import (
+    collect_chunk_tuples_from_duckdb,
     disconnect_registry_db,
     files_table_paths,
     index_with_rust,
@@ -170,12 +171,38 @@ def test_same_size_pre1970_edit_is_reindexed(tmp_path, monkeypatch):
     finally:
         disconnect_registry_db()
 
-    conn = duckdb.connect(str(db_dir / "chunks.db"))
+    chunks = collect_chunk_tuples_from_duckdb(db_dir)
+    assert any("bbbb_marker" in code for (_, _, _, code, _, _) in chunks), chunks
+
+
+@pytest.mark.parametrize("mtime", [-1e13, 1e13])
+def test_out_of_range_mtime_does_not_abort_indexing(tmp_path, monkeypatch, mtime):
+    """An extreme file date must not prevent this or later Rust index runs."""
+    monkeypatch.setenv("CHUNKHOUND_USE_RUST", "1")
+    root = tmp_path / "repo"
+    root.mkdir()
+    source = root / "alpha.py"
+    source.write_text("def alpha_marker():\n    return 1\n")
+    os.utime(source, (mtime, mtime))
+    if os.stat(source).st_mtime != mtime:
+        pytest.skip("filesystem cannot hold the requested modification time")
+    assert os.stat(source).st_mtime == mtime
+    (root / "beta.py").write_text("def beta_marker():\n    return 2\n")
+    db_dir = tmp_path / "db"
+
+    configure_registry(_config(root, db_dir))
+    coordinator = create_indexing_coordinator()
     try:
-        chunks = conn.execute("SELECT code FROM chunks").fetchall()
-        assert any("bbbb_marker" in text for (text,) in chunks), chunks
+        for _ in range(2):
+            result = asyncio.run(
+                coordinator.process_directory(root, patterns=["**/*.py"])
+            )
+            assert result["pipeline"] == "rust", result
+            assert result["status"] == "success", result
     finally:
-        conn.close()
+        disconnect_registry_db()
+
+    assert files_table_paths(db_dir) == {"alpha.py", "beta.py"}
 
 
 def _execute(db_dir: Path, sql: str, params: list[object]) -> None:

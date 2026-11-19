@@ -7,12 +7,20 @@ use std::time::SystemTime;
 
 use crate::types::DbFileEntry;
 
-/// Convert a filesystem timestamp to signed seconds since the Unix epoch.
+/// Lower epoch bound with margin inside DuckDB's roughly ±9.22e12-second range.
+/// Both bounds round-trip exactly through to_timestamp -> TIMESTAMP -> TIMESTAMPTZ
+/// -> epoch, including local-timezone casts, so clamped mtimes stay unchanged.
+const MIN_MTIME_EPOCH_SECONDS: f64 = -9_000_000_000_000.0;
+/// Upper epoch bound with the same conversion and timezone margin as the lower bound.
+const MAX_MTIME_EPOCH_SECONDS: f64 = 9_000_000_000_000.0;
+
+/// Convert a filesystem timestamp to signed seconds within DuckDB's safe range.
 pub(crate) fn signed_epoch_seconds(time: SystemTime) -> f64 {
-    match time.duration_since(SystemTime::UNIX_EPOCH) {
+    let seconds = match time.duration_since(SystemTime::UNIX_EPOCH) {
         Ok(duration) => duration.as_secs_f64(),
         Err(error) => -error.duration().as_secs_f64(),
-    }
+    };
+    seconds.clamp(MIN_MTIME_EPOCH_SECONDS, MAX_MTIME_EPOCH_SECONDS)
 }
 
 /// Result of diffing the filesystem against the DB.
@@ -388,6 +396,16 @@ mod tests {
         assert_eq!(signed_epoch_seconds(SystemTime::UNIX_EPOCH - offset), -1.5);
         assert_eq!(signed_epoch_seconds(SystemTime::UNIX_EPOCH), 0.0);
         assert_eq!(signed_epoch_seconds(SystemTime::UNIX_EPOCH + offset), 1.5);
+
+        let extreme_offset = std::time::Duration::from_secs(10_000_000_000_000);
+        assert_eq!(
+            signed_epoch_seconds(SystemTime::UNIX_EPOCH - extreme_offset),
+            MIN_MTIME_EPOCH_SECONDS
+        );
+        assert_eq!(
+            signed_epoch_seconds(SystemTime::UNIX_EPOCH + extreme_offset),
+            MAX_MTIME_EPOCH_SECONDS
+        );
     }
 
     /// Build a `rel_keys` map for a single (path, key) pair — the common case
