@@ -1,18 +1,23 @@
-"""Progress contracts through the shared handler and an in-memory MCP session."""
+"""Progress contracts through shared handlers and real MCP transports."""
 
 import asyncio
+import json
+import socket
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import anyio
+import httpx
 import pytest
+import uvicorn
 from mcp import ClientSession
 from mcp.server.session import ServerSession
 from mcp.shared.memory import create_client_server_memory_streams
 
 from chunkhound.core.config.config import Config
 from chunkhound.mcp_server.base import MCPServerBase
+from chunkhound.mcp_server.http_server import HttpMCPServer
 from chunkhound.mcp_server.tools import TOOL_REGISTRY
 
 ANSWER = "Research answer unchanged"
@@ -31,7 +36,8 @@ class InMemoryServer(MCPServerBase):
 
 
 @pytest.fixture
-async def progress_client(monkeypatch, tmp_path):
+async def slow_research_tool(monkeypatch):
+    finished = asyncio.Event()
     monkeypatch.setattr(
         "chunkhound.mcp_server.progress.HEARTBEAT_INTERVAL_SECONDS", 0.05
     )
@@ -43,6 +49,7 @@ async def progress_client(monkeypatch, tmp_path):
                 progress.emit_event("phase", "Synthesizing answer", metadata={}),
             )
         await asyncio.sleep(0.18)
+        finished.set()
         return {"answer": ANSWER}
 
     monkeypatch.setitem(
@@ -50,6 +57,11 @@ async def progress_client(monkeypatch, tmp_path):
         "code_research",
         replace(TOOL_REGISTRY["code_research"], implementation=slow_research),
     )
+    return finished
+
+
+@pytest.fixture
+async def progress_client(slow_research_tool, tmp_path):
     server = InMemoryServer(
         Config(target_dir=tmp_path, database={"path": str(tmp_path / "test.db")})
     )
@@ -80,6 +92,120 @@ async def progress_client(monkeypatch, tmp_path):
                 tasks.cancel_scope.cancel()
 
     return connect
+
+
+@pytest.fixture
+async def progress_http_url(slow_research_tool, monkeypatch, tmp_path):
+    server = HttpMCPServer(
+        Config(target_dir=tmp_path, database={"path": str(tmp_path / "http.db")})
+    )
+    server.services = MagicMock()
+    server.embedding_manager = MagicMock()
+    server.llm_manager = MagicMock()
+    # Only replace database/provider startup; use the production HTTP app,
+    # session lifecycle, handler registration and socket transport.
+    monkeypatch.setattr(server, "initialize", AsyncMock())
+    monkeypatch.setattr(server, "cleanup", AsyncMock())
+    monkeypatch.setattr(
+        server, "ensure_tool_services", AsyncMock(return_value=server.services)
+    )
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        host, port = listener.getsockname()
+        http_server = uvicorn.Server(
+            uvicorn.Config(server._build_app(), log_level="error", lifespan="on")
+        )
+        task = asyncio.create_task(http_server.serve(sockets=[listener]))
+        try:
+            async with asyncio.timeout(5):
+                while not http_server.started:
+                    if task.done():
+                        await task
+                        pytest.fail("HTTP server exited before startup")
+                    await asyncio.sleep(0.01)
+            yield f"http://{host}:{port}/mcp"
+        finally:
+            http_server.should_exit = True
+            try:
+                await asyncio.wait_for(task, timeout=5)
+            finally:
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_http_request_sse_stream_delivers_progress_before_result(
+    progress_http_url, slow_research_tool
+):
+    headers = {"Accept": "application/json, text/event-stream"}
+    async with httpx.AsyncClient(headers=headers, timeout=5, trust_env=False) as client:
+        initialized = await client.post(
+            progress_http_url,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "progress-test", "version": "1"},
+                },
+            },
+        )
+        initialized.raise_for_status()
+        client.headers["Mcp-Session-Id"] = initialized.headers["Mcp-Session-Id"]
+        client.headers["MCP-Protocol-Version"] = "2025-11-25"
+        notified = await client.post(
+            progress_http_url,
+            json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+        )
+        notified.raise_for_status()
+        frames = []
+        async with client.stream(
+            "POST",
+            progress_http_url,
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "code_research",
+                    "arguments": {"query": "architecture"},
+                    "_meta": {"progressToken": "http-research"},
+                },
+            },
+        ) as response:
+            response.raise_for_status()
+            assert "text/event-stream" in response.headers["content-type"]
+            async for line in response.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                frame = json.loads(line.removeprefix("data:").strip())
+                if not frames:
+                    # Prove live delivery, not merely ordered frames buffered
+                    # until the research call has finished.
+                    assert frame.get("method") == "notifications/progress"
+                    assert not slow_research_tool.is_set()
+                frames.append(frame)
+
+        progress = frames[:-1]
+        assert len(progress) >= 3  # Two research phases plus an idle heartbeat.
+        assert all(frame["method"] == "notifications/progress" for frame in progress)
+        params = [frame["params"] for frame in progress]
+        assert all(p["progressToken"] == "http-research" for p in params)
+        values = [p["progress"] for p in params]
+        assert all(a < b for a, b in zip(values, values[1:]))
+        messages = [p["message"] for p in params]
+        assert "Exploring sources" in messages
+        assert "Synthesizing answer" in messages
+        assert any("code_research still running" in message for message in messages)
+        assert frames[-1]["id"] == 2
+        result = frames[-1]["result"]
+        assert not result.get("isError", False)
+        assert result["content"][0]["text"] == ANSWER
+        terminated = await client.delete(progress_http_url)
+        terminated.raise_for_status()
 
 
 async def test_progress_arrives_before_unchanged_result(progress_client):
