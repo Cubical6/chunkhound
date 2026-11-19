@@ -62,12 +62,6 @@ class File:
                 "size_bytes", self.size_bytes, "File size cannot be negative"
             )
 
-        # mtime validation
-        if self.mtime < 0:
-            raise ValidationError(
-                "mtime", self.mtime, "Modification time cannot be negative"
-            )
-
     @staticmethod
     def _detect_language(file_path: Path) -> Language | None:
         """Detect language from file content for ambiguous extensions.
