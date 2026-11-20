@@ -203,11 +203,11 @@ async def test_research_runs_log_only_their_own_usage(
         await service.deep_research("query B")
     await provider.complete("unrelated")
 
-    runs = {
-        record["query"]: record
-        for record in records(tmp_path)
-        if record["event"] == "research_run"
-    }
+    run_records = [
+        record for record in records(tmp_path) if record["event"] == "research_run"
+    ]
+    assert len(run_records) == 2
+    runs = {record["query"]: record for record in run_records}
     assert set(runs) == {"query A", "query B"}
     for query in runs:
         synthesis_usage = {

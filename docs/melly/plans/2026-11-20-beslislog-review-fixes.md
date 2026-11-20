@@ -46,7 +46,7 @@ At most ~15 lines:
 - **Notes:** Do not change the locking code. Issue #90 may later replace the blocking lock; this phase only removes the start-up flakiness.
 
 ## Phase 2: research decision log tests and usage fixtures (item 12, item 2, old item 18)
-- [ ] Done
+- [x] Done
 - **Depends on:** none
 - **Model:** `openai-codex/gpt-6.1-sol` / `medium`
 - **Goal:** The usage-isolation test counts records; test fixtures count usage like real providers; the trace test goes through public methods.
@@ -104,6 +104,7 @@ Phases 1, 2 and 3 are independent. Run them in sequence in this worktree, or in 
 | Date | Phase | sessionId | Commit | Notes |
 |---|---|---|---|---|
 | 2026-11-20 | 1 | 01a1fa6b-211d-737f-ae4f-f0a0233039d6 | `test(decision-log): …` | 66 passed; mutation (append without O_NOFOLLOW) fails only the new symlinked-log test, checked by Claude in a scratch copy; smoke 14 passed |
+| 2026-11-20 | 2 | 01a1fa6c-d20c-737f-ae4f-f0a28367dd6d | `test(research): …` | Verify 624 passed; importers 549 passed, 1 skipped; mutation (duplicate `research_run`) fails the item-12 test. Deviations: the two `_requests_made += 1` left in `fake_providers.py` belong to `FakeEmbeddingProvider`, which has no LLM usage scope (the plan's premise was wrong there). Old item 18 kept as is: the public path `detect_and_fill_gaps` needs clustering, shard gap detection, gap embeddings and unification before it selects, far over the ~40-line setup limit |
 
 ---
 
