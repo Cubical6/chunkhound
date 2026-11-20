@@ -18,6 +18,10 @@ from mcp.shared.memory import create_client_server_memory_streams
 from chunkhound.core.config.config import Config
 from chunkhound.mcp_server.base import MCPServerBase
 from chunkhound.mcp_server.http_server import HttpMCPServer
+from chunkhound.mcp_server.progress import (
+    MIN_PROGRESS_INTERVAL_SECONDS,
+    McpProgressReporter,
+)
 from chunkhound.mcp_server.tools import TOOL_REGISTRY
 
 ANSWER = "Research answer unchanged"
@@ -38,8 +42,13 @@ class InMemoryServer(MCPServerBase):
 @pytest.fixture
 async def slow_research_tool(monkeypatch):
     finished = asyncio.Event()
+    may_finish = asyncio.Event()
+    may_finish.set()
     monkeypatch.setattr(
         "chunkhound.mcp_server.progress.HEARTBEAT_INTERVAL_SECONDS", 0.05
+    )
+    monkeypatch.setattr(
+        "chunkhound.mcp_server.progress.MIN_PROGRESS_INTERVAL_SECONDS", 0.02
     )
 
     async def slow_research(query: str, progress=None):
@@ -49,6 +58,7 @@ async def slow_research_tool(monkeypatch):
                 progress.emit_event("phase", "Synthesizing answer", metadata={}),
             )
         await asyncio.sleep(0.18)
+        await may_finish.wait()
         finished.set()
         return {"answer": ANSWER}
 
@@ -57,7 +67,7 @@ async def slow_research_tool(monkeypatch):
         "code_research",
         replace(TOOL_REGISTRY["code_research"], implementation=slow_research),
     )
-    return finished
+    return finished, may_finish
 
 
 @pytest.fixture
@@ -118,7 +128,7 @@ async def progress_http_url(slow_research_tool, monkeypatch, tmp_path):
         )
         task = asyncio.create_task(http_server.serve(sockets=[listener]))
         try:
-            async with asyncio.timeout(5):
+            with anyio.fail_after(5):
                 while not http_server.started:
                     if task.done():
                         await task
@@ -138,6 +148,8 @@ async def progress_http_url(slow_research_tool, monkeypatch, tmp_path):
 async def test_http_request_sse_stream_delivers_progress_before_result(
     progress_http_url, slow_research_tool
 ):
+    finished, may_finish = slow_research_tool
+    may_finish.clear()  # Keep research alive until the client sees a heartbeat.
     headers = {"Accept": "application/json, text/event-stream"}
     async with httpx.AsyncClient(headers=headers, timeout=5, trust_env=False) as client:
         initialized = await client.post(
@@ -186,18 +198,19 @@ async def test_http_request_sse_stream_delivers_progress_before_result(
                     # Prove live delivery, not merely ordered frames buffered
                     # until the research call has finished.
                     assert frame.get("method") == "notifications/progress"
-                    assert not slow_research_tool.is_set()
+                    assert not finished.is_set()
                 frames.append(frame)
+                if "still running" in frame.get("params", {}).get("message", ""):
+                    may_finish.set()
 
         progress = frames[:-1]
-        assert len(progress) >= 3  # Two research phases plus an idle heartbeat.
+        assert len(progress) >= 2  # Latest research phase plus an idle heartbeat.
         assert all(frame["method"] == "notifications/progress" for frame in progress)
         params = [frame["params"] for frame in progress]
         assert all(p["progressToken"] == "http-research" for p in params)
         values = [p["progress"] for p in params]
         assert all(a < b for a, b in zip(values, values[1:]))
         messages = [p["message"] for p in params]
-        assert "Exploring sources" in messages
         assert "Synthesizing answer" in messages
         assert any("code_research still running" in message for message in messages)
         assert frames[-1]["id"] == 2
@@ -208,21 +221,30 @@ async def test_http_request_sse_stream_delivers_progress_before_result(
         terminated.raise_for_status()
 
 
-async def test_progress_arrives_before_unchanged_result(progress_client):
+async def test_progress_arrives_before_unchanged_result(
+    progress_client, slow_research_tool
+):
+    _, may_finish = slow_research_tool
+    may_finish.clear()
     received = []
     finished = False
 
     async def on_progress(progress, total, message):
         received.append((progress, message, finished))
+        if "still running" in message:
+            may_finish.set()
 
     async with progress_client() as client:
         tools = await client.list_tools()
         research = next(tool for tool in tools.tools if tool.name == "code_research")
         assert "progress" not in research.input_schema["properties"]
         assert "progress_reporter" not in research.input_schema["properties"]
-        result = await client.call_tool(
-            "code_research", {"query": "architecture"}, progress_callback=on_progress
-        )
+        with anyio.fail_after(5):
+            result = await client.call_tool(
+                "code_research",
+                {"query": "architecture"},
+                progress_callback=on_progress,
+            )
         finished = True
         snapshot = list(received)
         await asyncio.sleep(0.12)
@@ -246,8 +268,7 @@ async def test_research_events_become_progress_messages(progress_client):
             "code_research", {"query": "architecture"}, progress_callback=on_progress
         )
     assert result.content[0].text == ANSWER
-    assert "Exploring sources" in messages
-    assert "Synthesizing answer" in messages
+    assert "Synthesizing answer" in messages  # Concurrent events are latest-wins.
 
 
 async def test_no_token_means_no_progress_or_heartbeat(progress_client, monkeypatch):
@@ -289,20 +310,17 @@ async def test_progress_send_failure_does_not_change_tool_result(
         )
     assert not result.is_error
     assert result.content[0].text == ANSWER
-    assert len(attempts) >= 3  # Events and heartbeat all tolerate a closed transport.
+    assert attempts  # A closed transport does not affect the tool result.
 
 
 async def test_hung_progress_send_does_not_stall_research(progress_client, monkeypatch):
-    monkeypatch.setattr("chunkhound.mcp_server.progress.SEND_TIMEOUT_SECONDS", 0.1)
+    monkeypatch.setattr("chunkhound.mcp_server.progress.SEND_TIMEOUT_SECONDS", 60.0)
     never = asyncio.Event()
-    attempts = []
+    send_started = asyncio.Event()
 
     async def hung_send(self, progress, total=None, message=None):
-        started = asyncio.get_running_loop().time()
-        try:
-            await never.wait()
-        finally:
-            attempts.append((message, asyncio.get_running_loop().time() - started))
+        send_started.set()
+        await never.wait()
 
     monkeypatch.setattr(ServerSession, "report_progress", hung_send)
 
@@ -316,13 +334,183 @@ async def test_hung_progress_send_does_not_stall_research(progress_client, monke
                 {"query": "architecture"},
                 progress_callback=on_progress,
             ),
-            timeout=1.0,
+            timeout=5.0,
         )
     assert not result.is_error
     assert result.content[0].text == ANSWER
-    # Both concurrent research events finish after their send times out,
-    # releasing the shared lock so research can continue.
-    for phase in ("Exploring sources", "Synthesizing answer"):
-        elapsed = next(duration for message, duration in attempts if message == phase)
-        assert 0.08 <= elapsed < 0.5
-    assert any("code_research still running" in message for message, _ in attempts)
+    assert send_started.is_set()  # Research finished without waiting for the 60 s send.
+
+
+async def test_emit_event_returns_while_transport_is_hung(monkeypatch):
+    monkeypatch.setattr("chunkhound.mcp_server.progress.SEND_TIMEOUT_SECONDS", 60.0)
+    sending = anyio.Event()
+    send_stopped = anyio.Event()
+
+    async def hung_send(progress, total, message):
+        sending.set()
+        try:
+            await anyio.sleep_forever()
+        finally:
+            send_stopped.set()
+
+    reporter = McpProgressReporter(hung_send)
+    async with reporter.heartbeat("code_research"):
+        await reporter.report("Starting")
+        with anyio.fail_after(5):
+            await sending.wait()
+            # Model the shared research lock, including concurrent emitters.
+            lock = asyncio.Lock()
+
+            async def emit(index):
+                async with lock:
+                    await reporter.emit_event("phase", f"Phase {index}")
+
+            await asyncio.gather(*(emit(index) for index in range(100)))
+        assert not send_stopped.is_set()
+    assert send_stopped.is_set()
+
+
+async def test_event_burst_is_throttled_and_latest_message_wins():
+    frames = []
+    delivered = asyncio.Queue()
+
+    async def send(progress, total, message):
+        frame = (anyio.current_time(), progress, total, message)
+        frames.append(frame)
+        delivered.put_nowait(frame)
+
+    reporter = McpProgressReporter(send)
+    async with reporter.heartbeat("code_research"):
+        await reporter.report("Starting")
+        with anyio.fail_after(5):
+            first = await delivered.get()
+        for index in range(100):
+            await reporter.emit_event("phase", f"Phase {index}")
+        with anyio.fail_after(5):
+            second = await delivered.get()
+        await anyio.sleep(0.1)
+        assert len(frames) == 2
+        assert second[0] - first[0] >= MIN_PROGRESS_INTERVAL_SECONDS * 0.95
+        assert first[1] < second[1]
+        assert first[2] is second[2] is None
+        assert second[3] == "Phase 99"
+
+
+async def test_heartbeats_stop_at_idle_cap_and_real_progress_restarts_them(monkeypatch):
+    monkeypatch.setattr(
+        "chunkhound.mcp_server.progress.HEARTBEAT_INTERVAL_SECONDS", 0.02
+    )
+    idle_cap = 1.0
+    monkeypatch.setattr(
+        "chunkhound.mcp_server.progress.HEARTBEAT_IDLE_LIMIT_SECONDS", idle_cap
+    )
+    monkeypatch.setattr(
+        "chunkhound.mcp_server.progress.MIN_PROGRESS_INTERVAL_SECONDS", 0.01
+    )
+    frames = []
+    delivered = asyncio.Queue()
+
+    async def send(progress, total, message):
+        frames.append(message)
+        delivered.put_nowait(message)
+
+    reporter = McpProgressReporter(send)
+    async with reporter.heartbeat("code_research"):
+        with anyio.fail_after(5):
+            assert "code_research still running" in await delivered.get()
+        await anyio.sleep(idle_cap + 0.25)  # Scheduling delays only extend this wait.
+        snapshot = list(frames)
+        await anyio.sleep(0.1)
+        assert frames == snapshot
+        while not delivered.empty():
+            delivered.get_nowait()
+
+        await reporter.emit_event("phase", "Research resumed")
+        with anyio.fail_after(5):
+            assert await delivered.get() == "Research resumed"
+            assert "code_research still running" in await delivered.get()
+        await anyio.sleep(idle_cap + 0.25)
+        snapshot = list(frames)
+        await anyio.sleep(0.1)
+        assert frames == snapshot  # Heartbeats themselves do not reset the cap.
+
+
+async def test_heartbeat_preserves_tool_exception():
+    async def send(progress, total, message):
+        pass
+
+    error = ValueError("boom")
+    reporter = McpProgressReporter(send)
+    with pytest.raises(ValueError, match="^boom$") as caught:
+        async with reporter.heartbeat("code_research"):
+            try:
+                raise error
+            except ValueError:
+                original_traceback = error.__traceback__
+                raise
+    assert caught.value is error
+    traceback = caught.value.__traceback__
+    while traceback.tb_next is not None:
+        traceback = traceback.tb_next
+    assert traceback is original_traceback
+
+
+async def test_request_cancellation_stops_progress_during_tool_unwind(monkeypatch):
+    monkeypatch.setattr(
+        "chunkhound.mcp_server.progress.HEARTBEAT_INTERVAL_SECONDS", 0.02
+    )
+    monkeypatch.setattr(
+        "chunkhound.mcp_server.progress.MIN_PROGRESS_INTERVAL_SECONDS", 0.01
+    )
+    frames = []
+    delivered = anyio.Event()
+
+    async def send(progress, total, message):
+        await anyio.sleep(0)  # A cancellable transport boundary.
+        frames.append(message)
+        delivered.set()
+
+    reporter = McpProgressReporter(send)
+    with anyio.fail_after(5):
+        with anyio.CancelScope() as request:
+            async with reporter.heartbeat("code_research"):
+                await delivered.wait()
+                request.cancel()
+                snapshot = list(frames)
+                # The tool may take time to unwind before heartbeat().__aexit__.
+                with anyio.CancelScope(shield=True):
+                    await anyio.sleep(0.15)
+                    assert frames == snapshot
+                await anyio.sleep(0)
+        await anyio.sleep(0.1)
+        assert frames == snapshot
+
+
+async def test_progress_send_timeout_allows_later_progress(monkeypatch):
+    monkeypatch.setattr("chunkhound.mcp_server.progress.SEND_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(
+        "chunkhound.mcp_server.progress.MIN_PROGRESS_INTERVAL_SECONDS", 0.01
+    )
+    timed_out = anyio.Event()
+    recovered = anyio.Event()
+    values = []
+
+    async def send(progress, total, message):
+        values.append(progress)
+        if message == "Hung send":
+            try:
+                await anyio.sleep_forever()
+            finally:
+                timed_out.set()
+        else:
+            assert message == "Recovered"
+            recovered.set()
+
+    reporter = McpProgressReporter(send)
+    async with reporter.heartbeat("code_research"):
+        await reporter.report("Hung send")
+        with anyio.fail_after(5):
+            await timed_out.wait()
+            await reporter.report("Recovered")
+            await recovered.wait()
+    assert len(values) == 2 and values[0] < values[1]
