@@ -15,6 +15,10 @@ describe upstream, this file wins.
   pull request, also a sync, and merges it or explicitly says "merge #N" for
   that pull request after reviewing it. Approval to push or to open a pull
   request is not approval to merge it, and neither are passing tests.
+  A local hook (`~/.claude/hooks/merge-guard.py`, registered in the gitignored
+  `.claude/settings.local.json`) makes Claude Code ask the user to confirm
+  every `gh pr merge` and every merge through the GitHub API. Never get
+  around it with another command, a script or a different tool.
 - GitHub enforces this with the ruleset `main: PR only`: a pull request is
   required (no approval needed), and force pushes and deletion are blocked.
   It requires no status checks: the fork runs its tests locally (see "Tests"
