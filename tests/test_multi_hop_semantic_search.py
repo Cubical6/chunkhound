@@ -250,6 +250,9 @@ async def test_decision_log_preserves_results_and_disabled_writes_nothing(
         await service.search_semantic("security validation mechanisms", **kwargs)
         assert search_decision_log.read_bytes() == before
         search_decision_log.unlink()
+        search_decision_log.with_name(search_decision_log.name + ".lock").unlink(
+            missing_ok=True
+        )
         search_decision_log.parent.rmdir()
 
 
