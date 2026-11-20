@@ -830,7 +830,7 @@ Each semantic search has its own `trace_id`. A search that runs inside a researc
 | `min_relevance` | The lowest score in the top-N fell below the floor | `multi_hop_min_relevance` |
 | `rerank_error` | The reranker failed; the search returns what it had | |
 
-**`single_hop_search`**: one record per semantic search without expansion. Fields: `query`, `page_size`, `has_path_filter`, `provider`, `model`, `strategy_reason` (`no_reranker` or `forced`), `n_returned`, `elapsed_s`.
+**`single_hop_search`**: one record per semantic search without expansion. Fields: `query`, `page_size`, `has_path_filter`, `provider`, `model`, `strategy_reason` (`no_reranker` or `forced`), `n_returned`, `elapsed_s`. Commit-scoped semantic searches (CLI `--commit-range`, `--commit-hash`, `--last-n`, or MCP commit arguments) also emit this record, with `vector_source: "diff"` and `strategy_reason: "diff"`.
 
 **`research_run`**: one record per `code_research` call or `chunkhound research` run, also when the run fails.
 

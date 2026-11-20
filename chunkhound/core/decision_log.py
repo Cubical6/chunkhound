@@ -8,6 +8,7 @@ import json
 import math
 import os
 import sys
+import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -86,6 +87,63 @@ def trace() -> Iterator[str]:
         yield trace_id
     finally:
         _trace.reset(token)
+
+
+def single_hop_payload(
+    *,
+    query: str,
+    page_size: int,
+    path_filter: str | None,
+    provider: str | None,
+    model: str | None,
+    strategy_reason: str,
+    n_returned: int,
+    elapsed_s: float,
+) -> dict[str, Any]:
+    """Shared single-hop record fields for indexed and commit-scoped search."""
+    return {
+        "query": query,
+        "page_size": page_size,
+        "has_path_filter": bool(path_filter),
+        "provider": provider,
+        "model": model,
+        "strategy_reason": strategy_reason,
+        "n_returned": n_returned,
+        "elapsed_s": elapsed_s,
+    }
+
+
+def record_diff_searches(
+    queries: list[str],
+    results: list[tuple[list[dict[str, Any]], dict[str, Any]]],
+    *,
+    start_time: float,
+    page_size: int,
+    path_filter: str | None,
+    embedding_manager: Any,
+    provider: str | None,
+    model: str | None,
+) -> None:
+    """Record each successful diff query without affecting its search outcome."""
+    try:
+        elapsed_s = time.perf_counter() - start_time
+        embedding_provider = embedding_manager.get_provider(provider)
+        for query, (rows, _) in zip(queries, results):
+            payload = single_hop_payload(
+                query=query,
+                page_size=page_size,
+                path_filter=path_filter,
+                provider=provider or embedding_provider.name,
+                model=model or embedding_provider.model,
+                strategy_reason="diff",
+                n_returned=len(rows),
+                elapsed_s=elapsed_s,
+            )
+            payload["vector_source"] = "diff"
+            with trace():
+                record("single_hop_search", payload)
+    except Exception:
+        _debug_failure("record diff searches")
 
 
 def _json_safe(value: Any) -> Any:

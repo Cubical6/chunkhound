@@ -154,16 +154,16 @@ class SearchService(BaseService):
                     if logging_enabled:
                         decision_log.record(
                             "single_hop_search",
-                            {
-                                "query": query,
-                                "page_size": page_size,
-                                "has_path_filter": bool(path_filter),
-                                "provider": search_provider,
-                                "model": search_model,
-                                "strategy_reason": strategy_reason,
-                                "n_returned": len(results),
-                                "elapsed_s": time.perf_counter() - start_time,
-                            },
+                            decision_log.single_hop_payload(
+                                query=query,
+                                page_size=page_size,
+                                path_filter=path_filter,
+                                provider=search_provider,
+                                model=search_model,
+                                strategy_reason=strategy_reason,
+                                n_returned=len(results),
+                                elapsed_s=time.perf_counter() - start_time,
+                            ),
                         )
 
             # Enhance results with additional metadata
