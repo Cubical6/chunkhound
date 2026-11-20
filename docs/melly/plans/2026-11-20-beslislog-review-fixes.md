@@ -87,12 +87,12 @@ At most ~15 lines:
 ---
 
 ## Final verification (Claude, after all phases)
-- [ ] Smoke: `uv run pytest tests/test_smoke.py -v -n auto`
-- [ ] Full test suite: `uv run pytest tests/ -v -n auto` (background task); compare failures with issues #80 and #81 (known `-n auto` failures)
-- [ ] Lint / typecheck: `uv run ruff check chunkhound tests/unit/test_decision_log.py tests/unit/research`, `uv run mypy chunkhound` (totals unchanged: no production code changes)
-- [ ] Review the complete diff against the Goal; no files under `chunkhound/` changed
-- [ ] `.pi-handoff/` removed; nothing from it committed
-- [ ] PR against `main` of `Cubical6/chunkhound` with "Tests" and "Upstream check" headings (decision log is fork-only; nothing upstream); references #89, #90, #91 as out of scope
+- [x] Smoke: `uv run pytest tests/test_smoke.py -v -n auto`
+- [x] Full test suite: `uv run pytest tests/ -v -n auto` (background task); compare failures with issues #80 and #81 (known `-n auto` failures) — 6758 passed, 4 failed, 69 errors; all explained in PR #92 (#80, #81, #82/#83, worktree-only native rpath)
+- [x] Lint / typecheck: `uv run ruff check chunkhound tests/unit/test_decision_log.py tests/unit/research`, `uv run mypy chunkhound` (totals unchanged: no production code changes)
+- [x] Review the complete diff against the Goal; no files under `chunkhound/` changed
+- [x] `.pi-handoff/` removed; nothing from it committed
+- [x] PR against `main` of `Cubical6/chunkhound` with "Tests" and "Upstream check" headings (decision log is fork-only; nothing upstream); references #89, #90, #91 as out of scope — PR #92
 
 ## After each phase (Claude)
 1. Review the diff, run the phase's Verify command, tick its box, add a Progress log line, commit (smoke suite first).
