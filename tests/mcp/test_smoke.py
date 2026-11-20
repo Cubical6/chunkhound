@@ -270,6 +270,7 @@ class TestMCPProtocolHandshake:
                 tools_result = await client.send_request("tools/list", timeout=5.0)
                 tools = tools_result.get("tools", [])
                 tool_names = [t["name"] for t in tools]
+                assert {"domain_write", "domain_read"} <= set(tool_names)
 
                 assert "search" in tool_names, f"search not in tools: {tool_names}"
                 assert "daemon_status" in tool_names, (

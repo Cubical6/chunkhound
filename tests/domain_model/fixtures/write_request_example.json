@@ -1,0 +1,20 @@
+{
+  "operations": [
+    {"op": "put", "element": {"kind": "concept", "repository": "backend", "term": "skill",
+      "plural": "skills", "definition": "An area of expertise a user can handle tickets for."}},
+    {"op": "put", "element": {"kind": "fact_type", "repository": "backend", "name": "user skill",
+      "templates": ["User <user> has skill <skill>."],
+      "roles": [
+        {"name": "user", "concept": "concept:backend/user", "datatype": "bigint", "mandatory": true},
+        {"name": "skill", "concept": "concept:backend/skill", "datatype": "bigint", "mandatory": true}],
+      "status": "confirmed"}},
+    {"op": "put", "element": {"kind": "validation_rule", "fact_type": "fact_type:backend/user-skill",
+      "rule_kind": "uniqueness", "roles": ["user", "skill"],
+      "statement": "A user has a skill at most once."}},
+    {"op": "put", "element": {"kind": "ground_fact", "fact_type": "fact_type:backend/user-skill",
+      "values": {"user": "42", "skill": "3"}}},
+    {"op": "put", "element": {"kind": "ground_fact", "fact_type": "fact_type:backend/user-skill",
+      "values": {"user": "42", "skill": "3"},
+      "violates": ["validation_rule:backend/user-skill/uniqueness/skill+user"]}}
+  ]
+}
