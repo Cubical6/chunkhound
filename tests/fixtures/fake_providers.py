@@ -90,7 +90,7 @@ class FakeLLMProvider(LLMProvider):
         """Generate a completion based on prompt patterns."""
         await asyncio.sleep(0.001)  # Simulate minimal latency
 
-        self._requests_made += 1
+        self._record_usage(requests=1)
 
         # Match prompt to response pattern
         prompt_lower = prompt.lower()
@@ -108,9 +108,11 @@ class FakeLLMProvider(LLMProvider):
         completion_tokens = self.estimate_tokens(response_content)
         total_tokens = prompt_tokens + completion_tokens
 
-        self._prompt_tokens += prompt_tokens
-        self._completion_tokens += completion_tokens
-        self._tokens_used += total_tokens
+        self._record_usage(
+            tokens=total_tokens,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
 
         return LLMResponse(
             content=response_content,
@@ -143,7 +145,7 @@ class FakeLLMProvider(LLMProvider):
 
         await asyncio.sleep(0.001)  # Simulate minimal latency
 
-        self._requests_made += 1
+        self._record_usage(requests=1)
 
         # Match prompt to response pattern
         prompt_lower = prompt.lower()
@@ -161,9 +163,11 @@ class FakeLLMProvider(LLMProvider):
         completion_tokens = self.estimate_tokens(response_content)
         total_tokens = prompt_tokens + completion_tokens
 
-        self._prompt_tokens += prompt_tokens
-        self._completion_tokens += completion_tokens
-        self._tokens_used += total_tokens
+        self._record_usage(
+            tokens=total_tokens,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
 
         # Try to parse as JSON
         try:

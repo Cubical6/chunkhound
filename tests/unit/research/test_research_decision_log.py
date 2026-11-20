@@ -1,17 +1,27 @@
 """Opt-in research logging preserves results and failures with real orchestration."""
 
+import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
 from chunkhound.core import decision_log
 from chunkhound.core.config.decision_log_config import DecisionLogConfig
+from chunkhound.interfaces.llm_provider import LLMProvider, LLMResponse
+from chunkhound.llm_manager import LLMManager
 from chunkhound.services.research.factory import ResearchServiceFactory
 from chunkhound.services.research.shared.gap_detection import GapDetectionService
 from chunkhound.services.research.shared.gap_models import UnifiedGap
 from chunkhound.services.research.shared.models import ResearchContext
+from chunkhound.services.research.v1.pluggable_research_service import (
+    PluggableResearchService,
+)
 from chunkhound.services.research.v1.question_generator import QuestionGenerator
+from tests.fixtures.fake_providers import FakeLLMProvider
 from tests.unit.research.test_source_provenance import _research_service
 
 
@@ -117,6 +127,101 @@ async def test_research_log_preserves_results(
         "research_run",
     ]
     assert all(record["trace_id"] == run["trace_id"] for record in logged)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("overlapping", [False, True])
+@pytest.mark.parametrize("shared_roles", [False, True])
+async def test_research_runs_log_only_their_own_usage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    overlapping: bool,
+    shared_roles: bool,
+) -> None:
+    enable_log(tmp_path)
+    utility_provider = FakeLLMProvider()
+    provider = utility_provider if shared_roles else FakeLLMProvider()
+
+    def create_provider(self: LLMManager, config: dict[str, Any]) -> LLMProvider:
+        return utility_provider if config["model"] == "utility" else provider
+
+    monkeypatch.setattr(LLMManager, "_create_provider", create_provider)
+    llm_manager = LLMManager(
+        {"provider": "fake", "model": "utility"},
+        {"provider": "fake", "model": "synthesis"},
+    )
+    service = PluggableResearchService(
+        database_services=MagicMock(),
+        embedding_manager=MagicMock(),
+        llm_manager=llm_manager,
+        exploration_strategy=MagicMock(),
+        algorithm="v1",
+    )
+    own_tokens = {"query A": 100, "query B": 7, "unrelated": 13}
+    a_started = asyncio.Event()
+    b_done = asyncio.Event()
+
+    async def complete(prompt: str, **kwargs: Any) -> LLMResponse:
+        # Fake only the provider boundary; use its production accounting API.
+        tokens = own_tokens[prompt]
+        provider._record_usage(requests=1, tokens=tokens)
+        return LLMResponse(content=prompt, tokens_used=tokens, model="fake-gpt")
+
+    async def research(
+        query: str,
+        previous_query: str | None,
+        decision_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        # Real map/reduce uses child tasks too: their accounting must be shared
+        # with their run, not with concurrently executing runs on this manager.
+        await asyncio.gather(asyncio.create_task(provider.complete(query)))
+        if overlapping:
+            if query == "query A":
+                a_started.set()
+                await b_done.wait()
+            else:
+                b_done.set()
+        return {"answer": query, "metadata": {}}
+
+    monkeypatch.setattr(provider, "complete", complete)
+    monkeypatch.setattr(service, "_deep_research_impl", research)
+    # Lifetime usage before/after a run, including an unrelated overlapping
+    # request, must not be attributed to that run.
+    await provider.complete("unrelated")
+    if overlapping:
+
+        async def run_b() -> dict[str, Any]:
+            await a_started.wait()
+            await provider.complete("unrelated")
+            return await service.deep_research("query B")
+
+        await asyncio.wait_for(
+            asyncio.gather(service.deep_research("query A"), run_b()), timeout=5
+        )
+    else:
+        await service.deep_research("query A")
+        await service.deep_research("query B")
+    await provider.complete("unrelated")
+
+    runs = {
+        record["query"]: record
+        for record in records(tmp_path)
+        if record["event"] == "research_run"
+    }
+    assert set(runs) == {"query A", "query B"}
+    for query in runs:
+        synthesis_usage = {
+            "requests_made": 1,
+            "total_tokens": own_tokens[query],
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+        }
+        assert runs[query]["llm_usage"] == {
+            "synthesis": synthesis_usage,
+            "utility": (
+                synthesis_usage if shared_roles else {key: 0 for key in synthesis_usage}
+            ),
+        }
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from chunkhound.core import decision_log
+from chunkhound.core.llm_usage_scope import LLMUsageScope, llm_usage_scope
 from chunkhound.core.utils.structured_reasoning_diagnostics import (
     current_empty_failures,
     structured_reasoning_failure_key,
@@ -212,9 +213,8 @@ class PluggableResearchService(ProgressEmitterMixin):
         try:
             if not decision_log.is_enabled():
                 return await self._deep_research_impl(query, previous_query)
-            with decision_log.trace():
+            with decision_log.trace(), llm_usage_scope() as usage_scope:
                 started = monotonic()
-                before = self._decision_log_usage()
                 payload: dict[str, Any] = {
                     "query": query,
                     "algorithm": self._algorithm,
@@ -243,28 +243,25 @@ class PluggableResearchService(ProgressEmitterMixin):
                     payload["error_type"] = type(exc).__name__
                     raise
                 finally:
-                    after = self._decision_log_usage()
-                    payload["llm_usage"] = {
-                        role: {
-                            key: value - before[role].get(key, 0)
-                            for key, value in counters.items()
-                        }
-                        for role, counters in after.items()
-                        if role in before
-                    }
+                    payload["llm_usage"] = self._decision_log_usage(usage_scope)
                     payload["elapsed_s"] = monotonic() - started
                     decision_log.record("research_run", payload)
         finally:
             current_empty_failures.reset(token)
 
-    def _decision_log_usage(self) -> dict[str, dict[str, int | float]]:
-        """Snapshot numeric role counters only; telemetry must never fail a run."""
+    def _decision_log_usage(self, scope: LLMUsageScope) -> dict[str, dict[str, int]]:
+        """Read run totals in the provider's stats shape; telemetry must not fail."""
         try:
             stats = self._llm_manager.get_usage_stats()
+            providers = {
+                "utility": self._llm_manager.get_utility_provider(),
+                "synthesis": self._llm_manager.get_synthesis_provider(),
+            }
             usage = {}
-            for role in ("utility", "synthesis"):
+            for role, provider in providers.items():
+                totals = scope.for_provider(provider)
                 counters = {
-                    key: value
+                    key: totals.get(key, 0)
                     for key, value in stats.get(role, {}).items()
                     if isinstance(value, (int, float)) and not isinstance(value, bool)
                 }
