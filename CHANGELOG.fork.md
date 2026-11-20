@@ -12,6 +12,7 @@ wrote it.
 
 ## Added
 
+- **Decision log** — Opt-in local JSONL file (`decision_log.enabled`, `CHUNKHOUND_DECISION_LOG__ENABLED`; default `.chunkhound/decisions.jsonl`, rotated above `max_size_mb`) that records why searches and research runs went the way they did: the multi-hop or single-hop choice and why expansion stopped, each `code_research` run with its LLM usage, which follow-up questions and gaps were kept, and per chunk the rerank scores and the elbow-filter cutoff. Records hold queries, file paths and line ranges, never code. Off by default.
 - **Fork release channels** — Every push to `main` publishes the wheels as the rolling `fork-latest` release. `fork-promote.yml` copies a checked `fork-latest` build, after approval, to a new and unchangeable stable release `fork-v<version>` (for example `fork-v6.1.1.dev198`) without rebuilding; the newest one is the repository's Latest release. All releases list the fork changes they add.
 - **Upstream overlap check** — `scripts/fork_upstream_check.sh` lists open upstream pull requests that touch given paths and searches upstream issues and pull requests by topic.
 - **pi-cli LLM provider** — `provider: "pi-cli"` runs the local pi CLI as a bare model, without tools, MCP, extensions, context files or a session. It is selectable for every LLM role through config, environment and the `--llm-*-provider` flags, needs no API key and has no default model: set one in `provider/id` form.
@@ -43,6 +44,7 @@ wrote it.
 
 ## Fixed
 
+- **Multi-hop thresholds take effect** — `multi_hop_min_candidates`, `multi_hop_score_degradation` and `multi_hop_min_relevance` (and their `CHUNKHOUND_RESEARCH_MULTI_HOP_*` variables) were loaded but ignored; multi-hop search now uses them. The defaults keep the previous behavior.
 - **MCP progress for long tool calls** — code_research and other long tool calls now send progress notifications (research phases at most once per second, plus a heartbeat every 30 s), so clients with an idle timeout (Claude Code: 300 s over HTTP) no longer abort them. A slow client never delays the tool, and heartbeats stop after 10 minutes without real progress, so a hung tool still times out.
 - **Out-of-range modification times no longer abort indexing** — A file dated far before 1970 or far in the future, outside the database's timestamp range, no longer makes the Rust index run fail with "Epoch seconds out of range"; its time is stored clamped to the nearest supported value.
 - **Same-size edits of pre-1970 files on the Rust pipeline** — A file dated before 1970 that is edited without changing its size is re-indexed again; before, search kept returning its old content until a force reindex.

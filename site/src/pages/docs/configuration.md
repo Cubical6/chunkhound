@@ -764,7 +764,7 @@ Gap detection parameters (`min_gaps`, `max_gaps`, `gap_similarity_threshold`) on
 
 ## Decision Log
 
-The decision log is an optional local file that records why a search or research run went the way it did: which strategy was chosen, why multi-hop expansion stopped, and how much a research run cost. Use it to tune the multi-hop settings above against your own queries. It is off by default.
+The decision log is an optional local file that records why a search or research run went the way it did: which strategy was chosen, why multi-hop expansion stopped, how much a research run cost, and which chunks research reranked and which the elbow filter dropped. Use it to tune the multi-hop settings above against your own queries. It is off by default.
 
 | Option | Type | Default | Env Var | Description |
 |---|---|---|---|---|
@@ -782,7 +782,7 @@ The decision log is an optional local file that records why a search or research
 
 The MCP server writes to the log, and so do the CLI commands that search or run research, such as `chunkhound search` and `chunkhound research`.
 
-**Privacy.** Records contain the text of your queries, and the research records also contain the follow-up questions and gap queries the LLM generated. They never contain chunk or file content. The file stays on your machine: ChunkHound never uploads it.
+**Privacy.** Records contain the text of your queries, and the research records also contain the follow-up questions and gap queries the LLM generated. The chunk selection records contain the file paths and line ranges of chunks. They never contain chunk or file content. The file stays on your machine: ChunkHound never uploads it.
 
 **Rotation.** When the file grows past `max_size_mb`, ChunkHound renames it to `decisions.jsonl.1` and starts a new file. It keeps one old file; the next rotation overwrites it.
 
@@ -851,6 +851,30 @@ Fields that the run did not reach are `null`. A run that finds no code context s
 **`followup_filter`**: one record each time generated follow-up questions are filtered (algorithms v1 and v3). Fields: `n_candidates`, `n_kept`, `candidates` (the question texts), `kept` (indexes into `candidates`), and `fallback`. `fallback` is `true` when the LLM call failed or returned no valid selection; ChunkHound then keeps the first questions in their original order.
 
 **`gap_selection`**: one record each time gap detection selects which gaps to fill (algorithms v2 and v3). Fields: `n_candidates`, `n_selected`, `scores` (all candidate scores, descending), `elbow_index` (the elbow found in the score curve, or `null`), and `selected` (indexes into `scores`).
+
+The next two records list chunks. A chunk reference holds `chunk_id`, `file_path`, `start_line` and `end_line`; a field the chunk lacks is `null`. Like `followup_filter` and `gap_selection`, these records carry the `trace_id` of the research run they belong to.
+
+**`chunk_rerank`**: one record each time research searches for code and ranks the combined pool of semantic and regex results.
+
+| Field | Description |
+|---|---|
+| `query`, `has_path_filter` | The search |
+| `node_id`, `depth` | The exploration node that ran the search, or `null` |
+| `method` | How the pool was ranked: `rerank` (against the query), `compound_rerank` (against several queries, scores averaged), `similarity` (embedding similarity, no reranker call), `skipped` (no reranker, or one chunk or less), `failed` (the reranker failed; the pool keeps semantic results first) |
+| `n_rerank_queries` | Number of queries the pool was reranked against |
+| `n_semantic`, `n_regex`, `n_pool` | Semantic results, regex results, and chunks in the pool after removing duplicates |
+| `chunks` | The pool in the returned order: a chunk reference plus `source` (`semantic` or `regex`), `rerank_score` and `similarity` (`null` when not set) |
+
+**`elbow_filter`**: one record each time a research strategy cuts its chunks at the elbow of the score curve.
+
+| Field | Description |
+|---|---|
+| `stage` | `bfs` (algorithm v1), `wide_coverage` (v2) or `parallel` (v3, after merging both strategies) |
+| `score_key` | The score the elbow was computed on: `unified` (`rerank_score`, else `similarity`, else `score`) or the name of a chunk field |
+| `method`, `reason` | `elbow` with `elbow_detected`, or `passthrough` (all chunks kept) with `empty_input`, `too_few_chunks` or `no_elbow_detected` |
+| `n_candidates`, `n_kept` | Chunks before and after the filter |
+| `cutoff_score`, `elbow_index` | Where the curve was cut, or `null` |
+| `kept`, `dropped` | Chunk references plus `score`, highest score first. Together they are exactly the input |
 
 ## C4 Map Sources
 
