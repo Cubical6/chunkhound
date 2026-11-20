@@ -1,6 +1,7 @@
 # PLAN: beslislaag en beslislog voor zoeken en onderzoek (stap 1)
 
 - **Status:** goedgekeurd 2026-11-14. Commits blijven lokaal op `feat/decision-log`. Geeft geen toestemming voor een push, een merge naar `main` of een providerrun; fase 7 vraagt aparte toestemming.
+- **Uitbreiding 2026-11-20:** fase 8 (fork-issue #58) toegevoegd op verzoek van de gebruiker; daarna gaat de branch als PR naar `main` van de fork (niet mergen zonder verzoek).
 - **Aanleiding:** onderzoek van 2026-11-14 naar decision models. De stop- en routeringsregels in het zoek- en onderzoekspad zijn vaste constanten, drie config-velden doen niets, en nergens wordt vastgelegd welke beslissing op welke invoer is genomen. Zonder die data kan een geleerde regel niet getraind en niet beoordeeld worden.
 
 ## Goal
@@ -14,7 +15,7 @@ Met de standaardinstellingen verandert het gedrag van zoeken en onderzoek niet.
 ## Context
 
 - **Repo / worktree:** `/home/disorder/Projects/Github/chunkhound/.claude/worktrees/decision-log`
-- **Branch:** `feat/decision-log`, basis lokale `main` op `03cbc080`. Baseer niets op `origin/main`.
+- **Branch:** `feat/decision-log`. Fase 1-6 zijn gebouwd op `03cbc080`; op 2026-11-20 is de branch gerebased op `origin/main` `f36eb7f4`. Fase 8 bouwt op die gerebasede branch. Regelnummers in "Huidige situatie" gelden voor `03cbc080`.
 - **Omgeving:** er zijn geen Rust-wijzigingen. De eerste `uv run` in de worktree installeert de vergrendelde `chunkhound-native`-wheel; `make dev` is niet nodig.
 - **Projectregels:** lees `AGENTS.md`, met name MODIFICATION_RULES (geen `print()` in de MCP-server) en TESTING_PHILOSOPHY. Schrijf alleen contracttests.
 
@@ -63,6 +64,13 @@ Gemeenschappelijke velden: `schema_version`, `ts` (ISO 8601 UTC), `event`, `trac
 - **`gap_selection`:** `n_candidates`, `n_selected`, `scores` (aflopend), `elbow_index` (of `null`), `selected` (indexen in `scores`).
 
 `top_scores` is steeds de top-N volgens `multi_hop_min_candidates`.
+
+Toegevoegd in fase 8 (additief binnen v1; de branch is nog niet uitgebracht). Een chunkverwijzing is `{chunk_id, file_path, start_line, end_line}`, zonder inhoud (zie besluit 3: paden en regelnummers zijn geen inhoud).
+
+- **`chunk_rerank`** (één per `unified_search`-aanroep, Step 7): `query`, `node_id`, `depth`, `has_path_filter`, `method` (`rerank`, `compound_rerank`, `similarity` bij `skip_rerank`, `skipped` als er geen reranker is of de pool ≤ 1 chunk heeft, `failed` als de rerank een uitzondering gaf), `n_rerank_queries`, `n_semantic`, `n_regex`, `n_pool`, `chunks`: lijst in de teruggegeven volgorde van chunkverwijzing + `source` (`semantic` of `regex`) + `rerank_score` + `similarity` (elk `null` als het veld ontbreekt).
+- **`elbow_filter`** (één per elbow-filtering in een onderzoeksstrategie): `stage` (`bfs`, `wide_coverage`, `parallel`), `score_key` (`unified` of de sleutel), `method` en `reason` uit de filterstatistiek, `n_candidates`, `n_kept`, `cutoff_score` en `elbow_index` (of `null`), `kept` en `dropped`: lijsten in scorevolgorde van chunkverwijzing + `score` (de score waarop de elbow is berekend). `kept` + `dropped` is samen precies de invoer.
+
+Beide records dragen, net als `followup_filter` en `gap_selection`, het `trace_id` van de lopende `research_run`.
 
 ## Buiten scope
 
@@ -213,6 +221,30 @@ Hooguit ~15 regels:
   4. Zet de tabellen en de vragenlijst in dit plan onder "Nulmeting".
 - **Notes:** dit doet echte embedding-, rerank- en LLM-aanroepen en kost dus quota. Voer het pas uit na expliciete toestemming.
 
+## Phase 8: rerank- en elbow-selectie loggen (fork-issue #58)
+- [x] Done (code en tests; docs en `CHANGELOG.fork.md` volgen in een aparte commit door Claude)
+- **Depends on:** Phase 2, 4
+- **Model:** `openai-codex/gpt-6.1-sol` / `medium`
+- **Goal:** bij een gemist antwoord van `code_research` is uit het log te herleiden welke chunks de unified rerank zag, met welke `rerank_score`, en welke chunks het elbow-filter liet vallen. Zie Schema v1, de records `chunk_rerank` en `elbow_filter`.
+- **Files:**
+  - nieuw: `chunkhound/services/research/shared/decision_records.py` (fork-only; bouwt en schrijft beide records)
+  - `chunkhound/services/research/shared/unified_search.py` (alleen een aanroep aan het eind van Step 6-7)
+  - `chunkhound/services/research/shared/exploration/bfs_exploration_strategy.py`, `wide_coverage_strategy.py`, `parallel_strategy.py` (alleen een aanroep direct na `filter_chunks_by_elbow`)
+  - een testbestand onder `tests/unit/research/`
+- **Steps:**
+  1. Schrijf in `decision_records.py` twee functies, bv. `record_chunk_rerank(...)` en `record_elbow_filter(stage, candidates, kept, stats, score_key)`. Ze doen niets als `decision_log.is_enabled()` false is, bouwen pas daarna de payload en roepen `decision_log.record(...)` aan. `dropped` is de invoer min `kept`, op objectidentiteit of chunk-id; de scores worden berekend zoals `filter_chunks_by_elbow` dat doet (`get_unified_score` bij `score_key=None`).
+  2. Houd in `unified_search` bij welke methode Step 7 nam (inclusief het `except`-pad) en roep `record_chunk_rerank` één keer aan vlak voor `return combined_pool`. `source` volgt uit Step 6: chunk-id's uit `semantic_results` zijn `semantic`, de rest `regex`.
+  3. Roep `record_elbow_filter` aan direct na de drie aanroepen van `filter_chunks_by_elbow` in de onderzoeksstrategieën. `chunkhound/utils/fetchurl.py` en `elbow_filter.py` blijven ongewijzigd.
+- **Acceptance criteria:**
+  - Met het log aan schrijft `unified_search` per aanroep één `chunk_rerank`-record met alle chunks uit de pool, in de teruggegeven volgorde, met de juiste `method` voor minstens het rerank-pad en het `skip_rerank`-pad.
+  - Met het log aan schrijft een strategie één `elbow_filter`-record waarin `kept` + `dropped` samen precies de invoerchunks zijn, zonder overlap, en `cutoff_score` gelijk is aan die uit de filterstatistiek.
+  - De teruggegeven chunks (volgorde en inhoud van de dicts) zijn identiek met het log aan en uit. De chunk-dicts worden niet gewijzigd.
+  - Records binnen een `decision_log.trace()` dragen dat `trace_id`.
+  - Met het log uit wordt geen payload gebouwd en geen bestand aangemaakt.
+  - Geen chunkinhoud (`content`, `code`, tekst) in de records.
+- **Verify:** `uv run pytest tests/unit/research tests/unit/test_decision_log.py -q --tb=short | tail -n 40`
+- **Notes:** hergebruik de nep-providers en fixtures uit `tests/unit/research/test_unified_search_bulk.py`, `tests/unit/research/shared/exploration/test_parallel_strategy.py` en `tests/unit/research/test_research_decision_log.py`; bouw geen nieuwe. Eén strategie in de test is genoeg als de drie aanroepen dezelfde helper gebruiken. Lees van `unified_search.py` alleen r. 364-500 en van de strategiebestanden alleen het bereik rond `filter_chunks_by_elbow`. Verander niets aan de selectielogica, de drempels of `elbow_filter.py`. De docs (`site/src/pages/docs/configuration.md`) en `CHANGELOG.fork.md` doet Claude.
+
 ---
 
 ## Final verification (Claude, na alle fases)
@@ -240,6 +272,8 @@ Na herstel (native module en `chunkhound.libs` uit de venv van de hoofdcheckout 
 | 2026-11-14 | 4 | `01a1d771-8827-7440-a3c6-739b655ea686` | zie `git log` | Zes contractgevallen; 268 gerichte tests en 14 smoke-tests groen. De sessie werd één keer onderbroken en in dezelfde sessie hervat. Met het log uit vraagt de run geen tellers op. `llm_usage` is leeg als de provider geen tellers geeft of het opvragen faalt. De hergebruikte nep-zoekservice vervangt `SearchService`; de test schrijft daarom op die grens een proefrecord in een eigen trace en controleert dat het de run als `parent_trace_id` heeft (v1, v2, v3 en de terugval naar v1). Overerving via `asyncio.gather` is gedekt door de test van het log zelf uit fase 2. Bij "geen codecontext gevonden" is `success` `true` en zijn `num_clusters` en `synthesis_mode` `null`. |
 | 2026-11-14 | 5 | `01a1d96c-1257-70ae-9edb-743d87c3fd7f` | zie `git log` | Eén geparametriseerde contracttest over zes gevallen; 317 gerichte tests en 14 smoke-tests groen. Het vraagfilter schrijft ook een record als er hooguit één vraag is en de LLM niet wordt aangeroepen (`fallback: false`). `selected` bij `gap_selection` verwijst naar de aflopend gesorteerde scores, niet naar de invoervolgorde. `elbow_index` staat er ook als de elbow wel gevonden maar niet gebruikt is. Eén correctieronde: import naar moduleniveau, twee losse opmaakwijzigingen teruggedraaid. |
 | 2026-11-14 | 6 | n.v.t. (Claude) | zie `git log` | De drie multi-hop-velden stonden al in de tabel, maar met de oude omschrijving; die is aangepast aan het werkelijke gedrag. Nieuwe sectie "Decision Log" met opties, privacy, rotatie en het recordformaat per event, plus een tabel van stopredenen met de bijbehorende instelling. Drie env-variabelen toegevoegd aan de lijst. Veldnamen en standaardwaarden zijn tegen de code gecontroleerd. |
+| 2026-11-20 | rebase | `01a1f8a0-9101-70b5-94d1-a2d110da65f5` | zie `git log` | Gerebased op `origin/main` `f36eb7f4`. Eén conflict in de imports van `pluggable_research_service.py`: upstream verwijderde `Path`, de branch voegde `monotonic` toe; alleen `monotonic` behouden. 338 gerichte tests groen. |
+| 2026-11-20 | 8 | `01a1f8a3-1b2a-70b5-94d1-a2d2fd8e767f` | zie `git log` | Nieuw `shared/decision_records.py`; upstream-bestanden krijgen alleen een import en één aanroep. `elbow_filter` splitst `kept`/`dropped` op objectidentiteit. `n_rerank_queries` telt de gestarte rerank-aanroepen, ook bij `failed`. De bestaande test van `research_run` verwacht nu ook `chunk_rerank` en `elbow_filter`, met het trace-id van de run. 7 nieuwe contracttests; 345 gerichte tests en 14 smoke-tests groen; mypy schoon op de nieuwe module. Eén correctieronde: twee losse herformatteringen in `unified_search.py` teruggedraaid. |
 
 ---
 

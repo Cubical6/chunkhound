@@ -109,8 +109,14 @@ async def test_research_log_preserves_results(
         if counters:
             expected_usage[role] = counters
     assert run["llm_usage"] == expected_usage
-    # The reused provenance fake bypasses SearchService; no search events exist.
-    assert [record["event"] for record in records(tmp_path)] == ["research_run"]
+    # The fake bypasses SearchService, but research selection is still recorded.
+    logged = records(tmp_path)
+    assert [record["event"] for record in logged] == [
+        "chunk_rerank",
+        "elbow_filter",
+        "research_run",
+    ]
+    assert all(record["trace_id"] == run["trace_id"] for record in logged)
 
 
 @pytest.mark.asyncio

@@ -23,6 +23,7 @@ from chunkhound.database_factory import DatabaseServices
 from chunkhound.embeddings import EmbeddingManager
 from chunkhound.services.research.shared.chunk_context_builder import get_chunk_text
 from chunkhound.services.research.shared.chunk_dedup import get_chunk_id
+from chunkhound.services.research.shared.decision_records import record_chunk_rerank
 from chunkhound.services.research.shared.models import (
     MAX_SYMBOLS_TO_SEARCH,
     QUERY_EXPANSION_ENABLED,
@@ -392,7 +393,10 @@ class UnifiedSearch:
         # using the configured reranking provider (existing behaviour).
         embedding_provider = self._embedding_manager.get_provider()
 
+        rerank_method = "skipped"
+        n_rerank_queries = 0
         if skip_rerank:
+            rerank_method = "similarity"
             # Regex chunks are scored via a bulk get_chunk_similarities_async call
             # inside search_by_symbols (post-pagination, one round-trip per symbol).
             # Semantic chunks already carry similarity from HNSW search (Step 2).
@@ -418,6 +422,7 @@ class UnifiedSearch:
 
                 # Compound reranking: rerank against each query and average scores
                 if rerank_queries and len(rerank_queries) > 1:
+                    rerank_method = "compound_rerank"
                     logger.debug(
                         f"Step 7: Compound reranking against {len(rerank_queries)} "
                         "queries"
@@ -427,6 +432,7 @@ class UnifiedSearch:
                     t_rerank_total = perf_counter()
                     for i, rerank_query in enumerate(rerank_queries):
                         t_rerank = perf_counter()
+                        n_rerank_queries += 1
                         rerank_results = await embedding_provider.rerank(
                             query=rerank_query,
                             documents=documents,
@@ -459,10 +465,12 @@ class UnifiedSearch:
                         f"({len(rerank_queries)} queries)"
                     )
                 else:
+                    rerank_method = "rerank"
                     rerank_query = (
                         rerank_queries[0] if rerank_queries else context.root_query
                     )
                     t_rerank = perf_counter()
+                    n_rerank_queries += 1
                     rerank_results = await embedding_provider.rerank(
                         query=rerank_query,
                         documents=documents,
@@ -496,10 +504,22 @@ class UnifiedSearch:
                 )
 
             except Exception as e:
+                rerank_method = "failed"
                 logger.warning(
                     f"Unified rerank failed, keeping semantic-priority order: {e}"
                 )
 
+        record_chunk_rerank(
+            query=query,
+            node_id=node_id,
+            depth=depth,
+            path_filter=path_filter,
+            method=rerank_method,
+            n_rerank_queries=n_rerank_queries,
+            semantic_results=semantic_results,
+            regex_results=regex_results,
+            chunks=combined_pool,
+        )
         return combined_pool
 
     async def extract_symbols_from_chunks(
