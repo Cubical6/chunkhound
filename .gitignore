@@ -355,3 +355,9 @@ site/test-results/
 
 # Codex CLI
 .codex/
+
+# Fork: local agent state, plans and design notes stay out of the repository
+.claude/
+.superpowers/
+docs/melly/
+docs/fork/plans/
