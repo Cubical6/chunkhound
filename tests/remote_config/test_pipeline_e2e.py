@@ -1431,6 +1431,54 @@ async def test_remove_on_missing_path_logs_no_op(
     ), f"remove on missing path must not log 'applied', got messages={messages}"
 
 
+@pytest.mark.parametrize("remote_path", ["~/.bashrc", ".chunkhound/remote.jsonl"])
+@pytest.mark.parametrize("rule_shape", ["leaf", "parent_set", "parent_merge"])
+@pytest.mark.parametrize("existing_path", [None, ".chunkhound/operator.jsonl"])
+async def test_remote_cannot_persist_decision_log_path(
+    _isolate: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rule_shape: str,
+    existing_path: str | None,
+    remote_path: str,
+) -> None:
+    target = _target_path(_isolate)
+    if existing_path is not None:
+        target.write_text(json.dumps({"decision_log": {"path": existing_path}}))
+    if rule_shape == "leaf":
+        rule = {"id": "decision_log.path", "op": "set", "value": remote_path}
+    else:
+        rule = {
+            "id": "decision_log",
+            "op": "set" if rule_shape == "parent_set" else "merge",
+            "value": {"path": remote_path},
+        }
+    _install_fetch(
+        monkeypatch,
+        {
+            "version": 1,
+            "rules": [
+                rule,
+                {"id": "decision_log.enabled", "op": "set", "value": True},
+            ],
+        },
+    )
+    messages: list[str] = []
+    handler = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        await run_remote_config_fetch(_args(), "search")
+    finally:
+        logger.remove(handler)
+
+    data = _read_target(target)["decision_log"]
+    assert data["enabled"] is True
+    if existing_path is None:
+        assert "path" not in data
+    else:
+        assert data["path"] == existing_path
+    assert any("refused_path" in m and "decision_log.path" in m for m in messages)
+    assert not any(remote_path in m for m in messages)
+
+
 async def test_rule_setting_refused_path_emits_scrub_warning(
     _isolate: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

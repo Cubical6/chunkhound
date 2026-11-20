@@ -37,8 +37,9 @@ def _debug_failure(action: str) -> None:
 def configure(config: Any, target_dir: Path) -> None:
     """Replace process-wide settings; missing config sections disable logging.
 
-    Relative paths are resolved against the same project root as the default.
-    Configuration never creates directories or opens the log.
+    Paths must resolve inside the project's resolved .chunkhound directory.
+    Relative paths start at the project root. Configuration never creates
+    directories or opens the log; a refused path leaves logging disabled.
     """
     global _path, _max_size_bytes
     with _lock:
@@ -52,8 +53,17 @@ def configure(config: Any, target_dir: Path) -> None:
                 if settings.path is not None
                 else Path(".chunkhound/decisions.jsonl")
             )
+            project_root = Path(target_dir).resolve()
+            log_dir = (project_root / ".chunkhound").resolve()
+            path = (path if path.is_absolute() else project_root / path).resolve()
+            if path == log_dir or not path.is_relative_to(log_dir):
+                logger.warning(
+                    "Decision log disabled: path must be inside the project's "
+                    "resolved .chunkhound directory (outside paths are refused)"
+                )
+                return
             _max_size_bytes = settings.max_size_mb * 1024 * 1024
-            _path = path if path.is_absolute() else Path(target_dir) / path
+            _path = path
         except Exception:
             _debug_failure("configuration")
 

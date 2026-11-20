@@ -769,8 +769,8 @@ The decision log is an optional local file that records why a search or research
 | Option | Type | Default | Env Var | Description |
 |---|---|---|---|---|
 | `enabled` | `bool` | `false` | `CHUNKHOUND_DECISION_LOG__ENABLED` | Write decision records |
-| `path` | `string` | `.chunkhound/decisions.jsonl` | `CHUNKHOUND_DECISION_LOG__PATH` | Log file. A relative path starts at the project root |
-| `max_size_mb` | `number` | `50` | `CHUNKHOUND_DECISION_LOG__MAX_SIZE_MB` | Rotate the file above this size |
+| `path` | `string` | `.chunkhound/decisions.jsonl` | `CHUNKHOUND_DECISION_LOG__PATH` | Log file; must resolve inside the project's resolved `.chunkhound/` directory. Relative paths start at the project root; remote config cannot set this option |
+| `max_size_mb` | `number` | `50` | `CHUNKHOUND_DECISION_LOG__MAX_SIZE_MB` | Rotate the file above this size in MiB (minimum: 1) |
 
 ```json
 {
@@ -784,7 +784,7 @@ The MCP server writes to the log, and so do the CLI commands that search or run 
 
 **Privacy.** Records contain the text of your queries, and the research records also contain the follow-up questions and gap queries the LLM generated. The chunk selection records contain the file paths and line ranges of chunks. They never contain chunk or file content. The file stays on your machine: ChunkHound never uploads it.
 
-**Rotation.** When the file grows past `max_size_mb`, ChunkHound renames it to `decisions.jsonl.1` and starts a new file. It keeps one old file; the next rotation overwrites it.
+**Rotation.** The log path must stay inside the project's `.chunkhound/` directory after resolving `~`, `..` and symlinks (the directory itself is resolved too). An outside path disables logging with one warning, without falling back to the default path. When the file grows past `max_size_mb` (at least 1 MiB), ChunkHound renames it to `<filename>.1` (for example, `d.jsonl.1` for `d.jsonl`) and starts a new file. It keeps one old file; the next rotation overwrites it.
 
 **Failures.** Logging never fails a search or a research run. If the file cannot be written, ChunkHound skips the record and reports the problem only in the debug log.
 

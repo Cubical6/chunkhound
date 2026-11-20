@@ -13,13 +13,16 @@ class DecisionLogConfig(BaseModel):
     enabled: bool = Field(default=False, description="Enable the local decision log")
     path: Path | None = Field(
         default=None,
-        description="Log path (default: <projectroot>/.chunkhound/decisions.jsonl)",
+        description=(
+            "Log path inside <projectroot>/.chunkhound/ "
+            "(default: .chunkhound/decisions.jsonl)"
+        ),
     )
     max_size_mb: float = Field(
         default=50,
-        gt=0,
+        ge=1,
         allow_inf_nan=False,
-        description="Rotate above this size in MiB, keeping one generation",
+        description="Rotate above this size in MiB (minimum 1), keeping one generation",
     )
 
     @classmethod
