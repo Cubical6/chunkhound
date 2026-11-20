@@ -19,6 +19,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
+from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -69,6 +70,7 @@ from .common import (  # noqa: E402
     parse_mcp_arguments,
     tool_call_failed,
 )
+from .progress import McpProgressReporter  # noqa: E402
 
 _DATABASE_CLOSE_TIMEOUT_SECONDS = 10.0
 
@@ -1489,19 +1491,26 @@ class MCPServerBase(ABC):
             )
             if validation_error is not None:
                 return _validation_error_result(validation_error)
-            text_contents = await handle_tool_call(
-                tool_name=params.name,
-                arguments=arguments,
-                services=self.services,
-                embedding_manager=self.embedding_manager,
-                initialization_complete=self._initialization_complete,
-                debug_mode=self.debug_mode,
-                scan_progress=self._scan_progress_for_tool(params.name),
-                llm_manager=self.llm_manager,
-                config=self.config,
-                ensure_services=self.ensure_tool_services,
-                analytics_recorder=self.analytics_recorder,
+            reporter = (
+                McpProgressReporter(ctx.session.report_progress)
+                if ctx.meta is not None and ctx.meta.get("progress_token") is not None
+                else None
             )
+            async with reporter.heartbeat(params.name) if reporter else nullcontext():
+                text_contents = await handle_tool_call(
+                    tool_name=params.name,
+                    arguments=arguments,
+                    services=self.services,
+                    embedding_manager=self.embedding_manager,
+                    initialization_complete=self._initialization_complete,
+                    debug_mode=self.debug_mode,
+                    scan_progress=self._scan_progress_for_tool(params.name),
+                    llm_manager=self.llm_manager,
+                    config=self.config,
+                    ensure_services=self.ensure_tool_services,
+                    analytics_recorder=self.analytics_recorder,
+                    progress_reporter=reporter,
+                )
             return types.CallToolResult(
                 content=list(text_contents),
                 is_error=tool_call_failed(text_contents),
