@@ -88,6 +88,12 @@ the commit you took.
 
 Every line the fork changes in an upstream file can conflict at a later sync.
 
+- Robustness comes first. Keep the difference small through where you put
+  code (fork-only files, one shared hook in an upstream file), never by
+  picking a weaker design or a workaround. When the robust fix needs many
+  upstream lines, make them, and name the expected sync conflicts and the
+  open upstream pull requests on those files in the pull request under
+  "Upstream check".
 - Put fork-only code, tooling and docs in files that do not exist upstream.
 - Do not reformat, rename or move upstream code.
 - Do not edit `CHANGELOG.md`. It stays as upstream wrote it; the fork's
