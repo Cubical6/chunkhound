@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from chunkhound.services.research.shared.chunk_dedup import get_chunk_id
+from chunkhound.services.research.shared.decision_records import record_elbow_filter
 from chunkhound.services.research.shared.exploration.elbow_filter import (
     filter_chunks_by_elbow,
     get_unified_score,
@@ -231,6 +232,9 @@ class ParallelExplorationStrategy:
         # Apply unified elbow detection (score_key=None uses get_unified_score)
         filtered_chunks, elbow_stats = filter_chunks_by_elbow(
             merged_chunks, score_key=None
+        )
+        record_elbow_filter(
+            "parallel", merged_chunks, filtered_chunks, elbow_stats, score_key=None
         )
         logger.info(
             f"ParallelExplorationStrategy: Elbow filter kept "

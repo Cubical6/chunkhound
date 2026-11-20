@@ -12,6 +12,7 @@ from chunkhound.core.config.research_config import ResearchConfig
 from chunkhound.database_factory import DatabaseServices
 from chunkhound.embeddings import EmbeddingManager
 from chunkhound.llm_manager import LLMManager
+from chunkhound.services.research.shared.decision_records import record_elbow_filter
 from chunkhound.services.research.shared.exploration.elbow_filter import (
     filter_chunks_by_elbow,
 )
@@ -166,6 +167,9 @@ class WideCoverageStrategy:
         # cosine similarity are not treated as 0.0 alongside Phase 1/2 rerank scores.
         filtered_chunks, elbow_stats = filter_chunks_by_elbow(
             all_chunks, score_key=None
+        )
+        record_elbow_filter(
+            "wide_coverage", all_chunks, filtered_chunks, elbow_stats, score_key=None
         )
         stats["elbow_filter"] = elbow_stats
         logger.info(

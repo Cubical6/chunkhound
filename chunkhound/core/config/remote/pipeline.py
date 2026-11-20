@@ -40,7 +40,7 @@ from chunkhound.utils.logging_guard import log_if_not_mcp
 from . import fetcher, persistence, rules
 from .fetcher import url_scheme_ok
 
-# Operator-owned fields that remote config must never touch. DB path and
+# Operator-owned fields that remote config must never touch. DB path, log path and
 # target dir describe the local install; embeddings_disabled is a kill-switch
 # the operator sets deliberately; the *_config_file paths are discovery
 # inputs to the loader and would recurse if remote could override them.
@@ -53,6 +53,7 @@ from .fetcher import url_scheme_ok
 # _self_register_remote.
 REFUSED_PATHS: tuple[str, ...] = (
     "database.path",
+    "decision_log.path",
     "target_dir",
     "embeddings_disabled",
     "local_config_file",

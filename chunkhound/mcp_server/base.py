@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from chunkhound.core import analytics as ch_analytics
+from chunkhound.core import decision_log
 from chunkhound.core.config import EmbeddingProviderFactory
 from chunkhound.core.config.config import Config
 from chunkhound.core.exceptions.core import ConfigurationError
@@ -112,10 +113,11 @@ class MCPServerBase(ABC):
         # config.analytics.enabled; always a safe, usable object -- see
         # build_recorder()'s docstring). Every tool call shares this one
         # recorder/buffer, matching the design's per-process buffer model.
+        target_dir = getattr(config, "target_dir", None) or Path.cwd()
         self.analytics_recorder = ch_analytics.build_recorder(
-            getattr(config, "analytics", None),
-            getattr(config, "target_dir", None) or Path.cwd(),
+            getattr(config, "analytics", None), target_dir
         )
+        decision_log.configure(config, target_dir)
 
         # Underlying MCP protocol server. Constructed in
         # _register_common_tool_handlers(), which every concrete subclass's
