@@ -8,21 +8,27 @@ import pytest
 
 from chunkhound.core import decision_log
 from chunkhound.services.research.shared import decision_records
+from chunkhound.services.research.shared.exploration import ParallelExplorationStrategy
 from chunkhound.services.research.shared.models import ResearchContext
-from tests.unit.research.shared.exploration.test_parallel_strategy import (
-    TestParallelExplorationStrategy as _ParallelTests,
-)
-from tests.unit.research.test_research_decision_log import (
-    enable_log,
-    records,
-    reset_decision_log,  # noqa: F401 - reuse the log isolation fixture
-)
+from tests.unit.research.test_research_decision_log import enable_log, records
 from tests.unit.research.test_unified_search_bulk import make_search
+
+
+@pytest.fixture(autouse=True)
+def reset_decision_log(tmp_path):
+    decision_log.configure(None, tmp_path)
+    yield
+    decision_log.configure(None, tmp_path)
 
 
 @pytest.fixture
 def mock_strategy():
-    return _ParallelTests.mock_strategy.__wrapped__(None)
+    return ParallelExplorationStrategy(
+        bfs_strategy=MagicMock(),
+        wide_strategy=MagicMock(),
+        file_reader=MagicMock(),
+        llm_manager=MagicMock(),
+    )
 
 
 @pytest.mark.asyncio
@@ -168,22 +174,34 @@ async def test_parallel_elbow_records_partition_without_changing_results(
     assert "SECRET" not in str(record)
 
 
-def test_disabled_records_do_not_build_payload_or_create_file(tmp_path, monkeypatch):
+@pytest.mark.parametrize("event", ["rerank", "elbow"])
+def test_disabled_records_do_not_build_payload_or_create_file(
+    tmp_path, monkeypatch, event
+):
     def unexpected(*args, **kwargs):
         pytest.fail("Disabled logging must not inspect chunks or build payloads")
 
     monkeypatch.setattr(decision_records, "_chunk_reference", unexpected)
     monkeypatch.setattr(decision_log, "record", unexpected)
-    decision_records.record_chunk_rerank(
-        query="root",
-        node_id=None,
-        depth=None,
-        path_filter=None,
-        method="skipped",
-        n_rerank_queries=0,
-        semantic_results=None,
-        regex_results=None,
-        chunks=None,
-    )
-    decision_records.record_elbow_filter("parallel", None, None, None)
+    chunks = [
+        {"chunk_id": "one", "similarity": 0.9},
+        {"chunk_id": "two", "similarity": 0.4},
+    ]
+    assert not decision_log.is_enabled()
+    if event == "rerank":
+        decision_records.record_chunk_rerank(
+            query="root",
+            node_id=1,
+            depth=2,
+            path_filter="src/",
+            method="rerank",
+            n_rerank_queries=1,
+            semantic_results=chunks[:1],
+            regex_results=chunks[1:],
+            chunks=chunks,
+        )
+    else:
+        decision_records.record_elbow_filter(
+            "parallel", chunks, chunks[:1], {"method": "elbow"}
+        )
     assert not (tmp_path / ".chunkhound/decisions.jsonl").exists()

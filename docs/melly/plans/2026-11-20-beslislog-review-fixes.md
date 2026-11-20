@@ -62,7 +62,7 @@ At most ~15 lines:
 - **Notes:** Item 2 is a nit (no test observes it today); do not widen it beyond the four lines.
 
 ## Phase 3: chunk selection test fixtures (old items 17 and 19)
-- [ ] Done
+- [x] Done
 - **Depends on:** none
 - **Model:** `openai-codex/gpt-6.1-terra` / `medium`
 - **Goal:** `tests/unit/research/test_chunk_selection_decision_log.py` uses normal pytest fixtures and its "disabled" test detects a missing `is_enabled()` guard.
@@ -106,6 +106,7 @@ Phases 1, 2 and 3 are independent. Run them in sequence in this worktree, or in 
 | 2026-11-20 | 1 | 01a1fa6b-211d-737f-ae4f-f0a0233039d6 | `test(decision-log): …` | 66 passed; mutation (append without O_NOFOLLOW) fails only the new symlinked-log test, checked by Claude in a scratch copy; smoke 14 passed |
 | 2026-11-20 | 2 | 01a1fa6c-d20c-737f-ae4f-f0a28367dd6d | `test(research): …` | Verify 624 passed; importers 549 passed, 1 skipped; mutation (duplicate `research_run`) fails the item-12 test. Deviations: the two `_requests_made += 1` left in `fake_providers.py` belong to `FakeEmbeddingProvider`, which has no LLM usage scope (the plan's premise was wrong there). Old item 18 kept as is: the public path `detect_and_fill_gaps` needs clustering, shard gap detection, gap embeddings and unification before it selects, far over the ~40-line setup limit |
 | 2026-11-20 | 4 | Claude | `docs(decision-log): …` | Containment moved to its own "Location" paragraph, new "Lock file" paragraph; changelog entry extended (title kept). Site tests 73 passed (needed `npm ci --prefix site` in the worktree first) |
+| 2026-11-20 | 3 | 01a1fa79-ee1a-737f-ae4f-f0a4113dcc5b | `test(research): …` | Fixtures defined locally (no `__wrapped__`, no `noqa: F401`); disabled test parametrized per record type. `tests/unit/research` 297 passed; mutation checked by Claude: removing either guard fails exactly its own case. Also wrapped two E501 lines (one from Phase 1) |
 
 ---
 

@@ -208,7 +208,9 @@ def test_process_writers_retain_generation_and_every_record(tmp_path):
         assert started[1].wait(30), "second writer did not start"
         # B must wait for A's check/rotate/append transaction, not rotate the
         # same generation itself. No sleeps or long subprocess timeouts.
-        assert not finished[1].wait(0.2), "second writer finished while rotation was locked"
+        assert not finished[1].wait(0.2), (
+            "second writer finished while rotation was locked"
+        )
         release.set()
         for process in processes:
             process.join(30)
