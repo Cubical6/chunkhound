@@ -77,7 +77,7 @@ At most ~15 lines:
 - **Notes:** If the moved fixture is used by the class `_ParallelTests` elsewhere, keep that class working.
 
 ## Phase 4: docs for the lock file (item 9) — Claude, not pi-bolt
-- [ ] Done
+- [x] Done
 - **Depends on:** none
 - **Goal:** Users learn that the log creates a `<filename>.lock` file next to it that stays.
 - **Files:** `site/src/pages/docs/configuration.md` (~:787, "Rotation" paragraph), `CHANGELOG.fork.md` (existing **Decision log** entry; keep its title)
@@ -105,6 +105,7 @@ Phases 1, 2 and 3 are independent. Run them in sequence in this worktree, or in 
 |---|---|---|---|---|
 | 2026-11-20 | 1 | 01a1fa6b-211d-737f-ae4f-f0a0233039d6 | `test(decision-log): …` | 66 passed; mutation (append without O_NOFOLLOW) fails only the new symlinked-log test, checked by Claude in a scratch copy; smoke 14 passed |
 | 2026-11-20 | 2 | 01a1fa6c-d20c-737f-ae4f-f0a28367dd6d | `test(research): …` | Verify 624 passed; importers 549 passed, 1 skipped; mutation (duplicate `research_run`) fails the item-12 test. Deviations: the two `_requests_made += 1` left in `fake_providers.py` belong to `FakeEmbeddingProvider`, which has no LLM usage scope (the plan's premise was wrong there). Old item 18 kept as is: the public path `detect_and_fill_gaps` needs clustering, shard gap detection, gap embeddings and unification before it selects, far over the ~40-line setup limit |
+| 2026-11-20 | 4 | Claude | `docs(decision-log): …` | Containment moved to its own "Location" paragraph, new "Lock file" paragraph; changelog entry extended (title kept). Site tests 73 passed (needed `npm ci --prefix site` in the worktree first) |
 
 ---
 
