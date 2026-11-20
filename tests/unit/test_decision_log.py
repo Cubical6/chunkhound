@@ -114,6 +114,7 @@ def test_unwritable_path_does_not_fail_or_print(tmp_path, capsys):
     blocker.parent.mkdir()
     blocker.write_text("file")
     enable(tmp_path, path=blocker / "decisions.jsonl")
+    assert decision_log.is_enabled()
     decision_log.record("search", {})
     assert blocker.read_text() == "file"
     assert capsys.readouterr().out == ""
@@ -165,7 +166,7 @@ def _write_process_records(project, role, rotating, release, started, finished):
     def pause_rotation(source, target):
         if source == path:
             rotating.set()
-            if not release.wait(3):
+            if not release.wait(30):
                 raise TimeoutError("rotation was not released")
         return real_replace(source, target)
 
@@ -201,16 +202,18 @@ def test_process_writers_retain_generation_and_every_record(tmp_path):
     try:
         processes[0].start()
         running.append(processes[0])
-        assert rotating.wait(3), "first writer did not reach rotation"
+        assert rotating.wait(30), "first writer did not reach rotation"
         processes[1].start()
         running.append(processes[1])
-        assert started[1].wait(3), "second writer did not start"
+        assert started[1].wait(30), "second writer did not start"
         # B must wait for A's check/rotate/append transaction, not rotate the
         # same generation itself. No sleeps or long subprocess timeouts.
-        assert not finished[1].wait(0.2)
+        assert not finished[1].wait(0.2), (
+            "second writer finished while rotation was locked"
+        )
         release.set()
         for process in processes:
-            process.join(3)
+            process.join(30)
             assert process.exitcode == 0
         assert all(event.is_set() for event in finished)
     finally:
@@ -267,6 +270,7 @@ def test_existing_log_and_directory_permissions_are_not_changed(tmp_path):
 @pytest.mark.skipif(os.name != "posix", reason="POSIX no-follow protection")
 def test_symlinked_lock_cannot_create_file_outside_log_directory(tmp_path):
     path = enable(tmp_path)
+    assert decision_log.is_enabled()
     path.parent.mkdir()
     outside = tmp_path / "outside"
     lock_path = path.with_name(path.name + ".lock")
@@ -277,6 +281,25 @@ def test_symlinked_lock_cannot_create_file_outside_log_directory(tmp_path):
     assert not outside.exists()
     assert not path.exists()
     assert lock_path.is_symlink()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX no-follow protection")
+def test_symlinked_log_cannot_modify_outside_file(tmp_path, capsys):
+    path = enable(tmp_path)
+    assert decision_log.is_enabled()
+    path.parent.mkdir()
+    outside = tmp_path / "outside"
+    original = b"existing outside content\x00\xff\n"
+    outside.write_bytes(original)
+    path.symlink_to(outside)
+
+    decision_log.record("search", {"query": "private query"})
+
+    assert outside.read_bytes() == original
+    assert path.is_symlink()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
 
 
 @pytest.mark.parametrize("failure", ["lock", "append", "rotation"])

@@ -51,5 +51,5 @@ class ScriptedStructuredLLM(FakeLLMProvider):
     ) -> dict[str, Any]:
         self.prompts.append(prompt)
         self.schemas.append(json_schema)
-        self._requests_made += 1
+        self._record_usage(requests=1)
         return self.handler(prompt, len(self.prompts))
