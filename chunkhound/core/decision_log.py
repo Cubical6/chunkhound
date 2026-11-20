@@ -5,6 +5,9 @@ native extension is involved; callers must opt in through configuration.
 """
 
 import json
+import math
+import os
+import sys
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -85,6 +88,51 @@ def trace() -> Iterator[str]:
         _trace.reset(token)
 
 
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, Mapping):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+def _mkdir_private(path: Path) -> None:
+    # mkdir(parents=True) uses default permissions for intermediate directories.
+    try:
+        path.mkdir(mode=0o700, exist_ok=True)
+    except FileNotFoundError:
+        _mkdir_private(path.parent)
+        path.mkdir(mode=0o700, exist_ok=True)
+
+
+@contextmanager
+def _file_lock(path: Path) -> Iterator[None]:
+    # Keep the sidecar in place: locking the log inode would not survive rotation.
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(fd, "r+b") as stream:
+        if sys.platform == "win32":
+            import msvcrt
+
+            # Windows permits locking a byte range beyond EOF.
+            stream.seek(0)
+            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
 def record(event: str, payload: Mapping[str, Any]) -> None:
     """Append one event with authoritative Schema v1 common fields.
 
@@ -108,11 +156,15 @@ def record(event: str, payload: Mapping[str, Any]) -> None:
                 "parent_trace_id": parent_trace_id,
                 "chunkhound_version": __version__,
             }
-            line = json.dumps(data, default=str) + "\n"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            if path.exists() and path.stat().st_size > _max_size_bytes:
-                path.replace(path.with_name(path.name + ".1"))
-            with path.open("a", encoding="utf-8") as stream:
-                stream.write(line)
+            line = json.dumps(_json_safe(data), default=str, allow_nan=False) + "\n"
+            _mkdir_private(path.parent)
+            with _file_lock(path.with_name(path.name + ".lock")):
+                if path.exists() and path.stat().st_size > _max_size_bytes:
+                    path.replace(path.with_name(path.name + ".1"))
+                flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+                flags |= getattr(os, "O_NOFOLLOW", 0)
+                fd = os.open(path, flags, 0o600)
+                with os.fdopen(fd, "a", encoding="utf-8") as stream:
+                    stream.write(line)
     except Exception:
         _debug_failure("write")

@@ -2,6 +2,9 @@
 
 import asyncio
 import json
+import multiprocessing
+import os
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -147,7 +150,197 @@ def test_custom_log_inside_chunkhound_rotates_one_generation(tmp_path, absolute)
     decision_log.record("third", {})
     assert json.loads(backup.read_text())["event"] == "second"
     assert json.loads(path.read_text())["event"] == "third"
-    assert sorted(p.name for p in path.parent.iterdir()) == ["d.jsonl", "d.jsonl.1"]
+    assert sorted(p.name for p in path.parent.iterdir()) == [
+        "d.jsonl",
+        "d.jsonl.1",
+        "d.jsonl.lock",
+    ]
+
+
+def _write_process_records(project, role, rotating, release, started, finished):
+    """Pause A at the filesystem rename boundary while B attempts to append."""
+    path = enable(project)
+    real_replace = Path.replace
+
+    def pause_rotation(source, target):
+        if source == path:
+            rotating.set()
+            if not release.wait(3):
+                raise TimeoutError("rotation was not released")
+        return real_replace(source, target)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(decision_log, "_max_size_bytes", 16 * 1024)
+        if role == "A":
+            patch.setattr(Path, "replace", pause_rotation)
+        started.set()
+        for index in range(5):
+            decision_log.record("search", {"writer": role, "index": index})
+        finished.set()
+
+
+def test_process_writers_retain_generation_and_every_record(tmp_path):
+    path = enable(tmp_path)
+    path.parent.mkdir()
+    old_records = [{"old": index, "padding": "x" * 4096} for index in range(5)]
+    path.write_text("".join(json.dumps(item) + "\n" for item in old_records))
+    # Both writers' new records fit in one generation. Exactly one rotation is
+    # needed, even when the second writer arrives during the first rotation.
+    context = multiprocessing.get_context("spawn")
+    rotating, release = context.Event(), context.Event()
+    started = [context.Event(), context.Event()]
+    finished = [context.Event(), context.Event()]
+    processes = [
+        context.Process(
+            target=_write_process_records,
+            args=(tmp_path, role, rotating, release, started[i], finished[i]),
+        )
+        for i, role in enumerate(("A", "B"))
+    ]
+    running = []
+    try:
+        processes[0].start()
+        running.append(processes[0])
+        assert rotating.wait(3), "first writer did not reach rotation"
+        processes[1].start()
+        running.append(processes[1])
+        assert started[1].wait(3), "second writer did not start"
+        # B must wait for A's check/rotate/append transaction, not rotate the
+        # same generation itself. No sleeps or long subprocess timeouts.
+        assert not finished[1].wait(0.2)
+        release.set()
+        for process in processes:
+            process.join(3)
+            assert process.exitcode == 0
+        assert all(event.is_set() for event in finished)
+    finally:
+        release.set()
+        for process in running:
+            if process.is_alive():
+                process.terminate()
+            process.join(1)
+
+    backup = path.with_name(path.name + ".1")
+    assert [json.loads(line) for line in backup.read_text().splitlines()] == old_records
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+    assert len(records) == 10
+    assert {(item["writer"], item["index"]) for item in records} == {
+        (role, index) for role in ("A", "B") for index in range(5)
+    }
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
+@pytest.mark.parametrize("nested", [False, True])
+def test_new_logs_and_directories_are_owner_only_under_umask_022(tmp_path, nested):
+    path = tmp_path / ".chunkhound" / "logs" / "nested" / "private.jsonl"
+    if nested:
+        enable(tmp_path, path=path)
+    else:
+        path = enable(tmp_path)
+    old_umask = os.umask(0o022)
+    try:
+        decision_log.record("search", {"query": "private query"})
+    finally:
+        os.umask(old_umask)
+    assert json.loads(path.read_text())["query"] == "private query"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(path.with_name(path.name + ".lock").stat().st_mode) == 0o600
+    for directory in path.parents:
+        if directory == tmp_path:
+            break
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
+def test_existing_log_and_directory_permissions_are_not_changed(tmp_path):
+    path = enable(tmp_path)
+    path.parent.mkdir()
+    path.touch()
+    path.parent.chmod(0o750)
+    path.chmod(0o640)
+    decision_log.record("search", {})
+    assert json.loads(path.read_text())["event"] == "search"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o750
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX no-follow protection")
+def test_symlinked_lock_cannot_create_file_outside_log_directory(tmp_path):
+    path = enable(tmp_path)
+    path.parent.mkdir()
+    outside = tmp_path / "outside"
+    lock_path = path.with_name(path.name + ".lock")
+    lock_path.symlink_to(outside)
+
+    decision_log.record("search", {"query": "private query"})
+
+    assert not outside.exists()
+    assert not path.exists()
+    assert lock_path.is_symlink()
+
+
+@pytest.mark.parametrize("failure", ["lock", "append", "rotation"])
+def test_io_failures_are_debug_logged_and_later_records_still_work(tmp_path, failure):
+    path = enable(tmp_path)
+    decision_log.record("before", {})
+    real_open = os.open
+
+    def fail_open(target, flags, mode=0o777):
+        if (failure == "lock" and str(target).endswith(".lock")) or (
+            failure == "append" and Path(target) == path
+        ):
+            raise OSError("unavailable")
+        return real_open(target, flags, mode)
+
+    def fail_rotation(source, target):
+        raise OSError("unavailable")
+
+    messages = []
+    handler = logger.add(lambda message: messages.append(message), level="DEBUG")
+    try:
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(os, "open", fail_open)
+            if failure == "rotation":
+                patch.setattr(decision_log, "_max_size_bytes", 0)
+                patch.setattr(Path, "replace", fail_rotation)
+            decision_log.record("failed", {})
+    finally:
+        logger.remove(handler)
+    decision_log.record("after", {})
+    assert [json.loads(line)["event"] for line in path.read_text().splitlines()] == [
+        "before",
+        "after",
+    ]
+    assert any(
+        message.record["level"].name == "DEBUG"
+        and "Decision log write failed" in str(message)
+        for message in messages
+    )
+
+
+def test_nonfinite_scores_are_null_in_strict_json_without_losing_records(tmp_path):
+    path = enable(tmp_path)
+    payload = {
+        "score": float("nan"),
+        "chunks": [{"scores": [float("inf"), float("-inf"), 0.5]}],
+        "metadata": {"nested": {"score": float("nan")}},
+    }
+    decision_log.record("rerank", payload)
+    decision_log.record("search", {})
+
+    def reject_constant(value):
+        raise ValueError(f"non-standard JSON constant: {value}")
+
+    records = [
+        json.loads(line, parse_constant=reject_constant)
+        for line in path.read_text().splitlines()
+    ]
+    assert len(records) == 2
+    assert records[0]["score"] is None
+    assert records[0]["chunks"] == [{"scores": [None, None, 0.5]}]
+    assert records[0]["metadata"] == {"nested": {"score": None}}
+    assert records[1]["event"] == "search"
+    assert payload["chunks"][0]["scores"][0] == float("inf")
 
 
 @pytest.mark.parametrize("value", [0, 0.5, -1, float("nan"), float("inf")])

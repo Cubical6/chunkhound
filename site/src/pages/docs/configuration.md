@@ -782,7 +782,7 @@ The decision log is an optional local file that records why a search or research
 
 The MCP server writes to the log, and so do the CLI commands that search or run research, such as `chunkhound search` and `chunkhound research`.
 
-**Privacy.** Records contain the text of your queries, and the research records also contain the follow-up questions and gap queries the LLM generated. The chunk selection records contain the file paths and line ranges of chunks. They never contain chunk or file content. The file stays on your machine: ChunkHound never uploads it.
+**Privacy.** Records contain the text of your queries, and the research records also contain the follow-up questions and gap queries the LLM generated. The chunk selection records contain the file paths and line ranges of chunks. They never contain chunk or file content. The file stays on your machine: ChunkHound never uploads it. On POSIX, newly created log files are owner-only (`0600`) and new log directories are owner-only (`0700`); existing permissions are left unchanged (Windows uses its platform permissions).
 
 **Rotation.** The log path must stay inside the project's `.chunkhound/` directory after resolving `~`, `..` and symlinks (the directory itself is resolved too). An outside path disables logging with one warning, without falling back to the default path. When the file grows past `max_size_mb` (at least 1 MiB), ChunkHound renames it to `<filename>.1` (for example, `d.jsonl.1` for `d.jsonl`) and starts a new file. It keeps one old file; the next rotation overwrites it.
 
