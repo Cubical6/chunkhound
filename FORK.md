@@ -11,6 +11,14 @@ describe upstream, this file wins.
 - `main` on the fork is upstream's `main` plus the fork's changes. Never rebase
   or force-push it, and never push to it directly: every change, also a sync
   or a one-line docs fix, goes through a pull request.
+- An agent opens pull requests but never merges one. The user reviews every
+  pull request, also a sync, and merges it or explicitly says "merge #N" for
+  that pull request after reviewing it. Approval to push or to open a pull
+  request is not approval to merge it, and neither are passing tests.
+  A local hook (`~/.claude/hooks/merge-guard.py`, registered in the gitignored
+  `.claude/settings.local.json`) makes Claude Code ask the user to confirm
+  every `gh pr merge` and every merge through the GitHub API. Never get
+  around it with another command, a script or a different tool.
 - GitHub enforces this with the ruleset `main: PR only`: a pull request is
   required (no approval needed), and force pushes and deletion are blocked.
   It requires no status checks: the fork runs its tests locally (see "Tests"
@@ -145,9 +153,10 @@ git merge upstream/main
 3. Run the smoke suite and the full suite locally (see "Tests"). When a test
    fails, run it on upstream's `main` too: a failure that also occurs there
    belongs in a fork issue, not in the sync.
-4. Open a pull request against the fork's `main` and merge it with a merge
-   commit: `gh pr merge <N> -R Cubical6/chunkhound --merge`. Never squash or
-   rebase a sync: that discards the link to upstream's history, and the next
+4. Open a pull request against the fork's `main` and leave it for the user to
+   review. It is merged with a merge commit, by the user or on the user's
+   explicit "merge #N": `gh pr merge <N> -R Cubical6/chunkhound --merge`.
+   Never squash or rebase a sync: that discards the link to upstream's history, and the next
    sync then conflicts on everything again.
 5. Delete the sync branch and its worktree.
 
