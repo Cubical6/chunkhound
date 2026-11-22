@@ -183,7 +183,10 @@ def test_out_of_range_mtime_does_not_abort_indexing(tmp_path, monkeypatch, mtime
     root.mkdir()
     source = root / "alpha.py"
     source.write_text("def alpha_marker():\n    return 1\n")
-    os.utime(source, (mtime, mtime))
+    try:
+        os.utime(source, (mtime, mtime))
+    except OSError:
+        pytest.skip("filesystem cannot hold the requested modification time")
     if os.stat(source).st_mtime != mtime:
         pytest.skip("filesystem cannot hold the requested modification time")
     assert os.stat(source).st_mtime == mtime
