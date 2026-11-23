@@ -533,7 +533,10 @@ class TestDocsVersionWorkflowContract:
             "old-linux-wheel-smoke",
             "native-dev-macos",
         ]
-        assert job["if"] == "github.ref == 'refs/heads/main'"
+        assert job["if"] == (
+            "github.repository == 'chunkhound/chunkhound' && "
+            "github.ref == 'refs/heads/main'"
+        )
         assert download_step["with"]["name"] == "site-dist"
         assert download_step["with"]["path"] == "site/dist"
         assert upload_step["with"]["path"] == "site/dist/"
@@ -558,7 +561,10 @@ class TestDocsVersionWorkflowContract:
         permissions = cast(dict[str, Any], job.get("permissions", {}))
 
         assert job["needs"] == "pages-artifact"
-        assert job["if"] == "github.ref == 'refs/heads/main'"
+        assert job["if"] == (
+            "github.repository == 'chunkhound/chunkhound' && "
+            "github.ref == 'refs/heads/main'"
+        )
         # Serialize only Pages deployments, not the validation/release builds.
         concurrency = cast(dict[str, Any], job["concurrency"])
         assert concurrency["group"] == "chunkhound-pages-deploy"

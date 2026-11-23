@@ -9,6 +9,7 @@ from chunkhound.core.types.common import Language
 from chunkhound.providers.database.duckdb.schema_constants import (
     fallback_embedding_tables,
 )
+from chunkhound.utils.mtime import clamp_mtime
 
 if TYPE_CHECKING:
     from chunkhound.providers.database.duckdb.connection_manager import (
@@ -83,7 +84,7 @@ class DuckDBFileRepository:
                         file.name,
                         file.extension,
                         file.size_bytes,
-                        file.mtime,
+                        clamp_mtime(file.mtime),
                         file.language.value if file.language else None,
                     ],
                 ).fetchone()
@@ -245,7 +246,7 @@ class DuckDBFileRepository:
             # Add timestamp update if provided
             if mtime is not None:
                 set_clauses.append("modified_time = to_timestamp(?)")
-                values.append(mtime)
+                values.append(clamp_mtime(mtime))
 
             # Add content hash update if provided
             if content_hash is not None:

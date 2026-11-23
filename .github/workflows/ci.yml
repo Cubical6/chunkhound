@@ -387,7 +387,7 @@ jobs:
       - native-wheel-smoke-arm64
       - old-linux-wheel-smoke
       - native-dev-macos
-    if: github.ref == 'refs/heads/main'
+    if: github.repository == 'chunkhound/chunkhound' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -405,7 +405,7 @@ jobs:
 
   deploy:
     needs: pages-artifact
-    if: github.ref == 'refs/heads/main'
+    if: github.repository == 'chunkhound/chunkhound' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # Pages may discard superseded pending deployments, never CI builds.
     concurrency:
