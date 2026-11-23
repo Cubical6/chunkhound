@@ -44,6 +44,7 @@ wrote it.
 
 ## Fixed
 
+- **Out-of-range modification times on the Python side** — A file dated outside the database's timestamp range no longer stops the stored times of other unchanged files from being updated; Python now stores and compares the same clamped time as the Rust pipeline. The Rust pipeline no longer hashes such a file again on every index run; the Python pipeline on DuckDB still does (#83).
 - **Multi-hop thresholds take effect** — `multi_hop_min_candidates`, `multi_hop_score_degradation` and `multi_hop_min_relevance` (and their `CHUNKHOUND_RESEARCH_MULTI_HOP_*` variables) were loaded but ignored; multi-hop search now uses them. The defaults keep the previous behavior.
 - **MCP progress for long tool calls** — code_research and other long tool calls now send progress notifications (research phases at most once per second, plus a heartbeat every 30 s), so clients with an idle timeout (Claude Code: 300 s over HTTP) no longer abort them. A slow client never delays the tool, and heartbeats stop after 10 minutes without real progress, so a hung tool still times out.
 - **Out-of-range modification times no longer abort indexing** — A file dated far before 1970 or far in the future, outside the database's timestamp range, no longer makes the Rust index run fail with "Epoch seconds out of range"; its time is stored clamped to the nearest supported value.

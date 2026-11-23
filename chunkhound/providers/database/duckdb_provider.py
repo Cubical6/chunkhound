@@ -40,6 +40,7 @@ from chunkhound.providers.database.duckdb.embedding_repository import (
 )
 from chunkhound.providers.database.duckdb.file_repository import DuckDBFileRepository
 from chunkhound.utils.logging_guard import log_if_not_mcp
+from chunkhound.utils.mtime import clamp_mtime
 from chunkhound.providers.database.like_utils import escape_like_pattern
 from chunkhound.providers.database.serial_database_provider import (
     SerialDatabaseProvider,
@@ -2880,7 +2881,7 @@ class DuckDBProvider(SerialDatabaseProvider):
                     if hasattr(file, "extension")
                     else Path(file.path).suffix,
                     file.size_bytes if hasattr(file, "size_bytes") else None,
-                    file.mtime if hasattr(file, "mtime") else None,
+                    clamp_mtime(file.mtime) if hasattr(file, "mtime") else None,
                     getattr(file, "content_hash", None),
                     file.language.value if file.language else None,
                 ],
@@ -3012,7 +3013,7 @@ class DuckDBProvider(SerialDatabaseProvider):
 
         if mtime is not None:
             updates.append("modified_time = to_timestamp(?)")
-            params.append(mtime)
+            params.append(clamp_mtime(mtime))
 
         if content_hash is not None:
             updates.append("content_hash = ?")
@@ -3040,7 +3041,7 @@ class DuckDBProvider(SerialDatabaseProvider):
         alone: the row's content was confirmed, not re-indexed.
         """
         paths = [e[0] for e in entries]
-        mtimes = [float(e[1]) for e in entries]
+        mtimes = [clamp_mtime(float(e[1])) for e in entries]
         hashes = [e[2] for e in entries]
         row = conn.execute(
             """
@@ -3106,7 +3107,16 @@ class DuckDBProvider(SerialDatabaseProvider):
                 skip_reason = EXCLUDED.skip_reason,
                 updated_at = now()  -- CURRENT_TIMESTAMP parses as a column name in ON CONFLICT SET; use now() instead
             """,
-            [path, name, extension, size, mtime, content_hash, language, skip_reason],
+            [
+                path,
+                name,
+                extension,
+                size,
+                clamp_mtime(mtime),
+                content_hash,
+                language,
+                skip_reason,
+            ],
         )
 
     def delete_file_completely(self, file_path: str) -> bool:
