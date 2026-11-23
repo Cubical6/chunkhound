@@ -238,7 +238,7 @@ class GeminiLLMProvider(LLMProvider):
                     config=config,
                 )
 
-            self._requests_made += 1
+            self._record_usage(requests=1)
 
             # Extract finish reason FIRST (before content check) so that
             # truncation/blocked errors win over empty-content errors.
@@ -293,9 +293,11 @@ class GeminiLLMProvider(LLMProvider):
                     usage, "total_token_count", prompt_tokens + completion_tokens
                 )
 
-                self._prompt_tokens += prompt_tokens
-                self._completion_tokens += completion_tokens
-                self._tokens_used += total_tokens
+                self._record_usage(
+                    tokens=total_tokens,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                )
             else:
                 total_tokens = 0
 
@@ -359,7 +361,7 @@ class GeminiLLMProvider(LLMProvider):
                     config=config,
                 )
 
-            self._requests_made += 1
+            self._record_usage(requests=1)
 
             # Extract finish reason FIRST (before content check) so that
             # truncation/blocked errors win over empty-content errors.
@@ -409,9 +411,11 @@ class GeminiLLMProvider(LLMProvider):
                     usage, "total_token_count", prompt_tokens + completion_tokens
                 )
 
-                self._prompt_tokens += prompt_tokens
-                self._completion_tokens += completion_tokens
-                self._tokens_used += total_tokens
+                self._record_usage(
+                    tokens=total_tokens,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                )
 
             # Parse JSON response
             try:

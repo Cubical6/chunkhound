@@ -94,6 +94,9 @@ def run_git(
             if timeout_s is not None
             else float(os.environ.get("CHUNKHOUND_GIT_TIMEOUT_SECONDS", "15")),
             text=True,
+            # Git emits UTF-8 paths even when Windows uses an ANSI code page.
+            encoding="utf-8",
+            errors="surrogateescape",
         )
         return proc
     except subprocess.TimeoutExpired as te:

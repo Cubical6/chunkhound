@@ -39,7 +39,7 @@ class ScriptedLLM(FakeLLMProvider):
             raise ValueError("Structured C4 prompt must contain 'C4 step: <step>'")
         step = match.group(1)
         self.calls[step] += 1
-        self._requests_made += 1
+        self._record_usage(requests=1)
         question = re.search(r"C4 question: (\w+)\b", prompt)
         key = question.group(1) if question else step
         if question:

@@ -13,6 +13,14 @@ from chunkhound.interfaces.llm_provider import (
     OutputLimitMetadata,
 )
 from chunkhound.llm_manager import LLMManager
+from chunkhound.providers.llm import PiCLIProvider
+
+
+def test_pi_cli_manager_creates_provider():
+    config = {"provider": "pi-cli", "model": "openai-codex/gpt-6-luna"}
+    manager = LLMManager(config, config)
+    assert isinstance(manager.get_utility_provider(), PiCLIProvider)
+    assert isinstance(manager.get_synthesis_provider(), PiCLIProvider)
 
 
 def test_llm_manager_registry_includes_codex_cli():
