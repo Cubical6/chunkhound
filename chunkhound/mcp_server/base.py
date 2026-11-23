@@ -19,6 +19,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
+from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -26,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from chunkhound.core import analytics as ch_analytics
+from chunkhound.core import decision_log
 from chunkhound.core.config import EmbeddingProviderFactory
 from chunkhound.core.config.config import Config
 from chunkhound.core.exceptions.core import ConfigurationError
@@ -69,6 +71,7 @@ from .common import (  # noqa: E402
     parse_mcp_arguments,
     tool_call_failed,
 )
+from .progress import McpProgressReporter  # noqa: E402
 
 _DATABASE_CLOSE_TIMEOUT_SECONDS = 10.0
 
@@ -110,10 +113,11 @@ class MCPServerBase(ABC):
         # config.analytics.enabled; always a safe, usable object -- see
         # build_recorder()'s docstring). Every tool call shares this one
         # recorder/buffer, matching the design's per-process buffer model.
+        target_dir = getattr(config, "target_dir", None) or Path.cwd()
         self.analytics_recorder = ch_analytics.build_recorder(
-            getattr(config, "analytics", None),
-            getattr(config, "target_dir", None) or Path.cwd(),
+            getattr(config, "analytics", None), target_dir
         )
+        decision_log.configure(config, target_dir)
 
         # Underlying MCP protocol server. Constructed in
         # _register_common_tool_handlers(), which every concrete subclass's
@@ -1489,19 +1493,26 @@ class MCPServerBase(ABC):
             )
             if validation_error is not None:
                 return _validation_error_result(validation_error)
-            text_contents = await handle_tool_call(
-                tool_name=params.name,
-                arguments=arguments,
-                services=self.services,
-                embedding_manager=self.embedding_manager,
-                initialization_complete=self._initialization_complete,
-                debug_mode=self.debug_mode,
-                scan_progress=self._scan_progress_for_tool(params.name),
-                llm_manager=self.llm_manager,
-                config=self.config,
-                ensure_services=self.ensure_tool_services,
-                analytics_recorder=self.analytics_recorder,
+            reporter = (
+                McpProgressReporter(ctx.session.report_progress)
+                if ctx.meta is not None and ctx.meta.get("progress_token") is not None
+                else None
             )
+            async with reporter.heartbeat(params.name) if reporter else nullcontext():
+                text_contents = await handle_tool_call(
+                    tool_name=params.name,
+                    arguments=arguments,
+                    services=self.services,
+                    embedding_manager=self.embedding_manager,
+                    initialization_complete=self._initialization_complete,
+                    debug_mode=self.debug_mode,
+                    scan_progress=self._scan_progress_for_tool(params.name),
+                    llm_manager=self.llm_manager,
+                    config=self.config,
+                    ensure_services=self.ensure_tool_services,
+                    analytics_recorder=self.analytics_recorder,
+                    progress_reporter=reporter,
+                )
             return types.CallToolResult(
                 content=list(text_contents),
                 is_error=tool_call_failed(text_contents),

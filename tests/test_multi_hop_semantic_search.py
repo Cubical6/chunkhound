@@ -1,10 +1,15 @@
 """Deterministic multi-hop semantic search contract tests."""
 
+import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
+from chunkhound.core import decision_log
+from chunkhound.core.config.decision_log_config import DecisionLogConfig
+from chunkhound.core.config.research_config import ResearchConfig
 from chunkhound.core.types.common import Language
 from chunkhound.interfaces.database_provider import DatabaseProvider
 from chunkhound.interfaces.embedding_provider import EmbeddingProvider
@@ -21,6 +26,300 @@ from tests.fixtures.multi_hop_synthetic import (
     build_multi_hop_scenario,
     build_score_drop_termination_scenario,
 )
+
+
+@pytest.fixture
+def search_decision_log(tmp_path):
+    decision_log.configure(None, tmp_path)
+    yield tmp_path / ".chunkhound" / "decisions.jsonl"
+    decision_log.configure(None, tmp_path)
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "builder,builder_kwargs,query,search_kwargs,stop_reason,n_rounds,n_reranks",
+    [
+        (
+            build_multi_hop_scenario,
+            {},
+            "security validation mechanisms",
+            {"time_limit": 0.0},
+            "time_limit",
+            0,
+            0,
+        ),
+        (
+            build_multi_hop_scenario,
+            {},
+            "security validation mechanisms",
+            {"result_limit": 2},
+            "result_limit",
+            0,
+            0,
+        ),
+        (
+            build_multi_hop_scenario,
+            {},
+            "security validation mechanisms",
+            {"result_limit": 6},
+            "result_limit",
+            1,
+            1,
+        ),
+        (
+            build_insufficient_candidates_scenario,
+            {},
+            "insufficient candidates",
+            {},
+            "insufficient_candidates",
+            0,
+            0,
+        ),
+        (
+            build_graph_exhaustion_scenario,
+            {},
+            "graph exhaustion",
+            {},
+            "no_new_candidates",
+            1,
+            1,
+        ),
+        (
+            build_multi_hop_scenario,
+            {"fail_rerank": True},
+            "security validation mechanisms",
+            {},
+            "rerank_error",
+            0,
+            0,
+        ),
+        (
+            build_score_drop_termination_scenario,
+            {},
+            "score drop termination",
+            {},
+            "score_drop",
+            0,
+            1,
+        ),
+        (
+            build_min_score_termination_scenario,
+            {},
+            "minimum score termination",
+            {},
+            "min_relevance",
+            0,
+            1,
+        ),
+        (
+            build_multi_hop_scenario,
+            {},
+            "security validation mechanisms",
+            {"force_strategy": "multi_hop"},
+            "no_new_candidates",
+            2,
+            2,
+        ),
+        (
+            build_multi_hop_scenario,
+            {},
+            "security validation mechanisms",
+            {"force_strategy": "single_hop"},
+            None,
+            None,
+            None,
+        ),
+        (
+            build_multi_hop_scenario,
+            {"supports_reranking": False},
+            "security validation mechanisms",
+            {},
+            None,
+            None,
+            None,
+        ),
+    ],
+)
+async def test_search_decision_log_contract(
+    tmp_path,
+    search_decision_log,
+    builder,
+    builder_kwargs,
+    query,
+    search_kwargs,
+    stop_reason,
+    n_rounds,
+    n_reranks,
+):
+    scenario = builder(**builder_kwargs)
+    service = _build_search_service(scenario.db, scenario.provider)
+    decision_log.configure(
+        SimpleNamespace(decision_log=DecisionLogConfig(enabled=True)), tmp_path
+    )
+    with decision_log.trace() as parent:
+        results, _ = await service.search_semantic(query, page_size=10, **search_kwargs)
+    records = [
+        json.loads(line) for line in search_decision_log.read_text().splitlines()
+    ]
+    assert len(records) == 1
+    record = records[0]
+    assert record["schema_version"] == 1
+    assert record["ts"] and record["chunkhound_version"]
+    assert record["parent_trace_id"] == parent
+    assert record["trace_id"] != parent
+    assert record["query"] == query
+    assert record["page_size"] == 10
+    assert record["has_path_filter"] is False
+    assert record["provider"] == "deterministic"
+    assert record["model"] == "synthetic"
+    assert record["n_returned"] == len(results)
+    assert record["elapsed_s"] >= 0
+    assert record["strategy_reason"] == (
+        "forced"
+        if "force_strategy" in search_kwargs
+        else "provider_supports_reranking"
+        if stop_reason
+        else "no_reranker"
+    )
+    if stop_reason:
+        assert record["event"] == "multi_hop_search"
+        assert record["stop_reason"] == stop_reason
+        assert record["n_rounds"] == n_rounds
+        assert len(record["rounds"]) == n_reranks
+        assert record["n_candidates"] >= len(results)
+        assert set(record["policy"]) == {
+            "min_candidates",
+            "score_drop_threshold",
+            "min_relevance_floor",
+            "time_limit",
+            "result_limit",
+            "exhaustive_mode",
+        }
+        assert set(record["initial"]) == {"n_results", "top_scores"}
+        assert len(record["initial"]["top_scores"]) <= 5
+        for index, round_record in enumerate(record["rounds"], 1):
+            assert set(round_record) == {
+                "round",
+                "n_new_candidates",
+                "n_total",
+                "top_scores",
+                "max_score_drop",
+                "min_top_score",
+                "elapsed_s",
+            }
+            assert round_record["round"] == index
+            assert round_record["n_new_candidates"] > 0
+            assert len(round_record["top_scores"]) <= 5
+            assert round_record["min_top_score"] == min(round_record["top_scores"])
+    else:
+        assert record["event"] == "single_hop_search"
+    serialized = json.dumps(record)
+    assert '"content"' not in serialized and '"file_path"' not in serialized
+    for result in results:
+        assert result["content"] not in serialized
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+async def test_decision_log_preserves_results_and_disabled_writes_nothing(
+    tmp_path,
+    search_decision_log,
+):
+    for strategy in ("multi_hop", "single_hop"):
+        scenario = build_multi_hop_scenario()
+        service = _build_search_service(scenario.db, scenario.provider)
+        decision_log.configure(None, tmp_path)
+        kwargs = dict(page_size=2, offset=1, force_strategy=strategy)
+        disabled = await service.search_semantic(
+            "security validation mechanisms", **kwargs
+        )
+        assert not search_decision_log.exists()
+        assert not search_decision_log.parent.exists()
+        decision_log.configure(
+            SimpleNamespace(decision_log=DecisionLogConfig(enabled=True)), tmp_path
+        )
+        enabled = await service.search_semantic(
+            "security validation mechanisms", **kwargs
+        )
+        assert json.dumps(disabled) == json.dumps(enabled)
+        record = json.loads(search_decision_log.read_text())
+        assert record["parent_trace_id"] is None
+        before = search_decision_log.read_bytes()
+        decision_log.configure(None, tmp_path)
+        await service.search_semantic("security validation mechanisms", **kwargs)
+        assert search_decision_log.read_bytes() == before
+        search_decision_log.unlink()
+        search_decision_log.with_name(search_decision_log.name + ".lock").unlink(
+            missing_ok=True
+        )
+        search_decision_log.parent.rmdir()
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+@pytest.mark.parametrize("degradation, expected_total", [(0.15, 6), (0.5, 8)])
+async def test_multi_hop_score_degradation_config_controls_expansion(
+    degradation: float, expected_total: int
+) -> None:
+    scenario = build_score_drop_termination_scenario()
+    search_service = _build_search_service(
+        scenario.db,
+        scenario.provider,
+        config=ResearchConfig(multi_hop_score_degradation=degradation),
+    )
+
+    results, pagination = await search_service.search_semantic(
+        "score drop termination", page_size=10
+    )
+
+    assert pagination["total"] == expected_total
+    assert (7 in {result["chunk_id"] for result in results}) == (expected_total == 8)
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+@pytest.mark.parametrize("floor, expected_total", [(0.3, 6), (0.1, 8)])
+async def test_multi_hop_min_relevance_config_controls_expansion(
+    floor: float, expected_total: int
+) -> None:
+    scenario = build_min_score_termination_scenario()
+    search_service = _build_search_service(
+        scenario.db,
+        scenario.provider,
+        config=ResearchConfig(multi_hop_min_relevance=floor),
+    )
+
+    results, pagination = await search_service.search_semantic(
+        "minimum score termination", page_size=10
+    )
+
+    assert pagination["total"] == expected_total
+    assert (7 in {result["chunk_id"] for result in results}) == (expected_total == 8)
+
+
+@pytest.mark.fast
+@pytest.mark.asyncio
+@pytest.mark.parametrize("min_candidates, expected_total", [(1, 6), (4, 6), (5, 5)])
+async def test_multi_hop_min_candidates_env_controls_expansion(
+    monkeypatch: pytest.MonkeyPatch, min_candidates: int, expected_total: int
+) -> None:
+    monkeypatch.setenv(
+        "CHUNKHOUND_RESEARCH_MULTI_HOP_MIN_CANDIDATES", str(min_candidates)
+    )
+    config = ResearchConfig(**ResearchConfig.load_from_env())
+    scenario = build_insufficient_candidates_scenario()
+    search_service = _build_search_service(
+        scenario.db, scenario.provider, config=config
+    )
+
+    results, pagination = await search_service.search_semantic(
+        "insufficient candidates", page_size=10
+    )
+
+    assert config.multi_hop_min_candidates == min_candidates
+    assert pagination["total"] == expected_total
+    assert (6 in {result["chunk_id"] for result in results}) == (expected_total == 6)
 
 
 class _StubResearchConfig:

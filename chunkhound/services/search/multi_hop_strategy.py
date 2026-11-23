@@ -6,12 +6,18 @@ This strategy performs iterative search with relevance-based expansion:
 3. Iterative reranking: Re-score all candidates after each expansion
 4. Smart termination: Stop when relevance stops improving
 
-Termination conditions (5 total):
-1. Time limit: 5 seconds maximum
-2. Result limit: 500 chunks maximum
-3. Candidate quality: Need 5+ high-scoring candidates for expansion
-4. Score degradation: Stop if tracked chunk scores drop by >= 0.15
-5. Minimum relevance: Stop if top-5 minimum score < 0.3
+Termination conditions (7 total):
+1. Time limit: 5 seconds maximum by default
+2. Result limit: 500 chunks maximum by default
+3. Candidate quality: Need enough positive-score candidates for expansion.
+   MultiHopPolicy defaults to 5; configure research.multi_hop_min_candidates.
+4. Score degradation: Stop if a tracked chunk's score drops by at least the
+   MultiHopPolicy default of 0.15; configure research.multi_hop_score_degradation.
+5. Minimum relevance: Stop if the minimum top-N score falls below the
+   MultiHopPolicy default of 0.3; configure research.multi_hop_min_relevance.
+   N is research.multi_hop_min_candidates (default 5).
+6. No new candidates: Expansion finds no unseen neighbors.
+7. Rerank error: Reranking fails during expansion.
 
 Best for:
 - Complex queries requiring context exploration
@@ -24,17 +30,17 @@ from typing import Any
 
 from loguru import logger
 
+from chunkhound.core import decision_log
 from chunkhound.interfaces.database_provider import DatabaseProvider
 from chunkhound.interfaces.embedding_provider import EmbeddingProvider
+
+from .multi_hop_policy import MultiHopPolicy, StopReason
 
 # Multi-hop search parameters
 INITIAL_LIMIT_CAP_NORMAL = 100
 INITIAL_LIMIT_CAP_EXHAUSTIVE = 500
 NEIGHBORS_PER_CANDIDATE_NORMAL = 20
 NEIGHBORS_PER_CANDIDATE_EXHAUSTIVE = 30
-MIN_EXPANSION_CANDIDATES = 5
-SCORE_DROP_THRESHOLD = 0.15
-MIN_RELEVANCE_FLOOR = 0.3
 
 
 class MultiHopStrategy:
@@ -71,6 +77,37 @@ class MultiHopStrategy:
         path_filter: str | None,
         time_limit: float | None = None,
         result_limit: int | None = None,
+        *,
+        strategy_reason: str = "provider_supports_reranking",
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Run one multi-hop search in its own decision trace."""
+        with decision_log.trace():
+            return await self._search(
+                query,
+                page_size,
+                offset,
+                threshold,
+                provider,
+                model,
+                path_filter,
+                time_limit,
+                result_limit,
+                strategy_reason=strategy_reason,
+            )
+
+    async def _search(
+        self,
+        query: str,
+        page_size: int,
+        offset: int,
+        threshold: float | None,
+        provider: str,
+        model: str,
+        path_filter: str | None,
+        time_limit: float | None = None,
+        result_limit: int | None = None,
+        *,
+        strategy_reason: str,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Perform dynamic multi-hop semantic search with reranking.
 
@@ -89,6 +126,10 @@ class MultiHopStrategy:
             Tuple of (results, pagination_metadata)
         """
         start_time = time.perf_counter()
+        policy = MultiHopPolicy.from_config(self._config)
+        logging_enabled = decision_log.is_enabled()
+        if logging_enabled:
+            rounds: list[dict[str, Any]] = []
 
         # Apply defaults - consult config if available
         effective_time_limit = (
@@ -173,42 +214,53 @@ class MultiHopStrategy:
                 if "score" not in result:
                     result["score"] = result.get("similarity", 0.0)
 
+        if logging_enabled:
+            initial = {
+                "n_results": len(initial_results),
+                "top_scores": [
+                    r.get("score", 0.0)
+                    for r in initial_results[: policy.min_candidates]
+                ],
+            }
+
         # Step 2: Dynamic expansion loop
         all_results = list(initial_results)
         seen_chunk_ids = {result["chunk_id"] for result in initial_results}
         # Track specific chunks and their scores (not positions)
         top_chunk_scores = {}
-        for result in initial_results[:MIN_EXPANSION_CANDIDATES]:
+        for result in initial_results[: policy.min_candidates]:
             top_chunk_scores[result["chunk_id"]] = result.get("score", 0.0)
 
         expansion_round = 0
 
         while True:
-            # Check termination conditions
-            if time.perf_counter() - start_time >= effective_time_limit:
+            top_candidates = [r for r in all_results if r.get("score", 0.0) > 0.0][
+                : policy.min_candidates
+            ]
+            stop_reason = policy.before_expansion(
+                elapsed_s=time.perf_counter() - start_time,
+                time_limit=effective_time_limit,
+                n_results=len(all_results),
+                result_limit=effective_result_limit,
+                n_candidates=len(top_candidates),
+            )
+            if stop_reason == StopReason.TIME_LIMIT:
                 logger.debug(
                     "Dynamic expansion terminated: "
                     f"{effective_time_limit:.1f} second time limit reached"
                 )
                 break
-            if (
-                effective_result_limit is not None
-                and len(all_results) >= effective_result_limit
-            ):
+            if stop_reason == StopReason.RESULT_LIMIT:
                 logger.debug(
                     "Dynamic expansion terminated: "
                     f"{effective_result_limit} result limit reached"
                 )
                 break
 
-            # Get top 5 candidates for expansion
-            top_candidates = [r for r in all_results if r.get("score", 0.0) > 0.0][
-                :MIN_EXPANSION_CANDIDATES
-            ]
-            if len(top_candidates) < MIN_EXPANSION_CANDIDATES:
+            if stop_reason == StopReason.INSUFFICIENT_CANDIDATES:
                 logger.debug(
                     f"Dynamic expansion terminated: only {len(top_candidates)} "
-                    f"high-scoring candidates, need at least {MIN_EXPANSION_CANDIDATES}"
+                    f"high-scoring candidates, need at least {policy.min_candidates}"
                 )
                 break
 
@@ -250,12 +302,14 @@ class MultiHopStrategy:
                     # Continue with other candidates even if one fails
 
             if not new_candidates:
+                stop_reason = StopReason.NO_NEW_CANDIDATES
                 logger.debug("Dynamic expansion terminated: no new candidates found")
                 break
 
             if effective_result_limit is not None:
                 remaining_budget = effective_result_limit - len(all_results)
                 if remaining_budget <= 0:
+                    stop_reason = StopReason.RESULT_LIMIT
                     logger.debug(
                         "Dynamic expansion terminated: %d result limit reached",
                         effective_result_limit,
@@ -311,6 +365,7 @@ class MultiHopStrategy:
                 logger.warning(
                     f"Reranking failed in expansion round {expansion_round}: {e}"
                 )
+                stop_reason = StopReason.RERANK_ERROR
                 # Scores already initialized, just sort and continue
                 all_results = sorted(
                     all_results, key=lambda x: x.get("score", 0.0), reverse=True
@@ -320,7 +375,7 @@ class MultiHopStrategy:
             # Track score changes by chunk identity, not ranked position.
             current_top_scores = [
                 result.get("score", 0.0)
-                for result in all_results[:MIN_EXPANSION_CANDIDATES]
+                for result in all_results[: policy.min_candidates]
             ]
 
             # Check if any of the originally top chunks have degraded significantly
@@ -339,23 +394,38 @@ class MultiHopStrategy:
                     if current_score < prev_score:
                         score_drops.append(prev_score - current_score)
 
-            # Update tracked chunks to current top 5
+            # Update tracked chunks to the current top candidates
             top_chunk_scores.clear()
-            for result in all_results[:MIN_EXPANSION_CANDIDATES]:
+            for result in all_results[: policy.min_candidates]:
                 top_chunk_scores[result["chunk_id"]] = result.get("score", 0.0)
 
-            # Check termination conditions
-            if score_drops and max(score_drops) >= SCORE_DROP_THRESHOLD:
+            stop_reason = policy.after_rerank(
+                max_score_drop=max(score_drops) if score_drops else None,
+                min_top_score=min(current_top_scores),
+            )
+            if logging_enabled:
+                rounds.append(
+                    {
+                        "round": expansion_round + 1,
+                        "n_new_candidates": len(new_candidates),
+                        "n_total": len(all_results),
+                        "top_scores": current_top_scores,
+                        "max_score_drop": max(score_drops) if score_drops else None,
+                        "min_top_score": min(current_top_scores),
+                        "elapsed_s": time.perf_counter() - start_time,
+                    }
+                )
+            if stop_reason == StopReason.SCORE_DROP:
                 logger.debug(
                     f"Dynamic expansion terminated: tracked chunk score drop "
-                    f"{max(score_drops):.3f} >= {SCORE_DROP_THRESHOLD}"
+                    f"{max(score_drops):.3f} >= {policy.score_drop_threshold}"
                 )
                 break
 
-            if min(current_top_scores) < MIN_RELEVANCE_FLOOR:
+            if stop_reason == StopReason.MIN_RELEVANCE:
                 logger.debug(
                     f"Dynamic expansion terminated: minimum score "
-                    f"{min(current_top_scores):.3f} < {MIN_RELEVANCE_FLOOR}"
+                    f"{min(current_top_scores):.3f} < {policy.min_relevance_floor}"
                 )
                 break
             expansion_round += 1
@@ -363,6 +433,9 @@ class MultiHopStrategy:
             logger.debug(
                 f"Expansion round {expansion_round}: {len(all_results)} total results"
             )
+
+        if logging_enabled:
+            n_candidates = len(all_results)
 
         # Step 3: Final filtering and pagination
         # Threshold applies to rerank scores because reranking is the final
@@ -396,4 +469,33 @@ class MultiHopStrategy:
             f"({total_results} total candidates, "
             f"{expansion_round} expansion rounds)"
         )
+        if logging_enabled:
+            decision_log.record(
+                "multi_hop_search",
+                {
+                    "query": query,
+                    "page_size": page_size,
+                    "has_path_filter": bool(path_filter),
+                    "provider": provider,
+                    "model": model,
+                    "strategy_reason": strategy_reason,
+                    "policy": {
+                        "min_candidates": policy.min_candidates,
+                        "score_drop_threshold": policy.score_drop_threshold,
+                        "min_relevance_floor": policy.min_relevance_floor,
+                        "time_limit": effective_time_limit,
+                        "result_limit": effective_result_limit,
+                        "exhaustive_mode": bool(
+                            self._config and self._config.exhaustive_mode
+                        ),
+                    },
+                    "initial": initial,
+                    "rounds": rounds,
+                    "stop_reason": stop_reason.value,
+                    "n_rounds": expansion_round,
+                    "n_candidates": n_candidates,
+                    "n_returned": len(paginated_results),
+                    "elapsed_s": elapsed_time,
+                },
+            )
         return paginated_results, pagination

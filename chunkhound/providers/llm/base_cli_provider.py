@@ -367,16 +367,19 @@ class BaseCLIProvider(LLMProvider):
                 )
 
             # Track usage (estimates since CLI doesn't return token counts)
-            self._requests_made += 1
+            self._record_usage(requests=1)
             prompt_tokens = self.estimate_tokens(prompt)
             if system:
                 prompt_tokens += self.estimate_tokens(system)
             completion_tokens = self.estimate_tokens(content)
             total_tokens = prompt_tokens + completion_tokens
 
-            self._estimated_prompt_tokens += prompt_tokens
-            self._estimated_completion_tokens += completion_tokens
-            self._estimated_tokens_used += total_tokens
+            self._record_usage(
+                tokens=total_tokens,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                estimated=True,
+            )
 
             return LLMResponse(
                 content=content,
@@ -442,16 +445,19 @@ class BaseCLIProvider(LLMProvider):
                 )
 
             # Track usage
-            self._requests_made += 1
+            self._record_usage(requests=1)
             prompt_tokens = self.estimate_tokens(structured_prompt)
             if system:
                 prompt_tokens += self.estimate_tokens(system)
             completion_tokens = self.estimate_tokens(content)
             total_tokens = prompt_tokens + completion_tokens
 
-            self._estimated_prompt_tokens += prompt_tokens
-            self._estimated_completion_tokens += completion_tokens
-            self._estimated_tokens_used += total_tokens
+            self._record_usage(
+                tokens=total_tokens,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                estimated=True,
+            )
 
             parsed = parse_and_validate_structured_json(content, json_schema)
 

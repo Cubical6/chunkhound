@@ -13,6 +13,7 @@ import numpy as np
 import regex
 from loguru import logger
 
+from chunkhound.core import decision_log
 from chunkhound.services.search_service_protocol import SearchServiceProtocol
 from chunkhound.services.vector_cache import VectorCache
 from chunkhound.utils.path_filter import normalize_path_filter, path_matches_filter
@@ -614,6 +615,9 @@ class TransientSearchService:
                 f"supported window ({_MAX_RESULT_WINDOW}) for diff/web search"
             )
         if self._vector_source == "diff":
+            logging_enabled = decision_log.is_enabled()
+            if logging_enabled:
+                start_time = time.perf_counter()
             transient_results = await self._search_transient_many(
                 queries,
                 page_size,
@@ -623,6 +627,17 @@ class TransientSearchService:
                 provider,
                 limit=result_limit,
             )
+            if logging_enabled:
+                decision_log.record_diff_searches(
+                    queries,
+                    list(transient_results),
+                    start_time=start_time,
+                    page_size=page_size,
+                    path_filter=path_filter,
+                    embedding_manager=self._embedding_manager,
+                    provider=provider,
+                    model=model,
+                )
             return list(transient_results)
 
         snapshot_size = self._both_mode_window(page_size, offset)
@@ -753,7 +768,10 @@ class TransientSearchService:
                 "vector_source='db' for deep pagination over the indexed corpus."
             )
         if self._vector_source == "diff":
-            return await self._search_transient(
+            logging_enabled = decision_log.is_enabled()
+            if logging_enabled:
+                start_time = time.perf_counter()
+            transient_result = await self._search_transient(
                 query,
                 page_size,
                 offset,
@@ -762,6 +780,19 @@ class TransientSearchService:
                 provider,
                 limit=result_limit,
             )
+
+            if logging_enabled:
+                decision_log.record_diff_searches(
+                    [query],
+                    [transient_result],
+                    start_time=start_time,
+                    page_size=page_size,
+                    path_filter=path_filter,
+                    embedding_manager=self._embedding_manager,
+                    provider=provider,
+                    model=model,
+                )
+            return transient_result
 
         # Overfetch-sized heaps from both sources, independent of offset. Reject
         # pages outside that fixed pool rather than returning a misleading empty

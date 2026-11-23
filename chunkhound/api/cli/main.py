@@ -13,6 +13,7 @@ from pathlib import Path
 from loguru import logger
 
 from chunkhound.core import analytics as ch_analytics
+from chunkhound.core import decision_log
 from chunkhound.utils.windows_constants import IS_WINDOWS
 
 from .utils.config_factory import create_validated_config
@@ -301,9 +302,11 @@ async def async_main() -> None:
     # for the lifetime of that long-running process. Only build a
     # recorder at all for commands this hook actually wraps.
     if args.command in _ANALYTICS_WRAPPED_COMMANDS:
+        target_dir = config.target_dir or Path.cwd()
         analytics_recorder = ch_analytics.build_recorder(
-            getattr(config, "analytics", None), config.target_dir or Path.cwd()
+            getattr(config, "analytics", None), target_dir
         )
+        decision_log.configure(config, target_dir)
         _save_sensitive_data = getattr(
             getattr(config, "analytics", None), "save_sensitive_data", False
         )
