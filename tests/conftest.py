@@ -1,7 +1,9 @@
 import os
+import shutil
 import subprocess
 import tempfile
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from loguru import logger
@@ -176,6 +178,12 @@ def free_opencode_models() -> list[str]:
     return servable
 
 
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    setattr(item, f"rep_{call.when}", outcome.get_result())
+
+
 @pytest.fixture(autouse=True)
 def isolated_user_config(tmp_path_factory, monkeypatch, request):
     """Keep user-level config out of tests and their CLI subprocesses.
@@ -185,11 +193,13 @@ def isolated_user_config(tmp_path_factory, monkeypatch, request):
     dynamic project metadata against an empty cache in this temporary HOME.
     Live integration tests retain their home-based CLI authentication; API keys
     and integration opt-ins are intentionally left unchanged for every test.
+    The home is removed after a passing test.
     """
     if request.node.get_closest_marker("integration"):
+        yield
         return
     # Keep caches written by subprocesses outside the tree a test may index.
-    home = tmp_path_factory.mktemp("home")
+    home = Path(tempfile.mkdtemp(prefix="home-", dir=tmp_path_factory.getbasetemp()))
     # Share the 31 MB vss extension per worker instead of installing it per test.
     shared_duckdb_home = tmp_path_factory.getbasetemp() / "shared-duckdb-home"
     shared_duckdb_home.mkdir(parents=True, exist_ok=True)
@@ -204,6 +214,15 @@ def isolated_user_config(tmp_path_factory, monkeypatch, request):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("UV_NO_SYNC", "1")
+    yield
+    report = getattr(request.node, "rep_call", None)
+    if report is not None and report.passed:
+        try:
+            if os.path.islink(home / ".duckdb"):
+                os.unlink(home / ".duckdb")
+        except OSError:
+            pass
+        shutil.rmtree(home, ignore_errors=True)
 
 
 @pytest.fixture
