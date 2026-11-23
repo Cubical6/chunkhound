@@ -70,9 +70,11 @@ async def test_code_research_uses_codex_cli_for_synthesis(monkeypatch, tmp_path:
         resp = await prov.complete(prompt=f"probe: {query}")
         return {"answer": resp.content}
 
-    # Replace both the function and the registered tool implementation
+    # Restore both references at teardown so later tests use the real implementation.
     monkeypatch.setattr(tools_mod, "deep_research_impl", _stub_deep_research_impl, raising=True)
-    tools_mod.TOOL_REGISTRY["code_research"].implementation = _stub_deep_research_impl
+    monkeypatch.setattr(
+        tools_mod.TOOL_REGISTRY["code_research"], "implementation", _stub_deep_research_impl
+    )
 
     # 5) Execute the MCP tool directly
     result = await execute_tool(
@@ -130,9 +132,11 @@ async def test_code_research_forwards_path_argument_to_impl(monkeypatch, tmp_pat
         captured["path"] = path
         return {"answer": "PATH_OK"}
 
-    # Replace implementation and registry entry
+    # Restore both references at teardown so later tests use the real implementation.
     monkeypatch.setattr(tools_mod, "deep_research_impl", _stub_deep_research_impl, raising=True)
-    tools_mod.TOOL_REGISTRY["code_research"].implementation = _stub_deep_research_impl
+    monkeypatch.setattr(
+        tools_mod.TOOL_REGISTRY["code_research"], "implementation", _stub_deep_research_impl
+    )
 
     result = await execute_tool(
         tool_name="code_research",
