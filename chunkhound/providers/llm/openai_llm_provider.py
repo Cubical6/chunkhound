@@ -228,13 +228,15 @@ class OpenAILLMProvider(OpenAICompatibleProvider):
             # Call Responses API
             response = await self._create_response(**request_params)
 
-            self._requests_made += 1
+            self._record_usage(requests=1)
             if response.usage:
                 # Responses API uses input_tokens/output_tokens instead of
                 # prompt_tokens/completion_tokens
-                self._prompt_tokens += response.usage.input_tokens
-                self._completion_tokens += response.usage.output_tokens
-                self._tokens_used += response.usage.total_tokens
+                self._record_usage(
+                    tokens=response.usage.total_tokens,
+                    prompt_tokens=response.usage.input_tokens,
+                    completion_tokens=response.usage.output_tokens,
+                )
 
             # Extract response content from output items
             content_parts = []
@@ -419,11 +421,13 @@ class OpenAILLMProvider(OpenAICompatibleProvider):
         try:
             response = await self._create_response(**request_params)
 
-            self._requests_made += 1
+            self._record_usage(requests=1)
             if response.usage:
-                self._prompt_tokens += response.usage.input_tokens
-                self._completion_tokens += response.usage.output_tokens
-                self._tokens_used += response.usage.total_tokens
+                self._record_usage(
+                    tokens=response.usage.total_tokens,
+                    prompt_tokens=response.usage.input_tokens,
+                    completion_tokens=response.usage.output_tokens,
+                )
 
             # Extract JSON content from output items
             content_parts = []

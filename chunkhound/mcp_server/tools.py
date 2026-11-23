@@ -1055,6 +1055,7 @@ async def execute_tool(
     scan_progress: dict | None = None,
     llm_manager: Any = None,
     config: Config | None = None,
+    progress_reporter: Any = None,
 ) -> dict[str, Any] | str:
     """Execute a tool from the registry with proper argument handling.
 
@@ -1066,6 +1067,7 @@ async def execute_tool(
         scan_progress: Optional scan progress from MCPServerBase
         llm_manager: Optional LLMManager instance for code_research
         config: Optional Config instance for research service factory
+        progress_reporter: Optional request-scoped research progress adapter
 
     Returns:
         Tool execution result
@@ -1096,8 +1098,7 @@ async def execute_tool(
         elif param_name == "config":
             kwargs["config"] = config
         elif param_name == "progress":
-            # Progress parameter for terminal UI (None for MCP mode)
-            kwargs["progress"] = None
+            kwargs["progress"] = progress_reporter
         elif param_name in arguments:
             # Tool-specific parameter from request
             kwargs[param_name] = arguments[param_name]
