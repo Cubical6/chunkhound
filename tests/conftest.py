@@ -201,12 +201,15 @@ def isolated_user_config(tmp_path_factory, monkeypatch, request):
     # Keep caches written by subprocesses outside the tree a test may index.
     home = Path(tempfile.mkdtemp(prefix="home-", dir=tmp_path_factory.getbasetemp()))
     # Share the 31 MB vss extension per worker instead of installing it per test.
-    shared_duckdb_home = tmp_path_factory.getbasetemp() / "shared-duckdb-home"
-    shared_duckdb_home.mkdir(parents=True, exist_ok=True)
-    try:
-        os.symlink(shared_duckdb_home, home / ".duckdb", target_is_directory=True)
-    except OSError:
-        pass
+    # Keep Windows per-test even when symlinks work: sharing extension DLLs risks
+    # cross-test loader/file-lock interference, including subprocess INSTALLs.
+    if os.name != "nt":
+        shared_duckdb_home = tmp_path_factory.getbasetemp() / "shared-duckdb-home"
+        shared_duckdb_home.mkdir(parents=True, exist_ok=True)
+        try:
+            os.symlink(shared_duckdb_home, home / ".duckdb", target_is_directory=True)
+        except OSError:
+            pass
     # Windows derives LocalAppData from USERPROFILE; Watchman exits if it
     # cannot create its app-data dir.
     (home / "AppData" / "Local").mkdir(parents=True, exist_ok=True)
@@ -215,6 +218,9 @@ def isolated_user_config(tmp_path_factory, monkeypatch, request):
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("UV_NO_SYNC", "1")
     yield
+    # This fixture tears down before its monkeypatch dependency. Restore test
+    # patches first: even the real rmtree can call patched os functions.
+    monkeypatch.undo()
     report = getattr(request.node, "rep_call", None)
     if report is not None and report.passed:
         try:
