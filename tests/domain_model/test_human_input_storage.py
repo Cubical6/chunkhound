@@ -1,6 +1,9 @@
 """Contracts for lazy, atomic, and durable human-input storage."""
 
 import shutil
+import subprocess
+import sys
+import textwrap
 from collections.abc import AsyncIterator, Iterator
 from datetime import datetime
 from pathlib import Path
@@ -145,15 +148,43 @@ def test_human_input_survives_python_compaction(populated_db: DuckDBProvider) ->
 
 
 def test_human_input_survives_wal_removal(
-    file_backed_db: DuckDBProvider, tmp_path: Path
+    tmp_path: Path, clean_environment: None
 ) -> None:
-    db = file_backed_db
-    db.append_domain_input(_rows())
-    expected = db.load_domain_input()
+    db_path = tmp_path / "input.duckdb"
+    # Windows prevents copying an open DuckDB file. Exit abruptly to release
+    # its handles without close(), destructors, or atexit checkpointing it.
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            textwrap.dedent("""\
+                import os
+                import sys
+                from pathlib import Path
+
+                from chunkhound.providers.database import serial_executor
+                from chunkhound.providers.database.duckdb_provider import DuckDBProvider
+                from tests.domain_model.test_human_input_storage import _rows
+
+                serial_executor.COMPACT_SAMPLE_INTERVAL = 0
+                path = Path(sys.argv[1])
+                db = DuckDBProvider(path, base_directory=path.parent)
+                db.connect()
+                assert db.append_domain_input(_rows()) == [1, 2]
+                os._exit(0)
+                """),
+            str(db_path),
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected = [{"seq": seq, **row} for seq, row in enumerate(_rows(), start=1)]
     copy_path = tmp_path / "without-wal.duckdb"
-    # Copy while the original connection is still open: close() must not be
-    # what makes these records durable. Deliberately do not copy the WAL.
-    shutil.copyfile(db.db_path, copy_path)
+    # Copy only the main file: WAL replay must not make the records durable.
+    shutil.copyfile(db_path, copy_path)
     assert not Path(f"{copy_path}.wal").exists()
     copy = DuckDBProvider(copy_path, base_directory=tmp_path)
     copy.connect()
