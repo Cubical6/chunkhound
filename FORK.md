@@ -16,6 +16,18 @@ file wins.
   required (no approval needed), force pushes and deletion are blocked, and
   the checks of the `CI` workflow must pass (see "Tests" below). Do not change
   or disable the ruleset without the user's approval.
+- An agent opens pull requests but never merges one. The user reviews every
+  pull request, also a sync, and merges it or explicitly says "merge #N" for
+  that pull request after reviewing it. Approval to push or to open a pull
+  request is not approval to merge it, and neither are passing tests.
+- A local hook (`~/.claude/hooks/merge-guard.py`, registered in the gitignored
+  `.claude/settings.local.json`) makes Claude Code ask the user to confirm a
+  merge. It only checks Bash commands, and only these forms: `gh pr merge`,
+  `gh api` with a merge endpoint or a merge mutation on the command line, and
+  `curl` to the REST merge endpoint. It does not see a GraphQL query read
+  from a file, `curl` to `/graphql`, a script or any other tool. The hook is
+  a safety net, not the rule: when the user asks for a merge, use
+  `gh pr merge`, never another command, a script or a different tool.
 
 ## Tests
 
@@ -157,11 +169,13 @@ git merge upstream/main
    there belongs in a fork issue, not in the sync. Because the ruleset
    requires green CI, ask the user how to proceed with such a failure; do not
    change the ruleset to get around it.
-4. Open a pull request against the fork's `main` and merge it with a merge
-   commit: `gh pr merge <N> -R Cubical6/chunkhound --merge`. Never squash or
-   rebase a sync: that discards the link to upstream's history, and the next
-   sync then conflicts on everything again.
-5. Delete the sync branch and its worktree.
+4. Open a pull request against the fork's `main` and leave it for the user to
+   review. It is merged with a merge commit, by the user or on the user's
+   explicit "merge #N": `gh pr merge <N> -R Cubical6/chunkhound --merge`.
+   Never squash or rebase a sync: that discards the link to upstream's
+   history, and the next sync then conflicts on everything again.
+5. After the merge, delete the sync branch (local and on `origin`) and its
+   worktree. Until then, keep both: the pull request still needs its branch.
 
 Upstream's `v*` tags stay local. They are needed there to derive the version,
 but must not reach `origin`: never run `git push --tags` or
