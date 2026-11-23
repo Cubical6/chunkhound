@@ -46,12 +46,13 @@ def _detect_with_recorded_walk(
             visited.append(Path(dirpath).resolve())
             yield dirpath, dirnames, filenames
 
-    monkeypatch.setattr(ignore_engine_module.os, "walk", _recording_walk)
-    roots = ignore_engine_module.detect_repo_roots(
-        root,
-        prune_ignored_gitfile_roots=prune_ignored_gitfile_roots,
-        workspace_root_only_gitignore=workspace_root_only_gitignore,
-    )
+    with monkeypatch.context() as m:
+        m.setattr(ignore_engine_module.os, "walk", _recording_walk)
+        roots = ignore_engine_module.detect_repo_roots(
+            root,
+            prune_ignored_gitfile_roots=prune_ignored_gitfile_roots,
+            workspace_root_only_gitignore=workspace_root_only_gitignore,
+        )
     return roots, visited
 
 
