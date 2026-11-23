@@ -312,6 +312,12 @@ cluster_eval.json
 .tmp-docs/
 docs/superpowers
 
+# Fork: local agent state, plans and design notes stay out of the repository
+.claude/
+.superpowers/
+docs/melly/
+docs/fork/plans/
+
 # AI review artifacts
 .gitignored/
 .tldr
@@ -355,9 +361,3 @@ site/test-results/
 
 # Codex CLI
 .codex/
-
-# Fork: local agent state, plans and design notes stay out of the repository
-.claude/
-.superpowers/
-docs/melly/
-docs/fork/plans/
