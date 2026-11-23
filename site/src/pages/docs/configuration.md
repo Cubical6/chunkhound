@@ -784,7 +784,11 @@ The MCP server writes to the log, and so do the CLI commands that search or run 
 
 **Privacy.** Records contain the text of your queries, and the research records also contain the follow-up questions and gap queries the LLM generated. The chunk selection records contain the file paths and line ranges of chunks. They never contain chunk or file content. The file stays on your machine: ChunkHound never uploads it. On POSIX, newly created log files are owner-only (`0600`) and new log directories are owner-only (`0700`); existing permissions are left unchanged (Windows uses its platform permissions).
 
-**Rotation.** The log path must stay inside the project's `.chunkhound/` directory after resolving `~`, `..` and symlinks (the directory itself is resolved too). An outside path disables logging with one warning, without falling back to the default path. When the file grows past `max_size_mb` (at least 1 MiB), ChunkHound renames it to `<filename>.1` (for example, `d.jsonl.1` for `d.jsonl`) and starts a new file. It keeps one old file; the next rotation overwrites it.
+**Location.** The log path must stay inside the project's `.chunkhound/` directory after resolving `~`, `..` and symlinks (the directory itself is resolved too). An outside path disables logging with one warning, without falling back to the default path.
+
+**Rotation.** When the file grows past `max_size_mb` (at least 1 MiB), ChunkHound renames it to `<filename>.1` (for example, `d.jsonl.1` for `d.jsonl`) and starts a new file. It keeps one old file; the next rotation overwrites it.
+
+**Lock file.** Next to the log, ChunkHound creates `<filename>.lock` (for example, `d.jsonl.lock`). Processes that write to the same log lock this file, so rotations and appends never interleave. It is owner-only on POSIX like a new log file, stays empty and is never removed; you can delete it when no ChunkHound process is running.
 
 **Failures.** Logging never fails a search or a research run. If the file cannot be written, ChunkHound skips the record and reports the problem only in the debug log.
 

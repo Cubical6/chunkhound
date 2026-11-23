@@ -2,8 +2,9 @@
 
 This repository is `Cubical6/chunkhound`, a fork of `chunkhound/chunkhound`.
 This file holds the fork's own rules for git, GitHub and releases. Where it
-disagrees with `AGENTS.md` (VERSION_MANAGEMENT) or `RELEASING.md`, which both
-describe upstream, this file wins.
+disagrees with `AGENTS.md` (VERSION_MANAGEMENT, and the rule to run the full
+suite before pushing) or `RELEASING.md`, which both describe upstream, this
+file wins.
 
 ## Remotes and branches
 
@@ -12,29 +13,37 @@ describe upstream, this file wins.
   or force-push it, and never push to it directly: every change, also a sync
   or a one-line docs fix, goes through a pull request.
 - GitHub enforces this with the ruleset `main: PR only`: a pull request is
-  required (no approval needed), and force pushes and deletion are blocked.
-  It requires no status checks: the fork runs its tests locally (see "Tests"
-  below). Do not change or disable the ruleset without the user's approval.
+  required (no approval needed), force pushes and deletion are blocked, and
+  the checks of the `CI` workflow must pass (see "Tests" below). Do not change
+  or disable the ruleset without the user's approval.
 
 ## Tests
 
-GitHub Actions `CI` (`ci.yml`) is disabled in the fork: its runs took 20–35
-minutes and failed on runner problems unrelated to the code (macOS Chrome
-start, Windows Watchman). `Minimal` and `Deprecate` are disabled too. Only the
-fork's own workflows stay on: `Fork rolling release`, `Fork stable
-promotion` and `Fork upstream watch`. Do not delete `ci.yml` or the other
-upstream workflows: they are upstream files, and deleting them conflicts at
-the next sync. Do not enable a workflow again without the user's approval.
+The full suite runs on GitHub Actions in the `CI` workflow (`ci.yml`), on
+every pull request and every push to `main`: Linux, macOS and Windows, each in
+three shards, plus the Rust checks, the Watchman runtime validation and the
+site build. The shards are balanced by the durations in `.test_durations`
+(pytest-split). The workflows that stay on are `CI` and the fork's own
+`Fork rolling release`, `Fork stable promotion` and `Fork upstream watch`.
+`Minimal`, `Deprecate`, `Release` and `RC Release` are disabled. Do not delete
+`ci.yml` or the other upstream workflows: they are upstream files, and deleting
+them conflicts at the next sync. Do not enable or disable a workflow without
+the user's approval.
 
-Tests run locally instead, with the commands from `AGENTS.md`:
-
-- Before every commit: the smoke suite.
-- Before merging a pull request: the full suite, and `make rust-test` when
-  Rust code or the native extension changed.
-- Put the results in the pull request under a "Tests" heading: the commit,
-  the counts, and every failure. A failure that only occurs under `-n auto`
-  counts as passed only when the test passes when rerun on its own; name it
-  in the pull request.
+- Locally, before every commit: the smoke suite, plus the tests of what you
+  changed (`make rust-test` when Rust code or the native extension changed).
+  Do not run the full suite locally as a gate; CI does that.
+- The ruleset `main: PR only` requires the `CI` checks, so a pull request
+  with red CI cannot be merged. Find the cause in the failed run
+  (`gh run view <id> -R Cubical6/chunkhound --log-failed`), fix it and push
+  again. Rerun a failed job only when the failure is a runner problem
+  unrelated to the code, and say so in the pull request.
+- Put the results in the pull request under a "Tests" heading: the CI run
+  (link) for the last commit, every job rerun and why, every failure that
+  passed through a `# flaky:` annotation, and the local tests you ran.
+- When `.test_durations` no longer matches the suite (many tests added or one
+  shard much slower than the others), regenerate it serially:
+  `uv run pytest tests/ --store-durations -q`.
 - Work on a branch cut from `origin/main` (`feat/…`, `fix/…`, `docs/…`,
   `ci/…`) and open the pull request against `main` of the fork.
 - Pass `-R Cubical6/chunkhound` to every `gh` command that creates or changes
@@ -142,9 +151,12 @@ git merge upstream/main
 2. Read what came in (`git log --oneline --first-parent origin/main..upstream/main`
    before the merge). For each open fork issue and fork branch, check whether
    upstream now covers it; close the issue or drop the branch if it does.
-3. Run the smoke suite and the full suite locally (see "Tests"). When a test
-   fails, run it on upstream's `main` too: a failure that also occurs there
-   belongs in a fork issue, not in the sync.
+3. Run the smoke suite locally and let CI run the full suite (see "Tests").
+   When a test fails, check whether it also fails on upstream's `main` (its
+   own CI runs, or the test run locally there): a failure that also occurs
+   there belongs in a fork issue, not in the sync. Because the ruleset
+   requires green CI, ask the user how to proceed with such a failure; do not
+   change the ruleset to get around it.
 4. Open a pull request against the fork's `main` and merge it with a merge
    commit: `gh pr merge <N> -R Cubical6/chunkhound --merge`. Never squash or
    rebase a sync: that discards the link to upstream's history, and the next
@@ -199,9 +211,9 @@ not a decision: sync according to "Syncing upstream" above.
 ### `fork-latest`: every merge to `main`
 
 There is nothing to start. Because every merge is published, merge only what
-can be installed: the tests from `AGENTS.md` pass and no phase of a larger
-plan is half done. After a merge, check that the `Fork rolling release` run
-succeeded. If it failed, repairing it comes before other work.
+can be installed: CI is green and no phase of a larger plan is half done.
+After a merge, check that the `Fork rolling release` run and the `CI` run on
+`main` succeeded. If one failed, repairing it comes before other work.
 
 ### Stable: when to promote
 
@@ -210,10 +222,10 @@ Propose a promotion to the user when all of these hold:
 1. There is a reason: an upstream release was synced into `main`, a fix for a
    fork issue labelled `bug` was merged, or a feature the user asked for is
    complete.
-2. The `Fork rolling release` run for that commit succeeded, and the local
-   full suite on that commit has no failure that passes on upstream at the
-   upstream commit last merged. Upstream's `main` is sometimes red itself;
-   compare, do not ignore.
+2. The `Fork rolling release` run and the `CI` run for that commit
+   succeeded. A failure that was let through (a `# flaky:` annotation, a
+   rerun job) also fails on upstream at the upstream commit last merged.
+   Upstream's `main` is sometimes red itself; compare, do not ignore.
 3. The `fork-latest` build was installed and used on a real repository:
    `chunkhound --version` shows the expected version, and indexing, search and
    the MCP server work.

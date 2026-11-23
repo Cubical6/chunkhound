@@ -398,14 +398,12 @@ mod tests {
         assert_eq!(signed_epoch_seconds(SystemTime::UNIX_EPOCH + offset), 1.5);
 
         let extreme_offset = std::time::Duration::from_secs(10_000_000_000_000);
-        assert_eq!(
-            signed_epoch_seconds(SystemTime::UNIX_EPOCH - extreme_offset),
-            MIN_MTIME_EPOCH_SECONDS
-        );
-        assert_eq!(
-            signed_epoch_seconds(SystemTime::UNIX_EPOCH + extreme_offset),
-            MAX_MTIME_EPOCH_SECONDS
-        );
+        if let Some(t) = SystemTime::UNIX_EPOCH.checked_sub(extreme_offset) {
+            assert_eq!(signed_epoch_seconds(t), MIN_MTIME_EPOCH_SECONDS);
+        }
+        if let Some(t) = SystemTime::UNIX_EPOCH.checked_add(extreme_offset) {
+            assert_eq!(signed_epoch_seconds(t), MAX_MTIME_EPOCH_SECONDS);
+        }
     }
 
     /// Build a `rel_keys` map for a single (path, key) pair — the common case
