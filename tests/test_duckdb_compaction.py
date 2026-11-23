@@ -396,6 +396,99 @@ class TestCompactDatabase:
         result = compaction_db.compact_database()
         assert result == 0
 
+    def test_failed_upsert_commit_preserves_later_file_transactions(
+        self, populated_db: DuckDBProvider, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asyncio
+
+        db = populated_db
+        original_step = db._executor_run_upsert_contract_step
+        original_execute = duckdb.DuckDBPyConnection.execute
+        injecting = {"inside": False, "failed": False}
+
+        def run_step(*args: Any, **kwargs: Any) -> None:
+            injecting["inside"] = True
+            try:
+                original_step(*args, **kwargs)
+            finally:
+                injecting["inside"] = False
+
+        def execute(conn: Any, sql: str, *args: Any, **kwargs: Any) -> Any:
+            if injecting["inside"] and not injecting["failed"] and sql == "COMMIT":
+                injecting["failed"] = True
+                original_execute(conn, "ROLLBACK")
+                raise duckdb.TransactionException("simulated failed COMMIT")
+            return original_execute(conn, sql, *args, **kwargs)
+
+        old_file = db.get_file_by_path("test_0.py")
+        assert old_file is not None
+        old_chunks = db.get_chunks_by_file_id(old_file["id"])
+        with monkeypatch.context() as fault:
+            fault.setattr(db, "_executor_run_upsert_contract_step", run_step)
+            fault.setattr(duckdb.DuckDBPyConnection, "execute", execute)
+            with pytest.raises(duckdb.TransactionException, match="simulated failed COMMIT"):
+                db.compact_database()
+        assert injecting["failed"]
+
+        def fail_plan(file_id: int, chunks: list[Chunk]) -> tuple[list[int], list[Chunk]]:
+            raise RuntimeError("plan failed")
+
+        with pytest.raises(RuntimeError, match="plan failed"):
+            asyncio.run(db.store_file_result_async(
+                File(path="test_0.py", mtime=42.0, language=Language.PYTHON,
+                     size_bytes=200, content_hash="new hash"),
+                fail_plan,
+            ))
+        assert db.get_file_by_path("test_0.py")["content_hash"] == old_file["content_hash"]
+        assert db.get_chunks_by_file_id(old_file["id"]) == old_chunks
+        assert db.compact_database() > 0
+
+    def test_failed_commit_keeps_later_file_stores_transactional(
+        self, populated_db: DuckDBProvider, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asyncio
+
+        db = populated_db
+        original_execute = duckdb.DuckDBPyConnection.execute
+        injected = {"failed": False}
+
+        def execute(conn: Any, sql: str, *args: Any, **kwargs: Any) -> Any:
+            if sql == "COMMIT" and not injected["failed"]:
+                injected["failed"] = True
+                original_execute(conn, "ROLLBACK")
+                raise duckdb.TransactionException("simulated failed COMMIT")
+            return original_execute(conn, sql, *args, **kwargs)
+
+        old_file = db.get_file_by_path("test_0.py")
+        assert old_file is not None
+        old_chunks = db.get_chunks_by_file_id(old_file["id"])
+
+        db.begin_transaction()
+        with monkeypatch.context() as fault:
+            fault.setattr(duckdb.DuckDBPyConnection, "execute", execute)
+            with pytest.raises(
+                duckdb.TransactionException, match="simulated failed COMMIT"
+            ):
+                db.commit_transaction()
+        assert injected["failed"]
+
+        def fail_plan(
+            file_id: int, chunks: list[Chunk]
+        ) -> tuple[list[int], list[Chunk]]:
+            raise RuntimeError("plan failed")
+
+        with pytest.raises(RuntimeError, match="plan failed"):
+            asyncio.run(db.store_file_result_async(
+                File(path="test_0.py", mtime=42.0, language=Language.PYTHON,
+                     size_bytes=200, content_hash="new hash"),
+                fail_plan,
+            ))
+        assert (
+            db.get_file_by_path("test_0.py")["content_hash"] == old_file["content_hash"]
+        )
+        assert db.get_chunks_by_file_id(old_file["id"]) == old_chunks
+        assert db.compact_database() > 0
+
     def test_fails_when_transaction_active(self, populated_db: DuckDBProvider) -> None:
         """Compaction raises RuntimeError during active transaction."""
         populated_db._execute_in_db_thread_sync("begin_transaction")
@@ -2960,6 +3053,75 @@ class TestRustPipelineGuard:
             )
         )
         assert file_id > 0
+
+    def test_handover_after_first_write_submission_succeeds(
+        self,
+        file_backed_db: DuckDBProvider,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The resync handover can land right after a realtime file
+        write's first executor submission. The write must not leave a
+        transaction open across that point, so the release succeeds and the
+        file is stored."""
+        import asyncio
+
+        from chunkhound.services.batch_processor import ParsedFileResult
+
+        monkeypatch.setattr(
+            "chunkhound.providers.database.serial_executor.COMPACT_SAMPLE_INTERVAL", 0
+        )
+        db = file_backed_db
+        coord = IndexingCoordinator(database_provider=db, base_directory=tmp_path)
+        result = ParsedFileResult(
+            file_path=tmp_path / "handover.yaml",
+            chunks=[
+                {
+                    "symbol": "a",
+                    "code": "x: 1",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "chunk_type": "key_value",
+                    "language": Language.YAML.value,
+                }
+            ],
+            language=Language.YAML,
+            file_size=4,
+            file_mtime=0.0,
+            status="ok",
+            error=None,
+            content_hash=None,
+        )
+
+        original_submit = db._execute_in_db_thread
+        handover: dict[str, Any] = {}
+
+        async def _submit_then_hand_over(operation_name: str, *a: Any, **k: Any):
+            value = await original_submit(operation_name, *a, **k)
+            if not handover:
+                handover["after"] = operation_name
+                db.set_rust_pipeline_in_progress(True)
+                try:
+                    db.release_for_rust_pipeline()
+                    handover["error"] = None
+                except DatabaseError as e:
+                    handover["error"] = e
+                with pytest.raises(DatabaseRustPipelineInProgressError):
+                    db.get_file_by_path("handover.yaml")
+            return value
+
+        monkeypatch.setattr(db, "_execute_in_db_thread", _submit_then_hand_over)
+        try:
+            stats = asyncio.run(coord._store_parsed_results([result]))
+        finally:
+            db.set_rust_pipeline_in_progress(False)
+            db.connect()
+
+        assert handover["error"] is None, handover
+        assert stats["total_files"] == 1 and not stats["errors"]
+        record = db.get_file_by_path("handover.yaml")
+        assert record is not None
+        assert len(db.get_chunks_by_file_id(record["id"])) == 1
 
 
 class TestCheckpointFailureSurfaces:

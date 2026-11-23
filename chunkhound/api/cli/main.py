@@ -13,6 +13,7 @@ from pathlib import Path
 from loguru import logger
 
 from chunkhound.core import analytics as ch_analytics
+from chunkhound.core import decision_log
 from chunkhound.utils.windows_constants import IS_WINDOWS
 
 from .utils.config_factory import create_validated_config
@@ -35,8 +36,7 @@ _ANALYTICS_ACTION_ARGS: dict[str, tuple[str, ...]] = {
 
 # Bounded, single-shot commands analytics wraps -- excludes "mcp" (handled by
 # the MCP tool-call hook instead), "_daemon" (long-running, per the design's
-# non-goal for long-running commands), and "_quickresearch" (an internal
-# subprocess spawned by research/websearch, not a user-facing entry point).
+# non-goal for long-running commands).
 _ANALYTICS_WRAPPED_COMMANDS = frozenset(
     {
         "index",
@@ -175,7 +175,6 @@ def create_parser() -> argparse.ArgumentParser:
     from .parsers.daemon_parser import add_daemon_subparser
     from .parsers.fetchurl_parser import add_fetchurl_subparser
     from .parsers.mcp_parser import add_mcp_subparser
-    from .parsers.quickresearch_parser import add_quickresearch_subparser
     from .parsers.research_parser import add_research_subparser
     from .parsers.run_parser import add_run_subparser
     from .parsers.search_parser import add_search_subparser
@@ -196,7 +195,6 @@ def create_parser() -> argparse.ArgumentParser:
     # Diagnose command retired; functionality lives under: index --check-ignores
     add_calibrate_subparser(subparsers)
     # Internal commands (hidden from help)
-    add_quickresearch_subparser(subparsers)
     add_daemon_subparser(subparsers)
 
     return parser
@@ -301,13 +299,14 @@ async def async_main() -> None:
     # `mcp`/`_daemon` build and own their own recorder (one per server
     # process, see mcp_server/base.py) -- constructing a second one here
     # would spin up a redundant background flush thread + reqwest client
-    # for the lifetime of that long-running process. `_quickresearch` is an
-    # internal subprocess, not a user-facing entry point. Only build a
+    # for the lifetime of that long-running process. Only build a
     # recorder at all for commands this hook actually wraps.
     if args.command in _ANALYTICS_WRAPPED_COMMANDS:
+        target_dir = config.target_dir or Path.cwd()
         analytics_recorder = ch_analytics.build_recorder(
-            getattr(config, "analytics", None), config.target_dir or Path.cwd()
+            getattr(config, "analytics", None), target_dir
         )
+        decision_log.configure(config, target_dir)
         _save_sensitive_data = getattr(
             getattr(config, "analytics", None), "save_sensitive_data", False
         )
@@ -343,10 +342,6 @@ async def async_main() -> None:
             from .commands.research import research_command
 
             await research_command(args, config)
-        elif args.command == "_quickresearch":
-            from .commands.quickresearch import quickresearch_command
-
-            await quickresearch_command(args, config)
         elif args.command == "websearch":
             from .commands.websearch import websearch_command
 

@@ -12,11 +12,13 @@ The service coordinates:
 """
 
 import asyncio
-from pathlib import Path
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from chunkhound.core import decision_log
+from chunkhound.core.llm_usage_scope import LLMUsageScope, llm_usage_scope
 from chunkhound.core.utils.structured_reasoning_diagnostics import (
     current_empty_failures,
     structured_reasoning_failure_key,
@@ -41,6 +43,10 @@ from chunkhound.services.research.shared.evidence_ledger import (
     extract_facts_with_clustering,
 )
 from chunkhound.services.research.shared.exploration import ExplorationStrategy
+from chunkhound.services.research.shared.file_reader import (
+    read_transient_sources_with_budget,
+    resolve_source_text_async,
+)
 from chunkhound.services.research.shared.models import (
     MAX_FILE_CONTENT_TOKENS,
     NUM_LLM_EXPANDED_QUERIES,
@@ -100,6 +106,7 @@ class PluggableResearchService(ProgressEmitterMixin):
         progress: "TreeProgressDisplay | None" = None,
         path_filter: str | None = None,
         config: "ResearchConfig | None" = None,
+        algorithm: str | None = None,
     ):
         """Initialize pluggable research service.
 
@@ -114,6 +121,7 @@ class PluggableResearchService(ProgressEmitterMixin):
             path_filter: Optional path filter to limit research scope
             config: Optional ResearchConfig for query expansion settings.
                 If None, falls back to hardcoded constants.
+            algorithm: Actual algorithm selected by the factory, if known.
         """
         self._db_services = database_services
         self._embedding_manager = embedding_manager
@@ -127,6 +135,7 @@ class PluggableResearchService(ProgressEmitterMixin):
         self._quality_validator = QualityValidator(llm_manager)
         self._path_filter = path_filter
         self._config = config
+        self._algorithm = algorithm
         self._unified_search_helper = UnifiedSearch(
             db_services=database_services,
             embedding_manager=embedding_manager,
@@ -202,12 +211,71 @@ class PluggableResearchService(ProgressEmitterMixin):
         """
         token = current_empty_failures.set({})
         try:
-            return await self._deep_research_impl(query, previous_query)
+            if not decision_log.is_enabled():
+                return await self._deep_research_impl(query, previous_query)
+            with decision_log.trace(), llm_usage_scope() as usage_scope:
+                started = monotonic()
+                payload: dict[str, Any] = {
+                    "query": query,
+                    "algorithm": self._algorithm,
+                    "has_path_filter": bool(self._path_filter),
+                    "is_follow_up": bool(previous_query),
+                    "depth_reached": None,
+                    "nodes_explored": None,
+                    "chunks_analyzed": None,
+                    "num_clusters": None,
+                    "synthesis_mode": None,
+                    "answer_chars": None,
+                    "success": False,
+                    "error_type": None,
+                }
+                try:
+                    result = await self._deep_research_impl(
+                        query, previous_query, payload
+                    )
+                    payload["answer_chars"] = len(result.get("answer", ""))
+                    metadata = result.get("metadata", {})
+                    for key in ("depth_reached", "nodes_explored", "chunks_analyzed"):
+                        payload[key] = metadata.get(key)
+                    payload["success"] = True
+                    return result
+                except BaseException as exc:
+                    payload["error_type"] = type(exc).__name__
+                    raise
+                finally:
+                    payload["llm_usage"] = self._decision_log_usage(usage_scope)
+                    payload["elapsed_s"] = monotonic() - started
+                    decision_log.record("research_run", payload)
         finally:
             current_empty_failures.reset(token)
 
+    def _decision_log_usage(self, scope: LLMUsageScope) -> dict[str, dict[str, int]]:
+        """Read run totals in the provider's stats shape; telemetry must not fail."""
+        try:
+            stats = self._llm_manager.get_usage_stats()
+            providers = {
+                "utility": self._llm_manager.get_utility_provider(),
+                "synthesis": self._llm_manager.get_synthesis_provider(),
+            }
+            usage = {}
+            for role, provider in providers.items():
+                totals = scope.for_provider(provider)
+                counters = {
+                    key: totals.get(key, 0)
+                    for key, value in stats.get(role, {}).items()
+                    if isinstance(value, (int, float)) and not isinstance(value, bool)
+                }
+                if counters:
+                    usage[role] = counters
+            return usage
+        except Exception:
+            return {}
+
     async def _deep_research_impl(
-        self, query: str, previous_query: str | None
+        self,
+        query: str,
+        previous_query: str | None,
+        decision_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         logger.info(f"Starting deep research for query: '{query}'")
 
@@ -303,6 +371,13 @@ class PluggableResearchService(ProgressEmitterMixin):
             path_filter=self._path_filter,
             constants_context=constants_context,
         )
+
+        if decision_payload is not None:
+            decision_payload.update(
+                depth_reached=exploration_stats.get("depth_reached", 1),
+                nodes_explored=exploration_stats.get("nodes_explored", 1),
+                chunks_analyzed=len(expanded_chunks),
+            )
 
         logger.info(
             f"Exploration complete: {exploration_stats.get('chunks_total', len(expanded_chunks))} total chunks, "
@@ -405,6 +480,12 @@ class PluggableResearchService(ProgressEmitterMixin):
                 evidence_table=evidence_ledger.format_progress_table(),
                 constants_count=evidence_ledger.constants_count,
                 facts_count=evidence_ledger.facts_count,
+            )
+
+        if decision_payload is not None:
+            decision_payload["num_clusters"] = cluster_metadata["num_clusters"]
+            decision_payload["synthesis_mode"] = (
+                "single_pass" if cluster_metadata["num_clusters"] == 1 else "map_reduce"
             )
 
         # If only 1 cluster, use single-pass (no benefit from map-reduce)
@@ -805,6 +886,12 @@ class PluggableResearchService(ProgressEmitterMixin):
         Returns:
             Dictionary mapping file paths to contents (limited to budget)
         """
+        transient = await read_transient_sources_with_budget(
+            self._db_services.provider, chunks, self._llm_manager, max_tokens
+        )
+        if transient is not None:
+            return transient
+
         # Group chunks by file
         files_to_chunks: dict[str, list[dict[str, Any]]] = {}
         for chunk in chunks:
@@ -822,9 +909,6 @@ class PluggableResearchService(ProgressEmitterMixin):
         total_tokens = 0
         llm = self._llm_manager.get_utility_provider()
 
-        # Get base directory for path resolution
-        base_dir = self._db_services.provider.get_base_directory()
-
         for file_path, file_chunks in files_to_chunks.items():
             # Check if we've hit the overall token limit
             if total_tokens >= budget_limit:
@@ -834,22 +918,16 @@ class PluggableResearchService(ProgressEmitterMixin):
                 break
 
             try:
-                # Resolve path relative to base directory
-                if Path(file_path).is_absolute():
-                    path = Path(file_path)
-                else:
-                    path = base_dir / file_path
-
-                if not path.exists():
-                    logger.warning(f"File not found (expected at {path}): {file_path}")
+                content = await resolve_source_text_async(
+                    self._db_services.provider, file_path
+                )
+                if content is None:
+                    logger.warning(f"File not found: {file_path}")
                     continue
 
                 # Calculate token budget for this file
                 num_chunks = len(file_chunks)
                 budget = TOKEN_BUDGET_PER_FILE * num_chunks
-
-                # Read file
-                content = path.read_text(encoding="utf-8", errors="ignore")
 
                 # Estimate tokens
                 estimated_tokens = llm.estimate_tokens(content)
@@ -930,7 +1008,7 @@ class PluggableResearchService(ProgressEmitterMixin):
                 f"but failed to read ANY file contents. "
                 f"Possible causes: "
                 f"(1) Token budget exhausted ({budget_limit:,} tokens insufficient), "
-                f"(2) Files not found at base_directory: {base_dir}, "
+                f"(2) Files not found on disk or in the transient store, "
                 f"(3) All file read operations failed. "
                 f"Check logs above for file-specific errors."
             )

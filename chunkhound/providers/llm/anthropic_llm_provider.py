@@ -760,12 +760,12 @@ class AnthropicLLMProvider(LLMProvider):
             response = await self._create_message(request_kwargs)
 
             # Update usage statistics
-            self._requests_made += 1
+            self._record_usage(requests=1)
             if response.usage:
-                self._prompt_tokens += response.usage.input_tokens
-                self._completion_tokens += response.usage.output_tokens
-                self._tokens_used += (
-                    response.usage.input_tokens + response.usage.output_tokens
+                self._record_usage(
+                    tokens=response.usage.input_tokens + response.usage.output_tokens,
+                    prompt_tokens=response.usage.input_tokens,
+                    completion_tokens=response.usage.output_tokens,
                 )
 
             # Check for truncated responses before content validation so a native
@@ -917,12 +917,12 @@ class AnthropicLLMProvider(LLMProvider):
             response = await self._create_message(request_kwargs)
 
             # Update usage statistics
-            self._requests_made += 1
+            self._record_usage(requests=1)
             if response.usage:
-                self._prompt_tokens += response.usage.input_tokens
-                self._completion_tokens += response.usage.output_tokens
-                self._tokens_used += (
-                    response.usage.input_tokens + response.usage.output_tokens
+                self._record_usage(
+                    tokens=response.usage.input_tokens + response.usage.output_tokens,
+                    prompt_tokens=response.usage.input_tokens,
+                    completion_tokens=response.usage.output_tokens,
                 )
 
             # Check for refusal (safety-related)
@@ -1070,12 +1070,12 @@ class AnthropicLLMProvider(LLMProvider):
             response = await self._create_message(request_kwargs)
 
             # Update usage statistics
-            self._requests_made += 1
+            self._record_usage(requests=1)
             if response.usage:
-                self._prompt_tokens += response.usage.input_tokens
-                self._completion_tokens += response.usage.output_tokens
-                self._tokens_used += (
-                    response.usage.input_tokens + response.usage.output_tokens
+                self._record_usage(
+                    tokens=response.usage.input_tokens + response.usage.output_tokens,
+                    prompt_tokens=response.usage.input_tokens,
+                    completion_tokens=response.usage.output_tokens,
                 )
 
             # Extract text content and tool uses

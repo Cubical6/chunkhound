@@ -61,6 +61,7 @@ def _create_v1_service(
         progress=progress,
         path_filter=path_filter,
         config=config.research,
+        algorithm="v1",
     )
 
 
@@ -101,6 +102,7 @@ def _create_v2_service(
         progress=progress,
         path_filter=path_filter,
         config=config.research,
+        algorithm="v2",
     )
 
 
@@ -158,6 +160,7 @@ def _create_v3_service(
         progress=progress,
         path_filter=path_filter,
         config=config.research,
+        algorithm="v3",
     )
 
 

@@ -17,6 +17,7 @@ from typing import Any
 
 from loguru import logger
 
+from chunkhound.core import decision_log
 from chunkhound.llm_manager import LLMManager
 from chunkhound.services import prompts
 from chunkhound.services.research.shared.chunk_context_builder import (
@@ -414,6 +415,17 @@ class QuestionGenerator:
             Filtered list of most relevant follow-up questions
         """
         if len(questions) <= 1:
+            if decision_log.is_enabled():
+                decision_log.record(
+                    "followup_filter",
+                    {
+                        "n_candidates": len(questions),
+                        "n_kept": len(questions),
+                        "candidates": questions,
+                        "kept": list(range(len(questions))),
+                        "fallback": False,
+                    },
+                )
             return questions
 
         llm = self._llm_manager.get_utility_provider()
@@ -449,8 +461,34 @@ class QuestionGenerator:
                 logger.debug(
                     f"Filtered {len(questions)} follow-ups to {len(filtered)} relevant ones"
                 )
+                if decision_log.is_enabled():
+                    kept = [i for i in selected if 0 <= i < len(questions)][
+                        :MAX_FOLLOWUP_QUESTIONS
+                    ]
+                    decision_log.record(
+                        "followup_filter",
+                        {
+                            "n_candidates": len(questions),
+                            "n_kept": len(kept),
+                            "candidates": questions,
+                            "kept": kept,
+                            "fallback": False,
+                        },
+                    )
                 return filtered[:MAX_FOLLOWUP_QUESTIONS]
         except Exception as e:
             logger.warning(f"Follow-up filtering failed: {e}, using all questions")
 
+        if decision_log.is_enabled():
+            kept = list(range(min(len(questions), MAX_FOLLOWUP_QUESTIONS)))
+            decision_log.record(
+                "followup_filter",
+                {
+                    "n_candidates": len(questions),
+                    "n_kept": len(kept),
+                    "candidates": questions,
+                    "kept": kept,
+                    "fallback": True,
+                },
+            )
         return questions[:MAX_FOLLOWUP_QUESTIONS]

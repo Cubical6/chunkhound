@@ -14,6 +14,7 @@ import xxhash
 
 from chunkhound.interfaces.embedding_provider import EmbeddingConfig, RerankResult
 from chunkhound.core.config.llm_config import DEFAULT_LLM_TIMEOUT
+from chunkhound.utils.hashing import compute_embedding_space_identity
 from chunkhound.interfaces.llm_provider import LLMProvider, LLMResponse
 
 
@@ -89,7 +90,7 @@ class FakeLLMProvider(LLMProvider):
         """Generate a completion based on prompt patterns."""
         await asyncio.sleep(0.001)  # Simulate minimal latency
 
-        self._requests_made += 1
+        self._record_usage(requests=1)
 
         # Match prompt to response pattern
         prompt_lower = prompt.lower()
@@ -107,9 +108,11 @@ class FakeLLMProvider(LLMProvider):
         completion_tokens = self.estimate_tokens(response_content)
         total_tokens = prompt_tokens + completion_tokens
 
-        self._prompt_tokens += prompt_tokens
-        self._completion_tokens += completion_tokens
-        self._tokens_used += total_tokens
+        self._record_usage(
+            tokens=total_tokens,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
 
         return LLMResponse(
             content=response_content,
@@ -142,7 +145,7 @@ class FakeLLMProvider(LLMProvider):
 
         await asyncio.sleep(0.001)  # Simulate minimal latency
 
-        self._requests_made += 1
+        self._record_usage(requests=1)
 
         # Match prompt to response pattern
         prompt_lower = prompt.lower()
@@ -160,9 +163,11 @@ class FakeLLMProvider(LLMProvider):
         completion_tokens = self.estimate_tokens(response_content)
         total_tokens = prompt_tokens + completion_tokens
 
-        self._prompt_tokens += prompt_tokens
-        self._completion_tokens += completion_tokens
-        self._tokens_used += total_tokens
+        self._record_usage(
+            tokens=total_tokens,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
 
         # Try to parse as JSON
         try:
@@ -251,6 +256,19 @@ class FakeEmbeddingProvider:
         if self._output_dims is not None:
             return self._output_dims
         return self._dims
+
+    @property
+    def embedding_space_identity(self) -> str:
+        """Stable identity for this deterministic fake embedding space."""
+        return compute_embedding_space_identity(
+            "fake-embedding-v1",
+            type(self).__module__,
+            type(self).__qualname__,
+            self._model,
+            str(self._dims),
+            str(self._output_dims),
+            str(self._client_side_truncation),
+        )
 
     @property
     def native_dims(self) -> int:
@@ -364,6 +382,9 @@ class FakeEmbeddingProvider:
                 embeddings = [v[: self._output_dims] for v in embeddings]
 
         return embeddings
+
+    async def embed_query(self, texts: list[str]) -> list[list[float]]:
+        return await self.embed(texts)
 
     async def embed_single(self, text: str) -> list[float]:
         """Generate embedding for a single text."""

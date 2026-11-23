@@ -205,6 +205,7 @@ async def handle_tool_call(
     config: Any = None,
     ensure_services: Callable[[str], Awaitable[DatabaseServices]] | None = None,
     analytics_recorder: Any = None,
+    progress_reporter: Any = None,
 ) -> list[types.TextContent]:
     """Unified tool call handler for all MCP servers.
 
@@ -221,6 +222,7 @@ async def handle_tool_call(
         scan_progress: Optional scan progress from MCPServerBase
         llm_manager: Optional LLM manager for code_research
         config: Optional Config instance for research service factory
+        progress_reporter: Optional request-scoped research progress adapter
         ensure_services: Optional lazy DB-service resolver for DB-backed tools
         analytics_recorder: Optional chunkhound_native.AnalyticsRecorder;
             None is a silent no-op (no analytics wired for this call site)
@@ -285,6 +287,7 @@ async def handle_tool_call(
             scan_progress=scan_progress,
             llm_manager=llm_manager,
             config=config,
+            progress_reporter=progress_reporter,
         )
 
         # Format response based on result type
@@ -375,6 +378,9 @@ def parse_mcp_arguments(args: dict[str, Any]) -> dict[str, Any]:
     if "limit" in parsed:
         if not isinstance(parsed["limit"], int):
             parsed["limit"] = int(parsed["limit"])
+    if "last_n_commits" in parsed and parsed["last_n_commits"] is not None:
+        if not isinstance(parsed["last_n_commits"], int):
+            parsed["last_n_commits"] = int(parsed["last_n_commits"])
     if "threshold" in parsed and parsed["threshold"] is not None:
         if not isinstance(parsed["threshold"], float):
             parsed["threshold"] = float(parsed["threshold"])

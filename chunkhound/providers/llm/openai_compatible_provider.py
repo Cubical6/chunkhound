@@ -345,11 +345,13 @@ class OpenAICompatibleProvider(LLMProvider):
                 )
             )
 
-            self._requests_made += 1
+            self._record_usage(requests=1)
             if response.usage:
-                self._prompt_tokens += response.usage.prompt_tokens
-                self._completion_tokens += response.usage.completion_tokens
-                self._tokens_used += response.usage.total_tokens
+                self._record_usage(
+                    tokens=response.usage.total_tokens,
+                    prompt_tokens=response.usage.prompt_tokens,
+                    completion_tokens=response.usage.completion_tokens,
+                )
 
             # Extract response content
             content = response.choices[0].message.content
@@ -634,11 +636,13 @@ class OpenAICompatibleProvider(LLMProvider):
                     )
                 )
 
-            self._requests_made += 1
+            self._record_usage(requests=1)
             if response.usage:
-                self._prompt_tokens += response.usage.prompt_tokens
-                self._completion_tokens += response.usage.completion_tokens
-                self._tokens_used += response.usage.total_tokens
+                self._record_usage(
+                    tokens=response.usage.total_tokens,
+                    prompt_tokens=response.usage.prompt_tokens,
+                    completion_tokens=response.usage.completion_tokens,
+                )
 
             content = response.choices[0].message.content
             finish_reason = response.choices[0].finish_reason
