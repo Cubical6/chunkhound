@@ -1,4 +1,6 @@
-"""LanceDB scope helpers should fail gracefully on executor errors."""
+"""LanceDB scope failures must not masquerade as an empty file index."""
+
+import pytest
 
 from chunkhound.providers.database.lancedb_provider import LanceDBProvider
 
@@ -32,10 +34,11 @@ def test_lancedb_scope_stats_handles_errors() -> None:
     assert total_chunks == 0
 
 
-def test_lancedb_scope_paths_handles_errors() -> None:
+@pytest.mark.parametrize("scope_prefix", [None, "scope/"])
+def test_lancedb_scope_paths_propagates_errors(scope_prefix: str | None) -> None:
     provider = LanceDBProvider.__new__(LanceDBProvider)
     provider._files_table = _ExplodingFilesTable()
 
-    paths = provider._executor_get_scope_file_paths(object(), {}, "scope/")
-    assert paths == []
+    with pytest.raises(RuntimeError, match="boom"):
+        provider._executor_get_scope_file_paths(object(), {}, scope_prefix)
 

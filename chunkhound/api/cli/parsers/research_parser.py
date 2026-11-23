@@ -48,7 +48,11 @@ def add_research_subparser(subparsers: Any) -> argparse.ArgumentParser:
     research_parser.add_argument(
         "--path-filter",
         type=nonempty_path_filter,
-        help="Optional path filter (e.g., 'src/', 'tests/')",
+        help=(
+            "Match a directory or file path segment anywhere; include the "
+            "repository directory (e.g., 'myrepo/tests') to narrow matches. "
+            "This is not root-anchored and can match nested paths in other repositories"
+        ),
     )
 
     research_parser.add_argument(

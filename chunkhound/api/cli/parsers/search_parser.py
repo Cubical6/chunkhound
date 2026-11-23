@@ -4,7 +4,11 @@ import argparse
 from pathlib import Path
 from typing import Any, cast
 
-from .common_arguments import add_common_arguments, add_config_arguments, add_git_diff_arguments
+from .common_arguments import (
+    add_common_arguments,
+    add_config_arguments,
+    add_git_diff_arguments,
+)
 
 
 def add_search_subparser(subparsers: Any) -> argparse.ArgumentParser:
@@ -76,7 +80,11 @@ def add_search_subparser(subparsers: Any) -> argparse.ArgumentParser:
     search_parser.add_argument(
         "--path-filter",
         type=str,
-        help="Optional path filter (e.g., 'src/', 'tests/')",
+        help=(
+            "Match a directory or file path segment anywhere; include the "
+            "repository directory (e.g., 'myrepo/tests') to narrow matches. "
+            "This is not root-anchored and can match nested paths in other repositories"
+        ),
     )
 
     # Git diff / commit-range arguments
