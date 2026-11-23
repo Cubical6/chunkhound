@@ -30,6 +30,7 @@ from chunkhound.utils.logging_guard import log_if_not_mcp
 from .analytics_config import AnalyticsConfig
 from .c4_config import C4Config
 from .database_config import DatabaseConfig
+from .decision_log_config import DecisionLogConfig
 from .embedding_config import EmbeddingConfig
 from .fetchurl_config import FetchUrlConfig
 from .indexing_config import IndexingConfig
@@ -141,6 +142,7 @@ class Config(BaseModel):
     c4: C4Config = Field(default_factory=C4Config)
     remote_config: RemoteConfig | None = Field(default=None)
     analytics: AnalyticsConfig = Field(default_factory=AnalyticsConfig)
+    decision_log: DecisionLogConfig = Field(default_factory=DecisionLogConfig)
     debug: bool = Field(default=False)
 
     # Private field to store the target directory from CLI args
@@ -521,6 +523,8 @@ class Config(BaseModel):
             config["remote_config"] = remote_config
         if analytics_config := AnalyticsConfig.load_from_env():
             config["analytics"] = analytics_config
+        if decision_log_config := DecisionLogConfig.load_from_env():
+            config["decision_log"] = decision_log_config
 
         return config
 

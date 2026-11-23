@@ -34,6 +34,7 @@ from sklearn.cluster import (
     KMeans,
 )
 
+from chunkhound.core import decision_log
 from chunkhound.core.config.research_config import ResearchConfig
 from chunkhound.database_factory import DatabaseServices
 from chunkhound.embeddings import EmbeddingManager
@@ -742,8 +743,27 @@ Output a single unified query that captures the essential information need."""
         Returns:
             Selected gaps to fill
         """
+        elbow_idx = None
+
+        def log_selection(selected: list[UnifiedGap]) -> list[UnifiedGap]:
+            if decision_log.is_enabled():
+                decision_log.record(
+                    "gap_selection",
+                    {
+                        "n_candidates": len(unified_gaps),
+                        "n_selected": len(selected),
+                        "scores": sorted(
+                            (gap.score for gap in unified_gaps), reverse=True
+                        ),
+                        "elbow_index": elbow_idx,
+                        # Selection is always a prefix of the descending scores.
+                        "selected": list(range(len(selected))),
+                    },
+                )
+            return selected
+
         if not unified_gaps:
-            return []
+            return log_selection([])
 
         # Sort by score descending
         sorted_gaps = sorted(unified_gaps, key=lambda g: g.score, reverse=True)
@@ -754,7 +774,7 @@ Output a single unified query that captures the essential information need."""
 
         # Special case: fewer gaps than minimum
         if len(sorted_gaps) <= min_gaps:
-            return sorted_gaps
+            return log_selection(sorted_gaps)
 
         # Special case: all gaps fit within max
         if len(sorted_gaps) <= max_gaps:
@@ -772,7 +792,7 @@ Output a single unified query that captures the essential information need."""
                     f"Gap selection: {len(sorted_gaps)} candidates → "
                     f"{len(selected)} selected (kneedle elbow at {elbow_idx})"
                 )
-                return selected
+                return log_selection(selected)
 
             # Fallback to 50% threshold heuristic
             selected = sorted_gaps[:min_gaps]  # At least min_gaps
@@ -783,7 +803,7 @@ Output a single unified query that captures the essential information need."""
                     f"Gap selection: {len(sorted_gaps)} candidates → "
                     f"{len(selected)} selected (near-zero top score)"
                 )
-                return selected
+                return log_selection(selected)
 
             for i in range(min_gaps, len(sorted_gaps)):
                 # Stop if score drops below 50% of top score
@@ -794,7 +814,7 @@ Output a single unified query that captures the essential information need."""
                 f"Gap selection: {len(sorted_gaps)} candidates → "
                 f"{len(selected)} selected (fallback 50% heuristic)"
             )
-            return selected
+            return log_selection(selected)
 
         # More gaps than max: use kneedle on first max_gaps
         candidate_gaps = sorted_gaps[:max_gaps]
@@ -806,7 +826,7 @@ Output a single unified query that captures the essential information need."""
                 f"Gap selection: {len(sorted_gaps)} candidates → "
                 f"{len(selected)} selected (near-zero top score, exceeds max)"
             )
-            return selected
+            return log_selection(selected)
 
         elbow_idx = self._find_elbow_kneedle(candidate_gaps)
         if elbow_idx is not None and elbow_idx >= min_gaps:
@@ -820,14 +840,14 @@ Output a single unified query that captures the essential information need."""
                 f"Gap selection: {len(sorted_gaps)} candidates → "
                 f"{len(selected)} selected (kneedle elbow at {elbow_idx})"
             )
-            return selected
+            return log_selection(selected)
 
         # Fallback: take max_gaps
         logger.debug(
             f"Gap selection: {len(sorted_gaps)} candidates → "
             f"{max_gaps} selected (fallback to max_gaps)"
         )
-        return sorted_gaps[:max_gaps]
+        return log_selection(sorted_gaps[:max_gaps])
 
     def _find_elbow_kneedle(self, sorted_gaps: list[UnifiedGap]) -> int | None:
         """Find elbow point in score curve using simplified kneedle algorithm.

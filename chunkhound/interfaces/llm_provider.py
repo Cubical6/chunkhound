@@ -8,6 +8,8 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from chunkhound.core.llm_usage_scope import record_usage
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
@@ -185,6 +187,38 @@ class OutputLimitPolicy:
 
 class LLMProvider(ABC):
     """Abstract base class for LLM providers."""
+
+    def _record_usage(
+        self,
+        *,
+        requests: int = 0,
+        tokens: int = 0,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        estimated: bool = False,
+    ) -> None:
+        """Update lifetime counters and mirror the same deltas into this run."""
+        counters = {
+            "_requests_made": ("requests_made", requests),
+            "_estimated_tokens_used" if estimated else "_tokens_used": (
+                "total_tokens_estimated" if estimated else "total_tokens",
+                tokens,
+            ),
+            "_estimated_prompt_tokens" if estimated else "_prompt_tokens": (
+                "prompt_tokens_estimated" if estimated else "prompt_tokens",
+                prompt_tokens,
+            ),
+            "_estimated_completion_tokens" if estimated else "_completion_tokens": (
+                "completion_tokens_estimated" if estimated else "completion_tokens",
+                completion_tokens,
+            ),
+        }
+        deltas = {}
+        for attribute, (key, delta) in counters.items():
+            if delta:
+                setattr(self, attribute, getattr(self, attribute, 0) + delta)
+                deltas[key] = delta
+        record_usage(self, deltas)
 
     @property
     def output_limit_metadata(self) -> OutputLimitMetadata:

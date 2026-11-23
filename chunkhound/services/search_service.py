@@ -1,16 +1,19 @@
 """Search service for ChunkHound - handles semantic and regex search operations."""
 
 import asyncio
+import time
 from typing import Any
 
 from loguru import logger
 
+from chunkhound.core import decision_log
 from chunkhound.core.types.common import ChunkId
 from chunkhound.interfaces.database_provider import DatabaseProvider
 from chunkhound.interfaces.embedding_provider import EmbeddingProvider
 
 from .base_service import BaseService
 from .search.context_retriever import ContextRetriever
+from .search.multi_hop_policy import select_search_strategy
 from .search.multi_hop_strategy import MultiHopStrategy
 from .search.result_enhancer import ResultEnhancer
 from .search.single_hop_strategy import SingleHopStrategy
@@ -84,7 +87,8 @@ class SearchService(BaseService):
                 (e.g., 'src/', 'tests/')
             force_strategy: Optional strategy override ('single_hop', 'multi_hop')
             time_limit: Optional time limit for multi-hop expansion (default: 5.0s)
-            result_limit: Optional result limit for multi-hop expansion (default: 500, None = unlimited)
+            result_limit: Optional multi-hop result limit
+                (default: 500, None = unlimited)
 
         Returns:
             Tuple of (results, pagination_metadata)
@@ -102,34 +106,21 @@ class SearchService(BaseService):
             search_provider = provider or embedding_provider.name
             search_model = model or embedding_provider.model
 
-            # logger.debug(f"Search using provider='{search_provider}', model='{search_model}'")
-
-            # Choose search strategy based on force_strategy or provider capabilities
-            use_multi_hop = False
-
-            if force_strategy == "multi_hop":
-                use_multi_hop = True
-            elif force_strategy == "single_hop":
-                use_multi_hop = False
-            else:
-                # Auto-select based on provider capabilities
-                use_multi_hop = (
-                    hasattr(embedding_provider, "supports_reranking")
-                    and embedding_provider.supports_reranking()
+            supports_reranking = (
+                force_strategy != "single_hop"
+                and hasattr(embedding_provider, "supports_reranking")
+                and embedding_provider.supports_reranking()
+            )
+            strategy, strategy_reason = select_search_strategy(
+                force_strategy, supports_reranking
+            )
+            if force_strategy == "multi_hop" and not supports_reranking:
+                logger.warning(
+                    "Multi-hop strategy requested but provider doesn't support "
+                    "reranking, falling back to single-hop"
                 )
 
-            if use_multi_hop:
-                # Ensure provider actually supports reranking for multi-hop
-                if not (
-                    hasattr(embedding_provider, "supports_reranking")
-                    and embedding_provider.supports_reranking()
-                ):
-                    logger.warning(
-                        "Multi-hop strategy requested but provider doesn't support reranking, falling back to single-hop"
-                    )
-                    use_multi_hop = False
-
-            if use_multi_hop:
+            if strategy == "multi_hop":
                 logger.debug(f"Using multi-hop search with reranking for: '{query}'")
                 assert self._multi_hop_strategy is not None
                 results, pagination = await self._multi_hop_strategy.search(
@@ -142,19 +133,38 @@ class SearchService(BaseService):
                     path_filter=path_filter,
                     time_limit=time_limit,
                     result_limit=result_limit,
+                    strategy_reason=strategy_reason,
                 )
             else:
                 logger.debug(f"Using standard semantic search for: '{query}'")
                 assert self._single_hop_strategy is not None
-                results, pagination = await self._single_hop_strategy.search(
-                    query=query,
-                    page_size=page_size,
-                    offset=offset,
-                    threshold=threshold,
-                    provider=search_provider,
-                    model=search_model,
-                    path_filter=path_filter,
-                )
+                with decision_log.trace():
+                    logging_enabled = decision_log.is_enabled()
+                    if logging_enabled:
+                        start_time = time.perf_counter()
+                    results, pagination = await self._single_hop_strategy.search(
+                        query=query,
+                        page_size=page_size,
+                        offset=offset,
+                        threshold=threshold,
+                        provider=search_provider,
+                        model=search_model,
+                        path_filter=path_filter,
+                    )
+                    if logging_enabled:
+                        decision_log.record(
+                            "single_hop_search",
+                            decision_log.single_hop_payload(
+                                query=query,
+                                page_size=page_size,
+                                path_filter=path_filter,
+                                provider=search_provider,
+                                model=search_model,
+                                strategy_reason=strategy_reason,
+                                n_returned=len(results),
+                                elapsed_s=time.perf_counter() - start_time,
+                            ),
+                        )
 
             # Enhance results with additional metadata
             enhanced_results = []
@@ -297,7 +307,7 @@ class SearchService(BaseService):
         provider: str,
         model: str,
     ) -> dict[int, float]:
-        """Batch cosine similarity between a query embedding and stored chunk embeddings."""
+        """Batch cosine similarity of a query embedding and stored chunks."""
         return await self._db.get_chunk_similarities_async(
             chunk_ids, query_embedding, provider, model
         )

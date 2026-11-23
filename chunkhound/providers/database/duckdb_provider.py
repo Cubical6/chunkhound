@@ -1455,6 +1455,8 @@ class DuckDBProvider(SerialDatabaseProvider):
             _atomic_replace(backup_path, db_path)
         _unlink_compacted(compacted_path)
         restored_conn = self._create_connection()
+        # A fresh connection has no active transaction.
+        state["transaction_active"] = False
         # Assign immediately so _close_live_compaction_connections() can
         # close it if a later step (schema/index creation) raises.
         _executor_local.connection = restored_conn
@@ -4809,8 +4811,10 @@ class DuckDBProvider(SerialDatabaseProvider):
         self, conn: Any, state: dict[str, Any], force_checkpoint: bool
     ) -> None:
         """Executor method for commit_transaction - runs in DB thread."""
-        conn.execute("COMMIT")
-        state["transaction_active"] = False
+        try:
+            conn.execute("COMMIT")
+        finally:
+            state["transaction_active"] = False
         if force_checkpoint:
             conn.execute("CHECKPOINT")
 

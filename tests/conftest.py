@@ -190,6 +190,10 @@ def isolated_user_config(tmp_path_factory, monkeypatch, request):
         return
     # Keep caches written by subprocesses outside the tree a test may index.
     home = tmp_path_factory.mktemp("home")
+    # Windows derives LocalAppData from USERPROFILE; Watchman exits if it
+    # cannot create its app-data dir.
+    (home / "AppData" / "Local").mkdir(parents=True, exist_ok=True)
+    (home / "AppData" / "Roaming").mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("UV_NO_SYNC", "1")

@@ -16,6 +16,7 @@ from chunkhound.database_factory import DatabaseServices
 from chunkhound.embeddings import EmbeddingManager
 from chunkhound.llm_manager import LLMManager
 from chunkhound.services.research.shared.chunk_dedup import get_chunk_id
+from chunkhound.services.research.shared.decision_records import record_elbow_filter
 from chunkhound.services.research.shared.exploration.elbow_filter import (
     filter_chunks_by_elbow,
     get_unified_score,
@@ -923,6 +924,7 @@ class BFSExplorationStrategy:
         # Apply elbow detection using shared utility (handles sorting internally)
         original_count = len(chunks)
         sorted_chunks, elbow_stats = filter_chunks_by_elbow(chunks, score_key=None)
+        record_elbow_filter("bfs", chunks, sorted_chunks, elbow_stats, score_key=None)
         logger.info(
             f"Elbow detection: keeping {len(sorted_chunks)}/{original_count} chunks"
         )
