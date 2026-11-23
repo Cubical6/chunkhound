@@ -2,6 +2,7 @@
 
 import asyncio
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +10,13 @@ import pytest
 from chunkhound.core.types.common import Language
 from chunkhound.database_factory import DatabaseServices
 from chunkhound.embeddings import EmbeddingManager
-from chunkhound.mcp_server.tools import execute_tool, search_impl
+from chunkhound.mcp_server.tools import (
+    MAX_RESPONSE_TOKENS,
+    TOOL_REGISTRY,
+    estimate_tokens,
+    execute_tool,
+    search_impl,
+)
 from chunkhound.parsers.parser_factory import create_parser_for_language
 from chunkhound.providers.database.duckdb_provider import DuckDBProvider
 from chunkhound.providers.database.lancedb_provider import LanceDBProvider
@@ -110,7 +117,8 @@ async def test_cross_repository_search_warns_in_dict_and_mcp_text(
     assert len(response["results"]) == 2
     warning = response["warnings"][0]
     assert "path 'tests' matches files in 2 repositories (alpha, beta)" in warning
-    assert "Start the path with one repository directory" in warning
+    assert warning.startswith("> **Warning:** ")
+    assert "not root-anchored" in warning
     text = await execute_tool(
         "search",
         indexed_scope,
@@ -174,9 +182,7 @@ async def test_path_search_on_empty_index_returns_no_results(tmp_path, provider_
 async def test_semantic_path_matches_the_same_files_as_regex(indexed_scope, path):
     embeddings = EmbeddingManager()
     embeddings.register_provider(FakeEmbeddingProvider(), set_default=True)
-    regex = await search_impl(
-        indexed_scope, None, "regex", "scope_marker", path=path
-    )
+    regex = await search_impl(indexed_scope, None, "regex", "scope_marker", path=path)
     semantic = await search_impl(
         indexed_scope, embeddings, "semantic", "scope_marker", path=path
     )
@@ -202,3 +208,145 @@ async def test_semantic_path_is_preserved_with_threshold(indexed_scope):
         threshold=4.0,
     )
     assert {row["file_path"] for row in results} == {"alpha/tests/test_scope.py"}
+
+
+@pytest.mark.parametrize("tool", ["search", "code_research"])
+def test_mcp_path_schema_includes_complete_matching_advice(tool):
+    description = TOOL_REGISTRY[tool].parameters["properties"]["path"]["description"]
+    assert "segment anywhere" in description
+    assert '"myrepo/tests"' in description
+    assert "not root-anchored" in description
+    assert description.endswith("nested paths in other repositories.")
+
+
+@pytest.mark.asyncio
+async def test_repositories_added_during_session_are_detected(indexed_scope, tmp_path):
+    (tmp_path / "alpha/.git").mkdir()
+    first = await search_impl(
+        indexed_scope, None, "regex", "scope_marker", path="tests"
+    )
+    assert not first.get("warnings")
+    (tmp_path / "beta/.git").mkdir()
+    second = await search_impl(
+        indexed_scope, None, "regex", "scope_marker", path="tests"
+    )
+    assert "2 repositories (alpha, beta)" in second["warnings"][0]
+
+
+@pytest.mark.asyncio
+async def test_unreadable_entry_does_not_hide_repositories(
+    indexed_scope, tmp_path, monkeypatch
+):
+    (tmp_path / "alpha/.git").mkdir()
+    (tmp_path / "beta/.git").mkdir()
+    blocked = tmp_path / "lost+found"
+    blocked.mkdir()
+    exists = Path.exists
+
+    def readable_exists(path):
+        if path == blocked / ".git":
+            raise PermissionError("unreadable directory")
+        return exists(path)
+
+    # Inject the filesystem failure so this contract also runs as root.
+    monkeypatch.setattr(Path, "exists", readable_exists)
+    response = await search_impl(
+        indexed_scope, None, "regex", "scope_marker", path="tests"
+    )
+    assert "2 repositories (alpha, beta)" in response["warnings"][0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("root_repo", [False, True])
+async def test_nested_repositories_are_counted_by_repository(
+    indexed_scope, tmp_path, root_repo
+):
+    if root_repo:
+        (tmp_path / ".git").mkdir()
+    for relative in ("github/alpha", "bitbucket/beta"):
+        repository = tmp_path / relative
+        (repository / ".git").mkdir(parents=True)
+        file = repository / "tests/test_nested.py"
+        file.parent.mkdir()
+        file.write_text("def scope_marker():\n    return 42\n")
+        result = await indexed_scope.indexing_coordinator.process_file(file)
+        assert result["status"] == "success"
+    response = await search_impl(
+        indexed_scope, None, "regex", "scope_marker", path="tests"
+    )
+    warning = response["warnings"][0]
+    expected = (
+        "3 repositories (., bitbucket/beta, github/alpha)"
+        if root_repo
+        else ("2 repositories (bitbucket/beta, github/alpha)")
+    )
+    assert expected in warning
+
+
+@pytest.mark.asyncio
+async def test_repository_scan_recovers_after_filesystem_failure(
+    indexed_scope, tmp_path, monkeypatch
+):
+    (tmp_path / "alpha/.git").mkdir()
+    (tmp_path / "beta/.git").mkdir()
+    iterdir = Path.iterdir
+    failed = False
+
+    def transient_iterdir(path):
+        nonlocal failed
+        if path == tmp_path and not failed:
+            failed = True
+            raise OSError("temporarily unavailable")
+        return iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", transient_iterdir)
+    first = await search_impl(
+        indexed_scope, None, "regex", "scope_marker", path="tests"
+    )
+    assert not first.get("warnings")
+    second = await search_impl(
+        indexed_scope, None, "regex", "scope_marker", path="tests"
+    )
+    assert "2 repositories (alpha, beta)" in second["warnings"][0]
+
+
+@pytest.mark.asyncio
+async def test_repository_prefix_can_also_match_another_repository(
+    indexed_scope, tmp_path
+):
+    (tmp_path / "alpha/.git").mkdir()
+    (tmp_path / "beta/.git").mkdir()
+    nested = tmp_path / "beta/vendor/alpha/tests/test_scope.py"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("def scope_marker():\n    return 42\n")
+    await indexed_scope.indexing_coordinator.process_file(nested)
+    response = await search_impl(
+        indexed_scope, None, "regex", "scope_marker", path="alpha/tests"
+    )
+    assert len(response["results"]) == 2
+    assert "2 repositories (alpha, beta)" in response["warnings"][0]
+    assert "can also match nested paths" in response["warnings"][0]
+
+
+@pytest.mark.asyncio
+async def test_search_notices_are_included_in_response_budget(monkeypatch):
+    warning = "> **Warning:** path matches multiple repositories (alpha, beta)."
+
+    async def large_search(**kwargs):
+        return {
+            "results": [{"file_path": "alpha/tests/a.py", "content": "x" * 60000}],
+            "pagination": {"offset": 0, "page_size": 10, "has_more": False},
+            "warnings": [warning],
+        }
+
+    monkeypatch.setattr(TOOL_REGISTRY["search"], "implementation", large_search)
+    text = await execute_tool(
+        "search",
+        None,
+        None,
+        {"type": "regex", "query": "x", "commit_range": "HEAD~1..HEAD"},
+    )
+    assert text.startswith(warning)
+    assert "Regex search ignores git diff params" in text
+    assert "alpha/tests/a.py" in text
+    assert estimate_tokens(text) <= MAX_RESPONSE_TOKENS

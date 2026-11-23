@@ -192,6 +192,8 @@ def _extract_param_descriptions_from_docstring(func: Callable) -> dict[str, str]
     descriptions: dict[str, str] = {}
     lines = func.__doc__.split("\n")
     in_args_section = False
+    current_param: str | None = None
+    param_indent = 0
 
     for line in lines:
         stripped = line.strip()
@@ -199,6 +201,11 @@ def _extract_param_descriptions_from_docstring(func: Callable) -> dict[str, str]
         # Detect Args section
         if stripped == "Args:":
             in_args_section = True
+            continue
+
+        indent = len(line) - len(line.lstrip())
+        if in_args_section and current_param and stripped and indent > param_indent:
+            descriptions[current_param] += " " + stripped
             continue
 
         # Exit Args section when we hit another section or empty line after args
@@ -215,6 +222,8 @@ def _extract_param_descriptions_from_docstring(func: Callable) -> dict[str, str]
                 param_name = parts[0].strip()
                 description = parts[1].strip()
                 descriptions[param_name] = description
+                current_param = param_name
+                param_indent = indent
 
     return descriptions
 
@@ -368,6 +377,7 @@ class SearchResponse(TypedDict):
 
     results: list[dict[str, Any]]
     pagination: PaginationInfo
+    warnings: NotRequired[list[str]]
 
 
 def estimate_tokens(text: str) -> int:
@@ -382,14 +392,15 @@ def _format_search_results_within_token_limit(
     results: list[dict[str, Any]],
     pagination: dict[str, Any],
     search_type: str,
+    notices: str = "",
 ) -> str:
-    """Render every requested result, truncating content rather than entries."""
+    """Render results and notices within one budget, truncating content only."""
     rendered_results = [dict(result) for result in results]
     content_limits = [len(result.get("content") or "") for result in rendered_results]
     truncated_marker = "\n\n[... truncated ...]"
 
     def render() -> str:
-        return format_search_results_markdown(
+        return notices + format_search_results_markdown(
             rendered_results, pagination, search_type
         )
 
@@ -729,9 +740,9 @@ async def search_impl(
         config: Application configuration controlling MCP semantic search strategy
         type: Search mode — "regex" for exact pattern matching, "semantic" for meaning-based similarity
         query: For regex: a regex pattern like "def authenticate" or "class.*Handler". For semantic: a natural language concept like "retry logic" or "database connection pooling"
-        path: Match a directory or file path segment anywhere. In a multi-repo
-            index, start with the repository directory (e.g. "myrepo/tests") to
-            stay in one repository.
+        path: Match a directory or file path segment anywhere. Include the
+            repository directory (e.g. "myrepo/tests") to narrow matches; this
+            is not root-anchored and can match nested paths in other repositories.
         page_size: Number of results per page (1-100)
         offset: Starting offset for pagination
         commit_range: Optional git revision range (e.g. 'HEAD~10..HEAD', 'v1.0..v2.0'). When provided with type='semantic', searches changed code in that range.
@@ -866,9 +877,9 @@ async def deep_research_impl(
         llm_manager: LLM manager instance
         query: Natural language question about codebase architecture or behavior, e.g. "how does authentication work end-to-end?" or "explain the request lifecycle"
         progress: Optional Rich Progress instance for terminal UI (None for MCP)
-        path: Match a directory or file path segment anywhere. In a multi-repo
-            index, start with the repository directory (e.g. "myrepo/tests") to
-            stay in one repository.
+        path: Match a directory or file path segment anywhere. Include the
+            repository directory (e.g. "myrepo/tests") to narrow matches; this
+            is not root-anchored and can match nested paths in other repositories.
         config: Application configuration (optional, defaults to environment config)
         commit_range: Optional git revision range (e.g. 'HEAD~10..HEAD', 'v1.0..v2.0'). When provided, research incorporates code changed in that range.
         commit_hash: Single commit hash — researches only that commit's diff (equivalent to '<hash>^..<hash>').
@@ -1148,23 +1159,22 @@ async def execute_tool(
             search_type = arguments.get("type", "regex")
             results_list = list(result.get("results", []))
             pagination = dict(result.get("pagination", {}))
-            md = _format_search_results_within_token_limit(
-                results_list, pagination, search_type
-            )
+            notices = ""
             ignored = [
                 name
                 for name in ("commit_range", "commit_hash", "last_n_commits")
                 if arguments.get(name) is not None
             ]
             if search_type == "regex" and ignored:
-                md = (
+                notices = (
                     "> **Warning:** Regex search ignores git diff params "
                     f"({', '.join(ignored)}); searching the indexed corpus instead.\n\n"
-                    + md
                 )
             if result.get("warnings"):
-                md = "\n".join(result["warnings"]) + "\n\n" + md
-            return md
+                notices = "\n".join(result["warnings"]) + "\n\n" + notices
+            return _format_search_results_within_token_limit(
+                results_list, pagination, search_type, notices
+            )
 
     # String return types (e.g., websearch) pass through directly as markdown
     if isinstance(result, str):
