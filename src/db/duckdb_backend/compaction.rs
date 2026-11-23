@@ -176,6 +176,24 @@ impl DuckDbHnswBackend {
             Self::ensure_embedding_table_dims(&import_conn, dims)?;
         }
 
+        // Preserve human-input tables using their source DDL, without knowing
+        // the domain schema. Other unknown tables remain intentionally dropped.
+        let domain_tables: Vec<(String, String)> = import_conn
+            .prepare(
+                "SELECT table_name, sql FROM duckdb_tables() \
+                 WHERE database_name = 'src' AND schema_name = 'main' \
+                 AND table_name LIKE 'domain\\_%' ESCAPE '\\' ORDER BY table_name",
+            )?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        for (table_name, ddl) in domain_tables {
+            import_conn.execute_batch(&ddl)?;
+            let quoted_name = table_name.replace('"', "\"\"");
+            import_conn.execute_batch(&format!(
+                "INSERT INTO \"{quoted_name}\" SELECT * FROM src.\"{quoted_name}\""
+            ))?;
+        }
+
         // DETACH and CHECKPOINT.
         import_conn.execute_batch("DETACH src")?;
         import_conn.execute_batch("CHECKPOINT")?;
@@ -395,6 +413,63 @@ mod compaction_threshold_tests {
 mod compaction_index_restore_tests {
     use super::*;
     use crate::db::DbBackend;
+
+    #[test]
+    fn compaction_preserves_domain_tables() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let db_path = tmp.path().join("t.duckdb").to_string_lossy().into_owned();
+        let mut backend = DuckDbHnswBackend::new(super::super::test_support::config(db_path));
+        backend.open().expect("open");
+        backend
+            .conn_or_err()
+            .expect("conn")
+            .execute_batch(
+                "CREATE TABLE domain_input (seq BIGINT PRIMARY KEY, payload VARCHAR NOT NULL); \
+                 INSERT INTO domain_input VALUES (1, 'human input'); \
+                 CREATE TABLE \"domain_extra\"\"notes\" (\
+                     id BIGINT PRIMARY KEY, note VARCHAR NOT NULL DEFAULT 'pending'); \
+                 INSERT INTO \"domain_extra\"\"notes\" (id) VALUES (1), (2); \
+                 CREATE TABLE other_unknown (id BIGINT); \
+                 INSERT INTO other_unknown VALUES (1); \
+                 CREATE TABLE domainXunowned (id BIGINT); \
+                 INSERT INTO domainXunowned VALUES (1);",
+            )
+            .expect("seed tables");
+
+        backend
+            .run_attach_copy_compaction()
+            .expect("compaction should succeed without falling back to CHECKPOINT");
+
+        let conn = backend.conn_or_err().expect("conn");
+        let row: (i64, String) = conn
+            .query_row("SELECT seq, payload FROM domain_input", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .expect("human input survives");
+        assert_eq!(row, (1, "human input".to_string()));
+        let notes: Vec<(i64, String)> = conn
+            .prepare("SELECT * FROM \"domain_extra\"\"notes\" ORDER BY id")
+            .expect("prepare notes query")
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("query notes")
+            .collect::<Result<_, _>>()
+            .expect("read notes");
+        assert_eq!(notes, vec![(1, "pending".into()), (2, "pending".into())]);
+        conn.execute_batch("INSERT INTO \"domain_extra\"\"notes\" (id) VALUES (3)")
+            .expect("source default is preserved");
+        assert!(conn
+            .execute_batch("INSERT INTO \"domain_extra\"\"notes\" VALUES (4, NULL)")
+            .is_err());
+        let unknown_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM duckdb_tables() \
+                 WHERE table_name IN ('other_unknown', 'domainXunowned')",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query unknown tables");
+        assert_eq!(unknown_count, 0, "only the literal domain_ prefix survives");
+    }
 
     #[test]
     fn compaction_restores_embedding_table_indexes() {
