@@ -22,6 +22,7 @@ from chunkhound.providers.database.serial_database_provider import (
     SerialDatabaseProvider,
 )
 from chunkhound.utils.chunk_hashing import generate_chunk_id
+from chunkhound.utils.path_filter import normalize_path_filter
 
 # Type hinting only
 if TYPE_CHECKING:
@@ -207,6 +208,18 @@ class LanceDBProvider(SerialDatabaseProvider):
         escaped = _escape_like_pattern(prefix)
         like = f"{escaped}%"
         return f"path LIKE '{like}' ESCAPE '\\\\'"
+
+    def _build_search_path_clause(self, path_filter: str) -> str:
+        """Match search path segments anywhere, like DuckDB and transient search."""
+        normalized = normalize_path_filter(path_filter)
+        if normalized is None:
+            return "true"
+        escaped = _escape_like_pattern(normalized)
+        pattern = escaped + ("%" if normalized.endswith("/") else "")
+        return (
+            f"(path LIKE '{pattern}' ESCAPE '\\\\' "
+            f"OR path LIKE '%/{pattern}' ESCAPE '\\\\')"
+        )
 
     def _fetch_file_paths_by_ids(self, file_ids: list[int]) -> dict[int, str]:
         if not self._files_table or not file_ids:
@@ -1765,16 +1778,13 @@ class LanceDBProvider(SerialDatabaseProvider):
         if not self._files_table:
             return []
 
-        try:
-            if scope_prefix:
-                normalized = scope_prefix.replace("\\", "/")
-                clause = self._build_path_like_clause(normalized)
-                rows = self._files_table.search().where(clause).to_list()
-            else:
-                total = int(self._files_table.count_rows())
-                rows = self._files_table.head(total).to_list()
-        except Exception:
-            return []
+        if scope_prefix:
+            normalized = scope_prefix.replace("\\", "/")
+            clause = self._build_path_like_clause(normalized)
+            rows = self._files_table.search().where(clause).to_list()
+        else:
+            total = int(self._files_table.count_rows())
+            rows = self._files_table.head(total).to_pylist()
 
         out: list[str] = []
         for row in rows:
@@ -1921,19 +1931,35 @@ class LanceDBProvider(SerialDatabaseProvider):
             query = self._chunks_table.search(
                 query_embedding, vector_column_name="embedding"
             )
-            query = query.where(
-                f"provider = '{provider}' AND model = '{model}' AND embedding IS NOT NULL"
+            where_clause = (
+                f"provider = '{provider}' AND model = '{model}' "
+                "AND embedding IS NOT NULL"
             )
+            if path_filter:
+                if self._files_table is None:
+                    raise RuntimeError("Files table not initialized")
+                clause = self._build_search_path_clause(path_filter)
+                file_rows = self._files_table.search().where(clause).to_list()
+                if not file_rows:
+                    return [], {
+                        "offset": offset,
+                        "page_size": 0,
+                        "has_more": False,
+                        "total": 0,
+                    }
+                file_ids = ",".join(str(int(row["id"])) for row in file_rows)
+                where_clause += f" AND file_id IN ({file_ids})"
+            query = query.where(where_clause, prefilter=True)
             query = query.limit(page_size + offset)
 
-            if threshold:
-                query = query.where(f"_distance <= {threshold}")
-
-            if path_filter:
-                # Join with files table to filter by path
-                pass  # Would need more complex query joining with files table
-
             results = query.to_list()
+            # _distance is a result column, not a prefilter column. A second
+            # where() also replaces the provider/model/path prefilter in LanceDB.
+            # Keep 0.0 as the existing "no threshold" sentinel used by multi-hop.
+            if threshold:
+                results = [
+                    row for row in results if row.get("_distance", 0.0) <= threshold
+                ]
 
             # Deduplicate across fragments (safety net for fragment-induced duplicates)
             results = _deduplicate_by_id(results)
@@ -2082,7 +2108,7 @@ class LanceDBProvider(SerialDatabaseProvider):
             if path_filter:
                 if self._files_table is None:
                     raise RuntimeError("Files table not initialized")
-                clause = self._build_path_like_clause(path_filter.replace("\\", "/"))
+                clause = self._build_search_path_clause(path_filter)
                 file_rows = self._files_table.search().where(clause).to_list()
                 if not file_rows:
                     return []
@@ -2170,8 +2196,7 @@ class LanceDBProvider(SerialDatabaseProvider):
             # Apply path filter if provided
             if path_filter:
                 # Get file IDs matching path filter
-                normalized_path = path_filter.replace("\\", "/")
-                clause = self._build_path_like_clause(normalized_path)
+                clause = self._build_search_path_clause(path_filter)
                 file_results = self._files_table.search().where(clause).to_list()
                 valid_file_ids = {r["id"] for r in file_results}
                 results = [r for r in results if r["file_id"] in valid_file_ids]

@@ -759,8 +759,12 @@ async def search_impl(
         commit_range, commit_hash, last_n_commits, services
     )
 
-    scope_warning = validate_path_scope(
-        services, path, vector_source, effective_commit_range
+    scope_warning = await asyncio.to_thread(
+        validate_path_scope,
+        services,
+        path,
+        "db" if type == "regex" else vector_source,
+        effective_commit_range,
     )
 
     if type == "semantic":
@@ -884,8 +888,8 @@ async def deep_research_impl(
         commit_range, commit_hash, last_n_commits, services
     )
 
-    scope_warning = validate_path_scope(
-        services, path, vector_source, effective_commit_range
+    scope_warning = await asyncio.to_thread(
+        validate_path_scope, services, path, vector_source, effective_commit_range
     )
 
     if effective_commit_range is not None and vector_source != "db":

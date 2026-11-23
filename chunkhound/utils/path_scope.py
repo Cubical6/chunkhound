@@ -92,9 +92,13 @@ def validate_path_scope(
     if normalized is None:
         return None
     provider = services.provider
+    file_paths = cast(ScopeAggregationProvider, provider).get_scope_file_paths(None)
+    # An empty or still-indexing database is not evidence of an invalid path.
+    if not file_paths:
+        return None
     scope = check_path_scope(
         normalized,
-        cast(ScopeAggregationProvider, provider).get_scope_file_paths(None),
+        file_paths,
         provider.get_base_directory(),
     )
     if not scope.matching_files and vector_source == "db":
