@@ -3108,8 +3108,14 @@ class DuckDBProvider(SerialDatabaseProvider):
                 updated_at = now()  -- CURRENT_TIMESTAMP parses as a column name in ON CONFLICT SET; use now() instead
             """,
             [
-                path, name, extension, size, clamp_mtime(mtime),
-                content_hash, language, skip_reason,
+                path,
+                name,
+                extension,
+                size,
+                clamp_mtime(mtime),
+                content_hash,
+                language,
+                skip_reason,
             ],
         )
 
