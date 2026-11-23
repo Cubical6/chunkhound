@@ -2,7 +2,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-import uuid
 from collections.abc import Iterator
 
 import pytest
@@ -199,9 +198,7 @@ def isolated_user_config(tmp_path_factory, monkeypatch, request):
         yield
         return
     # Keep caches written by subprocesses outside the tree a test may index.
-    # mkdtemp's 0o700 mode becomes a restrictive ACL on Windows with Python 3.13+.
-    home = tmp_path_factory.getbasetemp() / f"home-{uuid.uuid4().hex}"
-    home.mkdir()
+    home = tmp_path_factory.mktemp("home")
     # Share the 31 MB vss extension per worker instead of installing it per test.
     # Keep Windows per-test even when symlinks work: sharing extension DLLs risks
     # cross-test loader/file-lock interference, including subprocess INSTALLs.
